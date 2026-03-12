@@ -1,26 +1,59 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700&family=Pacifico&display=swap");
 @import "tailwindcss";
 
+/* App-wide color variables used by the UI theme. */
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #262626;
+  /* Primary typography: Manrope body + DM Serif Display headings with safe fallbacks. */
+  --font-sans: "Manrope", "Segoe UI", "Trebuchet MS", "Arial", sans-serif;
+  --font-serif: "DM Serif Display", "Georgia", "Times New Roman", serif;
+  --font-brand: "Pacifico", "DM Serif Display", "Georgia", "Times New Roman", serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* Global page styling (clean white background + default text style). */
+html,
+body {
+  min-height: 100vh;
+  background-color: var(--background);
+  background-image: url("/backgrounds/bg-test-2026-02-27.webp");
+  background-position: center top;
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-attachment: scroll;
+  color: var(--foreground);
+  font-family: var(--font-sans);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Utility class for headings that use the serif display font. */
+.font-serif {
+  font-family: var(--font-serif);
+}
+
+/* Brand font used only for the app name in the top navigation. */
+.font-brand {
+  font-family: var(--font-brand);
+}
+
+/* Simple entrance animation used on major screens. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Helper class to apply the rise-in animation. */
+.animate-rise-in {
+  animation: rise-in 360ms ease-out both;
+}
+
+/* Selected option styling for native dropdowns */
+select option:checked {
+  background-color: #10b981;
+  color: #ffffff;
 }

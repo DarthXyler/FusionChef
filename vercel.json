@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/r2-orphan-cleanup?maxAgeMinutes=180&maxDeletes=200",
+      "schedule": "30 2 * * *"
+    }
+  ]
+}
