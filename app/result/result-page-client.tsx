@@ -22,7 +22,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { RecipeResultView } from "@/components/RecipeResultView";
 import {
   getGeneratedRecipeById,
@@ -34,12 +34,15 @@ import {
 import type { GeneratedRecipeRecord } from "@/lib/types";
 import { isRecipeFusion } from "@/lib/validation";
 
-export function ResultPageClient() {
+type ResultPageClientProps = {
+  initialRecipeId?: string | null;
+};
+
+export function ResultPageClient({ initialRecipeId = null }: ResultPageClientProps) {
   const IMAGE_FETCH_TIMEOUT_MS = 25_000;
   const REROLL_TIMEOUT_MS = 30_000;
   const SAVE_REQUEST_TIMEOUT_MS = 30_000;
   const router = useRouter();
-  const searchParams = useSearchParams();
   // Holds the current recipe result pulled from local storage.
   const [record, setRecord] = useState<GeneratedRecipeRecord | null>(null);
   // Loading state while we find the saved result.
@@ -93,11 +96,11 @@ export function ResultPageClient() {
 
   // On first render, load the recipe by id from the URL (or the latest saved one).
   useEffect(() => {
-    const id = searchParams.get("id");
+    const id = initialRecipeId;
     const loaded = id ? getGeneratedRecipeById(id) : getLatestGeneratedRecipe();
     setRecord(loaded);
     setIsLoading(false);
-  }, [searchParams]);
+  }, [initialRecipeId]);
 
   useEffect(() => {
     setHasCheckedPreviewCache(false);

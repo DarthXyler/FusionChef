@@ -50,11 +50,7 @@ const MEAL_TYPE_OPTIONS: Array<{ value: MealType; label: string }> = [
   { value: "beverage", label: "Beverage" },
 ];
 
-type RecipeInputFormProps = {
-  shouldReset?: boolean;
-};
-
-export function RecipeInputForm({ shouldReset = false }: RecipeInputFormProps) {
+export function RecipeInputForm() {
   const router = useRouter();
   const FUSE_REQUEST_TIMEOUT_MS = 35_000;
   const DEFAULT_FUSION_CUISINE = CUISINE_OPTIONS[0] ?? "Japanese";
@@ -80,6 +76,9 @@ export function RecipeInputForm({ shouldReset = false }: RecipeInputFormProps) {
 
   // When page opens, restore the last used settings from local storage.
   useEffect(() => {
+    const shouldReset =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("reset") === "1";
     if (shouldReset) {
       setBaseRecipe("");
       setMealType("main");
@@ -103,7 +102,7 @@ export function RecipeInputForm({ shouldReset = false }: RecipeInputFormProps) {
     setFusionCuisine(lastInput.fusionCuisine);
     setDietaryStyle(lastInput.dietaryStyle);
     setSpiceLevel(lastInput.spiceLevel);
-  }, [DEFAULT_FUSION_CUISINE, shouldReset]);
+  }, [DEFAULT_FUSION_CUISINE]);
 
   useEffect(() => {
     if (isMealTypeOpen) {

@@ -3,16 +3,7 @@
  * Shows the app intro and the main recipe input form.
  */
 import { RecipeInputForm } from "@/components/RecipeInputForm";
-
-type HomePageProps = {
-  searchParams?: Promise<{ reset?: string | string[] | undefined }>;
-};
-
-export default async function Home({ searchParams }: HomePageProps) {
-  const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const resetParam = resolvedSearchParams?.reset;
-  const shouldReset =
-    Array.isArray(resetParam) ? resetParam.includes("1") : resetParam === "1";
+export default function Home() {
 
   return (
     // Main landing page wrapper with spacing and a small entrance animation.
@@ -31,7 +22,7 @@ export default async function Home({ searchParams }: HomePageProps) {
         </p>
       </section>
       {/* The interactive form where users paste a recipe and choose options */}
-      <RecipeInputForm shouldReset={shouldReset} />
+      <RecipeInputForm />
     </div>
   );
 }
