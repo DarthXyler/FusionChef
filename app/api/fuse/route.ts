@@ -28,16 +28,39 @@ const MAX_FUSE_BODY_BYTES = 100_000;
 const MAX_BASE_RECIPE_CHARS = 10_000;
 const MAX_FUSION_CUISINE_CHARS = 80;
 
-const SYSTEM_PROMPT = [
+const BASE_SYSTEM_PROMPT = [
   "You are a fusion chef assistant.",
   "Output valid JSON only.",
   "Do not use markdown.",
   "Do not include extra keys.",
   'Use simple quantities like "2 tbsp" and "1 cup".',
   "Keep steps short and practical.",
-  "Swaps must be realistic, practical, and location-neutral.",
   "Generate a fresh variation each time while respecting all inputs.",
-].join("\n");
+];
+
+function getCountryNameFromCode(countryCode: string) {
+  try {
+    const normalized = countryCode.trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(normalized)) {
+      return null;
+    }
+
+    const displayNames = new Intl.DisplayNames(["en"], { type: "region" });
+    return displayNames.of(normalized) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function buildSystemPrompt(request: Request) {
+  const countryCode = request.headers.get("x-vercel-ip-country")?.trim().toUpperCase() ?? "";
+  const countryName = getCountryNameFromCode(countryCode);
+  const swapGuidance = countryName
+    ? `Swaps must be realistic and commonly available in ${countryName} where possible.`
+    : "Swaps must be realistic, practical, and location-neutral.";
+
+  return [...BASE_SYSTEM_PROMPT, swapGuidance].join("\n");
+}
 
 function buildUserPrompt(input: FuseRequest) {
   // Includes both schema and user inputs so output shape stays predictable.
@@ -216,8 +239,9 @@ export async function POST(request: Request) {
     }
 
     const input = normalizeFuseRequest(body);
+    const systemPrompt = buildSystemPrompt(request);
     const baseMessages: OpenAIMessage[] = [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
       { role: "user", content: buildUserPrompt(input) },
     ];
 
@@ -230,7 +254,7 @@ export async function POST(request: Request) {
 
     // Repair attempt if first output is invalid.
     const repairMessages: OpenAIMessage[] = [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
       { role: "user", content: buildRepairPrompt(firstAttempt) },
     ];
 
