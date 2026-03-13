@@ -2,6 +2,7 @@
  * Home page entry.
  * Shows the app intro and the main recipe input form.
  */
+import { Suspense } from "react";
 import { RecipeInputForm } from "@/components/RecipeInputForm";
 export default function Home() {
 
@@ -22,7 +23,9 @@ export default function Home() {
         </p>
       </section>
       {/* The interactive form where users paste a recipe and choose options */}
-      <RecipeInputForm />
+      <Suspense fallback={<p className="text-zinc-700">Loading form...</p>}>
+        <RecipeInputForm />
+      </Suspense>
     </div>
   );
 }
