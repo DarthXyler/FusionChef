@@ -25,6 +25,14 @@ body {
   font-family: var(--font-sans);
 }
 
+@media (min-width: 1024px) {
+  html,
+  body {
+    /* Keep the decorative artwork pinned to the page edges on desktop. */
+    background-size: 100% auto;
+  }
+}
+
 /* Utility class for headings that use the serif display font. */
 .font-serif {
   font-family: var(--font-serif);
