@@ -26,7 +26,7 @@ export default function RootLayout({
         <div className="flex min-h-screen flex-col">
           {/* Global top bar shown on all screens */}
           <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white">
-            <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-4 md:px-6">
+            <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-4 md:px-6 lg:px-8 xl:px-10">
               <Link href="/" className="font-brand text-2xl text-zinc-900">
                 Flavor Fusion Chef
               </Link>
@@ -47,7 +47,7 @@ export default function RootLayout({
             </div>
           </header>
           {/* Current page content gets injected here */}
-          <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 md:px-6 md:py-10">{children}</main>
+          <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 md:px-6 md:py-10 lg:px-8 xl:px-10">{children}</main>
         </div>
       </body>
     </html>
