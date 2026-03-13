@@ -27,8 +27,12 @@ const OPENAI_TIMEOUT_MS = 30_000;
 const MAX_FUSE_BODY_BYTES = 100_000;
 const MAX_BASE_RECIPE_CHARS = 10_000;
 const MAX_FUSION_CUISINE_CHARS = 80;
+const DEFAULT_GENERATION_TEMPERATURE = 0.85;
+const REPAIR_TEMPERATURE = 0.35;
 const EGG_PATTERN = /\begg(s)?\b/i;
 const COCONUT_DAIRY_PATTERN = /\bcoconut\s+(milk|cream|yogurt|curd)\b/i;
+const IMPROBABLE_DESSERT_OR_BEVERAGE_PATTERN =
+  /\b(beef|steak|pork|rib|ribs|chicken|lamb|mutton|bacon|ham|sausage|duck|turkey|salami|prosciutto|salmon|tuna|fish|shrimp|prawn|crab|lobster|anchovy|sardine|meat|broth|stock|bone-in|bones?)\b/i;
 
 const BASE_SYSTEM_PROMPT = [
   "You are a fusion chef assistant.",
@@ -38,6 +42,7 @@ const BASE_SYSTEM_PROMPT = [
   'Use simple quantities like "2 tbsp" and "1 cup".',
   "Keep steps short and practical.",
   "Ingredient categories must be accurate: eggs are not dairy, and coconut milk, coconut cream, coconut yogurt, and coconut curd are not dairy.",
+  "Every recipe must be realistic, edible, and something a normal restaurant or home cook would plausibly make and serve.",
   "Generate a fresh variation each time while respecting all inputs.",
 ];
 
@@ -96,11 +101,32 @@ function buildSystemPrompt(request: Request) {
   return [...BASE_SYSTEM_PROMPT, swapGuidance].join("\n");
 }
 
+function buildMealTypeGuidance(input: FuseRequest) {
+  if (input.mealType === "dessert") {
+    return [
+      "This recipe must be a realistic dessert.",
+      "If the source recipe is savory, translate its inspiration into dessert-friendly flavors, textures, or presentation instead of using entree-style proteins literally.",
+      "Do not include meat, poultry, seafood, broth, stock, or bone-in ingredients in desserts.",
+    ].join(" ");
+  }
+
+  if (input.mealType === "beverage") {
+    return [
+      "This recipe must be a realistic beverage.",
+      "If the source recipe is savory, translate its inspiration into beverage-friendly flavors instead of using entree-style proteins literally.",
+      "Do not include meat, poultry, seafood, broth, stock, or bone-in ingredients in beverages.",
+    ].join(" ");
+  }
+
+  return "Prefer realistic ingredient pairings, cooking methods, and titles over novelty or shock value.";
+}
+
 function buildUserPrompt(input: FuseRequest) {
   // Includes both schema and user inputs so output shape stays predictable.
   return [
     "Create one recipe that matches this exact schema.",
     "Return JSON only.",
+    buildMealTypeGuidance(input),
     "",
     `Schema:\n${JSON.stringify(recipeFusionJsonSchema, null, 2)}`,
     "",
@@ -119,6 +145,37 @@ function buildRepairPrompt(invalidText: string) {
     "",
     `Invalid output:\n${invalidText}`,
   ].join("\n");
+}
+
+function buildRealismRepairPrompt(input: FuseRequest, recipe: RecipeFusion) {
+  return [
+    "The recipe below is structurally valid but likely implausible for the requested meal type.",
+    "Rewrite it into the closest realistic, appealing fusion recipe that a normal person would plausibly order, cook, and eat.",
+    "Keep the same meal type and fusion cuisines.",
+    "Preserve inspiration from the original request through flavor notes, spices, aroma, texture, or presentation rather than literal use of implausible ingredients.",
+    buildMealTypeGuidance(input),
+    "Output valid JSON only and no extra keys.",
+    "",
+    `Schema:\n${JSON.stringify(recipeFusionJsonSchema, null, 2)}`,
+    "",
+    `Original input:\n${JSON.stringify(input, null, 2)}`,
+    "",
+    `Implausible recipe to repair:\n${JSON.stringify(recipe, null, 2)}`,
+  ].join("\n");
+}
+
+function shouldRunRealismRepair(input: FuseRequest, recipe: RecipeFusion) {
+  if (input.mealType !== "dessert" && input.mealType !== "beverage") {
+    return false;
+  }
+
+  const combinedText = [
+    recipe.title,
+    ...recipe.ingredients.map((ingredient) => ingredient.item),
+    ...recipe.steps,
+  ].join(" ");
+
+  return IMPROBABLE_DESSERT_OR_BEVERAGE_PATTERN.test(combinedText);
 }
 
 function extractContentText(raw: unknown): string | null {
@@ -181,7 +238,7 @@ async function fetchWithTimeout(
   }
 }
 
-async function callOpenAI(messages: OpenAIMessage[]) {
+async function callOpenAI(messages: OpenAIMessage[], temperature = DEFAULT_GENERATION_TEMPERATURE) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is missing.");
@@ -196,7 +253,7 @@ async function callOpenAI(messages: OpenAIMessage[]) {
     },
     body: JSON.stringify({
       model: MODEL,
-      temperature: 0.9,
+      temperature,
       messages,
       response_format: {
         type: "json_schema",
@@ -221,6 +278,34 @@ async function callOpenAI(messages: OpenAIMessage[]) {
   }
 
   return content;
+}
+
+async function finalizeRecipe(
+  input: FuseRequest,
+  recipe: RecipeFusion,
+  systemPrompt: string,
+) {
+  const normalizedRecipe = normalizeRecipeCategories(recipe);
+  if (!shouldRunRealismRepair(input, normalizedRecipe)) {
+    return normalizedRecipe;
+  }
+
+  const realismMessages: OpenAIMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: buildRealismRepairPrompt(input, normalizedRecipe) },
+  ];
+  const repairedAttempt = await callOpenAI(realismMessages, REPAIR_TEMPERATURE);
+  const repairedParsed = parseRecipeFusionFromText(repairedAttempt);
+  if (!repairedParsed) {
+    throw new Error("IMPLAUSIBLE_RECIPE");
+  }
+
+  const repairedRecipe = normalizeRecipeCategories(repairedParsed);
+  if (shouldRunRealismRepair(input, repairedRecipe)) {
+    throw new Error("IMPLAUSIBLE_RECIPE");
+  }
+
+  return repairedRecipe;
 }
 
 export async function POST(request: Request) {
@@ -283,7 +368,7 @@ export async function POST(request: Request) {
     const firstAttempt = await callOpenAI(baseMessages);
     const firstParsed = parseRecipeFusionFromText(firstAttempt);
     if (firstParsed) {
-      return NextResponse.json(normalizeRecipeCategories(firstParsed));
+      return NextResponse.json(await finalizeRecipe(input, firstParsed, systemPrompt));
     }
 
     // Repair attempt if first output is invalid.
@@ -292,7 +377,7 @@ export async function POST(request: Request) {
       { role: "user", content: buildRepairPrompt(firstAttempt) },
     ];
 
-    const repairedAttempt = await callOpenAI(repairMessages);
+    const repairedAttempt = await callOpenAI(repairMessages, REPAIR_TEMPERATURE);
     const repairedParsed = parseRecipeFusionFromText(repairedAttempt);
     if (!repairedParsed) {
       return NextResponse.json(
@@ -301,7 +386,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json(normalizeRecipeCategories(repairedParsed));
+    return NextResponse.json(await finalizeRecipe(input, repairedParsed, systemPrompt));
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       return NextResponse.json(
@@ -314,6 +399,16 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "Recipe generation failed. Please try again." },
         { status: 502 },
+      );
+    }
+
+    if (error instanceof Error && error.message === "IMPLAUSIBLE_RECIPE") {
+      return NextResponse.json(
+        {
+          error:
+            "Could not generate a realistic recipe for that combination. Try adjusting the meal type or base recipe.",
+        },
+        { status: 422 },
       );
     }
 
