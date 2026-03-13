@@ -181,7 +181,7 @@ export default function CookbookDetailPage() {
   }
 
   return (
-    <div className="animate-rise-in">
+    <div className="mx-auto w-full max-w-4xl animate-rise-in">
       <RecipeResultView
         key={record.recipe.id}
         recipe={record.recipe}

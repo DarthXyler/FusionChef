@@ -88,7 +88,7 @@ export function RecipeResultView({
   }, [hasShoppingCategories, recipe.shoppingList]);
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-4xl space-y-6 lg:space-y-8">
       {/* Title area with high-level details */}
       <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">

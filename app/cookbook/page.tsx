@@ -276,8 +276,8 @@ export default function CookbookPage() {
   }
 
   return (
-    <div className="animate-rise-in space-y-6">
-      <section className="space-y-2 lg:pl-4 xl:pl-6">
+    <div className="mx-auto w-full max-w-4xl animate-rise-in space-y-6 lg:space-y-8">
+      <section className="space-y-2 px-1 sm:px-2">
         <h1 className="font-serif text-4xl leading-tight text-zinc-900 md:text-5xl">Cookbook</h1>
         <p className="max-w-2xl text-lg text-zinc-700">
           Your saved fusion recipes are stored for this browser profile.

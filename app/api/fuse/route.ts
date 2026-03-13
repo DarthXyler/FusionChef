@@ -3,7 +3,7 @@
  * Generates a structured fusion recipe JSON by calling OpenAI and validating output strictly.
  */
 import { NextResponse } from "next/server";
-import type { FuseRequest } from "@/lib/types";
+import type { FuseRequest, RecipeFusion } from "@/lib/types";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import {
   isLikelyRecipeOrFoodName,
@@ -27,6 +27,8 @@ const OPENAI_TIMEOUT_MS = 30_000;
 const MAX_FUSE_BODY_BYTES = 100_000;
 const MAX_BASE_RECIPE_CHARS = 10_000;
 const MAX_FUSION_CUISINE_CHARS = 80;
+const EGG_PATTERN = /\begg(s)?\b/i;
+const COCONUT_DAIRY_PATTERN = /\bcoconut\s+(milk|cream|yogurt|curd)\b/i;
 
 const BASE_SYSTEM_PROMPT = [
   "You are a fusion chef assistant.",
@@ -35,8 +37,40 @@ const BASE_SYSTEM_PROMPT = [
   "Do not include extra keys.",
   'Use simple quantities like "2 tbsp" and "1 cup".',
   "Keep steps short and practical.",
+  "Ingredient categories must be accurate: eggs are not dairy, and coconut milk, coconut cream, coconut yogurt, and coconut curd are not dairy.",
   "Generate a fresh variation each time while respecting all inputs.",
 ];
+
+function normalizeIngredientCategory(item: string, category: string) {
+  const trimmedCategory = category.trim();
+  if (!trimmedCategory) {
+    return category;
+  }
+
+  if (EGG_PATTERN.test(item)) {
+    return "protein";
+  }
+
+  if (COCONUT_DAIRY_PATTERN.test(item)) {
+    return "pantry";
+  }
+
+  return trimmedCategory;
+}
+
+function normalizeRecipeCategories(recipe: RecipeFusion): RecipeFusion {
+  return {
+    ...recipe,
+    ingredients: recipe.ingredients.map((ingredient) => ({
+      ...ingredient,
+      category: normalizeIngredientCategory(ingredient.item, ingredient.category),
+    })),
+    shoppingList: recipe.shoppingList.map((item) => ({
+      ...item,
+      category: normalizeIngredientCategory(item.item, item.category),
+    })),
+  };
+}
 
 function getCountryNameFromCode(countryCode: string) {
   try {
@@ -249,7 +283,7 @@ export async function POST(request: Request) {
     const firstAttempt = await callOpenAI(baseMessages);
     const firstParsed = parseRecipeFusionFromText(firstAttempt);
     if (firstParsed) {
-      return NextResponse.json(firstParsed);
+      return NextResponse.json(normalizeRecipeCategories(firstParsed));
     }
 
     // Repair attempt if first output is invalid.
@@ -267,7 +301,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json(repairedParsed);
+    return NextResponse.json(normalizeRecipeCategories(repairedParsed));
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       return NextResponse.json(
