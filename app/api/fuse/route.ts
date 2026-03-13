@@ -35,7 +35,7 @@ const SYSTEM_PROMPT = [
   "Do not include extra keys.",
   'Use simple quantities like "2 tbsp" and "1 cup".',
   "Keep steps short and practical.",
-  "Swaps must be realistic and available in Sri Lanka where possible.",
+  "Swaps must be realistic, practical, and location-neutral.",
   "Generate a fresh variation each time while respecting all inputs.",
 ].join("\n");
 
