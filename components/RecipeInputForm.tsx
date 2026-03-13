@@ -23,7 +23,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import type { DietaryStyle, FuseRequest, MealType } from "@/lib/types";
 // Shared cuisine list (kept in one place for easier updates).
 import { CUISINE_OPTIONS } from "@/lib/config/cuisines";
@@ -50,9 +50,12 @@ const MEAL_TYPE_OPTIONS: Array<{ value: MealType; label: string }> = [
   { value: "beverage", label: "Beverage" },
 ];
 
-export function RecipeInputForm() {
+type RecipeInputFormProps = {
+  shouldReset?: boolean;
+};
+
+export function RecipeInputForm({ shouldReset = false }: RecipeInputFormProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const FUSE_REQUEST_TIMEOUT_MS = 35_000;
   const DEFAULT_FUSION_CUISINE = CUISINE_OPTIONS[0] ?? "Japanese";
   // Form state: what user typed/selected.
@@ -77,7 +80,6 @@ export function RecipeInputForm() {
 
   // When page opens, restore the last used settings from local storage.
   useEffect(() => {
-    const shouldReset = searchParams.get("reset") === "1";
     if (shouldReset) {
       setBaseRecipe("");
       setMealType("main");
@@ -101,7 +103,7 @@ export function RecipeInputForm() {
     setFusionCuisine(lastInput.fusionCuisine);
     setDietaryStyle(lastInput.dietaryStyle);
     setSpiceLevel(lastInput.spiceLevel);
-  }, [DEFAULT_FUSION_CUISINE, searchParams]);
+  }, [DEFAULT_FUSION_CUISINE, shouldReset]);
 
   useEffect(() => {
     if (isMealTypeOpen) {

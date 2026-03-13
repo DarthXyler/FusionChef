@@ -2,10 +2,18 @@
  * Home page entry.
  * Shows the app intro and the main recipe input form.
  */
-import { Suspense } from "react";
 import { RecipeInputForm } from "@/components/RecipeInputForm";
 
-export default function Home() {
+type HomePageProps = {
+  searchParams?: Promise<{ reset?: string | string[] | undefined }>;
+};
+
+export default async function Home({ searchParams }: HomePageProps) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const resetParam = resolvedSearchParams?.reset;
+  const shouldReset =
+    Array.isArray(resetParam) ? resetParam.includes("1") : resetParam === "1";
+
   return (
     // Main landing page wrapper with spacing and a small entrance animation.
     <div className="space-y-8 animate-rise-in">
@@ -23,9 +31,7 @@ export default function Home() {
         </p>
       </section>
       {/* The interactive form where users paste a recipe and choose options */}
-      <Suspense fallback={<p className="text-zinc-700">Loading form...</p>}>
-        <RecipeInputForm />
-      </Suspense>
+      <RecipeInputForm shouldReset={shouldReset} />
     </div>
   );
 }
