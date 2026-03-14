@@ -16,20 +16,47 @@ html,
 body {
   min-height: 100vh;
   background-color: var(--background);
-  background-image: url("/backgrounds/bg-test-2026-02-27.webp");
-  background-position: center top;
-  background-repeat: no-repeat;
-  background-size: cover;
-  background-attachment: scroll;
   color: var(--foreground);
   font-family: var(--font-sans);
 }
 
-@media (min-width: 1024px) {
-  html,
-  body {
-    /* Keep the decorative artwork pinned to the page edges on desktop. */
-    background-size: 100% auto;
+.app-background-layer {
+  background-color: var(--background);
+  overflow: hidden;
+}
+
+.app-background-side {
+  display: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background-image: url("/backgrounds/bg-test-2026-02-27.webp");
+  background-repeat: no-repeat;
+  background-size: auto 100%;
+  opacity: 1;
+}
+
+.app-background-side-left {
+  left: 0;
+  background-position: left top;
+}
+
+.app-background-side-right {
+  right: 0;
+  background-position: right top;
+}
+
+@media (min-width: 1280px) and (max-width: 1535px) {
+  .app-background-side {
+    display: block;
+    width: clamp(92px, 9vw, 150px);
+  }
+}
+
+@media (min-width: 1536px) {
+  .app-background-side {
+    display: block;
+    width: clamp(120px, 14vw, 240px);
   }
 }
 

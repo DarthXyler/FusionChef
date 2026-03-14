@@ -22,8 +22,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased">
-        <div className="flex min-h-screen flex-col">
+      <body className="relative antialiased">
+        <div aria-hidden="true" className="app-background-layer pointer-events-none fixed inset-0">
+          <div className="app-background-side app-background-side-left" />
+          <div className="app-background-side app-background-side-right" />
+        </div>
+        <div className="relative z-10 flex min-h-screen flex-col">
           {/* Global top bar shown on all screens */}
           <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white">
             <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-4 md:px-6 lg:px-8 xl:px-10">
