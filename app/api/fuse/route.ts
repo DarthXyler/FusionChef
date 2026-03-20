@@ -127,13 +127,11 @@ function buildMealTypeGuidance(input: FuseRequest) {
 }
 
 function buildUserPrompt(input: FuseRequest) {
-  // Includes both schema and user inputs so output shape stays predictable.
+  // The OpenAI call already enforces our JSON schema via response_format.
   return [
-    "Create one recipe that matches this exact schema.",
+    "Create one fusion recipe that matches the required response format.",
     "Return JSON only.",
     buildMealTypeGuidance(input),
-    "",
-    `Schema:\n${JSON.stringify(recipeFusionJsonSchema, null, 2)}`,
     "",
     `Input:\n${JSON.stringify(input, null, 2)}`,
   ].join("\n");
