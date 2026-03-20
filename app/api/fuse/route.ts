@@ -21,6 +21,11 @@ type OpenAIMessage = {
   content: string;
 };
 
+type FuseStageTiming = {
+  stage: string;
+  durationMs: number;
+};
+
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const MODEL = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
 const OPENAI_TIMEOUT_MS = 30_000;
@@ -238,12 +243,21 @@ async function fetchWithTimeout(
   }
 }
 
-async function callOpenAI(messages: OpenAIMessage[], temperature = DEFAULT_GENERATION_TEMPERATURE) {
+function logFuseTiming(event: Record<string, unknown>) {
+  console.info("[api/fuse]", JSON.stringify(event));
+}
+
+async function callOpenAI(
+  messages: OpenAIMessage[],
+  stage: string,
+  temperature = DEFAULT_GENERATION_TEMPERATURE,
+) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is missing.");
   }
 
+  const startedAt = Date.now();
   // Forces model to respond in our strict JSON schema.
   const response = await fetchWithTimeout(OPENAI_URL, {
     method: "POST",
@@ -277,13 +291,20 @@ async function callOpenAI(messages: OpenAIMessage[], temperature = DEFAULT_GENER
     throw new Error("OpenAI response did not include text content.");
   }
 
-  return content;
+  return {
+    content,
+    timing: {
+      stage,
+      durationMs: Date.now() - startedAt,
+    } satisfies FuseStageTiming,
+  };
 }
 
 async function finalizeRecipe(
   input: FuseRequest,
   recipe: RecipeFusion,
   systemPrompt: string,
+  stageTimings: FuseStageTiming[],
 ) {
   const normalizedRecipe = normalizeRecipeCategories(recipe);
   if (!shouldRunRealismRepair(input, normalizedRecipe)) {
@@ -294,8 +315,9 @@ async function finalizeRecipe(
     { role: "system", content: systemPrompt },
     { role: "user", content: buildRealismRepairPrompt(input, normalizedRecipe) },
   ];
-  const repairedAttempt = await callOpenAI(realismMessages, REPAIR_TEMPERATURE);
-  const repairedParsed = parseRecipeFusionFromText(repairedAttempt);
+  const repairedAttempt = await callOpenAI(realismMessages, "realism_repair", REPAIR_TEMPERATURE);
+  stageTimings.push(repairedAttempt.timing);
+  const repairedParsed = parseRecipeFusionFromText(repairedAttempt.content);
   if (!repairedParsed) {
     throw new Error("IMPLAUSIBLE_RECIPE");
   }
@@ -309,6 +331,9 @@ async function finalizeRecipe(
 }
 
 export async function POST(request: Request) {
+  const requestId = crypto.randomUUID();
+  const requestStartedAt = Date.now();
+  const stageTimings: FuseStageTiming[] = [];
   try {
     // Basic abuse protection.
     const limited = await enforceRateLimit(request, {
@@ -359,36 +384,76 @@ export async function POST(request: Request) {
 
     const input = normalizeFuseRequest(body);
     const systemPrompt = buildSystemPrompt(request);
+    logFuseTiming({
+      requestId,
+      event: "request_started",
+      mealType: input.mealType,
+      dietaryStyle: input.dietaryStyle,
+      fusionCuisine: input.fusionCuisine,
+      baseRecipeLength: input.baseRecipe.length,
+    });
     const baseMessages: OpenAIMessage[] = [
       { role: "system", content: systemPrompt },
       { role: "user", content: buildUserPrompt(input) },
     ];
 
     // First model attempt.
-    const firstAttempt = await callOpenAI(baseMessages);
-    const firstParsed = parseRecipeFusionFromText(firstAttempt);
+    const firstAttempt = await callOpenAI(baseMessages, "initial_generation");
+    stageTimings.push(firstAttempt.timing);
+    const firstParsed = parseRecipeFusionFromText(firstAttempt.content);
     if (firstParsed) {
-      return NextResponse.json(await finalizeRecipe(input, firstParsed, systemPrompt));
+      const finalizedRecipe = await finalizeRecipe(input, firstParsed, systemPrompt, stageTimings);
+      logFuseTiming({
+        requestId,
+        event: "request_succeeded",
+        totalDurationMs: Date.now() - requestStartedAt,
+        stageTimings,
+        usedRepair: false,
+      });
+      return NextResponse.json(finalizedRecipe);
     }
 
     // Repair attempt if first output is invalid.
     const repairMessages: OpenAIMessage[] = [
       { role: "system", content: systemPrompt },
-      { role: "user", content: buildRepairPrompt(firstAttempt) },
+      { role: "user", content: buildRepairPrompt(firstAttempt.content) },
     ];
 
-    const repairedAttempt = await callOpenAI(repairMessages, REPAIR_TEMPERATURE);
-    const repairedParsed = parseRecipeFusionFromText(repairedAttempt);
+    const repairedAttempt = await callOpenAI(repairMessages, "schema_repair", REPAIR_TEMPERATURE);
+    stageTimings.push(repairedAttempt.timing);
+    const repairedParsed = parseRecipeFusionFromText(repairedAttempt.content);
     if (!repairedParsed) {
+      logFuseTiming({
+        requestId,
+        event: "request_failed",
+        totalDurationMs: Date.now() - requestStartedAt,
+        stageTimings,
+        reason: "schema_parse_failed_after_repair",
+      });
       return NextResponse.json(
         { error: "Model output could not be parsed as valid recipe JSON." },
         { status: 502 },
       );
     }
 
-    return NextResponse.json(await finalizeRecipe(input, repairedParsed, systemPrompt));
+    const finalizedRecipe = await finalizeRecipe(input, repairedParsed, systemPrompt, stageTimings);
+    logFuseTiming({
+      requestId,
+      event: "request_succeeded",
+      totalDurationMs: Date.now() - requestStartedAt,
+      stageTimings,
+      usedRepair: true,
+    });
+    return NextResponse.json(finalizedRecipe);
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
+      logFuseTiming({
+        requestId,
+        event: "request_failed",
+        totalDurationMs: Date.now() - requestStartedAt,
+        stageTimings,
+        reason: "timeout",
+      });
       return NextResponse.json(
         { error: "Recipe generation timed out. Please try again." },
         { status: 504 },
@@ -396,6 +461,13 @@ export async function POST(request: Request) {
     }
 
     if (error instanceof Error && error.message === "UPSTREAM_OPENAI_ERROR") {
+      logFuseTiming({
+        requestId,
+        event: "request_failed",
+        totalDurationMs: Date.now() - requestStartedAt,
+        stageTimings,
+        reason: "upstream_openai_error",
+      });
       return NextResponse.json(
         { error: "Recipe generation failed. Please try again." },
         { status: 502 },
@@ -403,6 +475,13 @@ export async function POST(request: Request) {
     }
 
     if (error instanceof Error && error.message === "IMPLAUSIBLE_RECIPE") {
+      logFuseTiming({
+        requestId,
+        event: "request_failed",
+        totalDurationMs: Date.now() - requestStartedAt,
+        stageTimings,
+        reason: "implausible_recipe",
+      });
       return NextResponse.json(
         {
           error:
@@ -412,6 +491,13 @@ export async function POST(request: Request) {
       );
     }
 
+    logFuseTiming({
+      requestId,
+      event: "request_failed",
+      totalDurationMs: Date.now() - requestStartedAt,
+      stageTimings,
+      reason: "unexpected_server_error",
+    });
     return NextResponse.json(
       { error: "Unexpected server error." },
       { status: 500 },
