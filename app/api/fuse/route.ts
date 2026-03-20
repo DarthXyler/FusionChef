@@ -24,6 +24,11 @@ type OpenAIMessage = {
 type FuseStageTiming = {
   stage: string;
   durationMs: number;
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
 };
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
@@ -226,6 +231,37 @@ function extractContentText(raw: unknown): string | null {
   return textParts.length > 0 ? textParts : null;
 }
 
+function extractUsage(raw: unknown): FuseStageTiming["usage"] | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return undefined;
+  }
+
+  const usage = (raw as { usage?: unknown }).usage;
+  if (typeof usage !== "object" || usage === null || Array.isArray(usage)) {
+    return undefined;
+  }
+
+  const promptTokens = (usage as { prompt_tokens?: unknown }).prompt_tokens;
+  const completionTokens = (usage as { completion_tokens?: unknown }).completion_tokens;
+  const totalTokens = (usage as { total_tokens?: unknown }).total_tokens;
+
+  const normalized = {
+    promptTokens: typeof promptTokens === "number" ? promptTokens : undefined,
+    completionTokens: typeof completionTokens === "number" ? completionTokens : undefined,
+    totalTokens: typeof totalTokens === "number" ? totalTokens : undefined,
+  };
+
+  if (
+    normalized.promptTokens === undefined &&
+    normalized.completionTokens === undefined &&
+    normalized.totalTokens === undefined
+  ) {
+    return undefined;
+  }
+
+  return normalized;
+}
+
 async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit,
@@ -288,12 +324,14 @@ async function callOpenAI(
   if (!content) {
     throw new Error("OpenAI response did not include text content.");
   }
+  const usage = extractUsage(payload);
 
   return {
     content,
     timing: {
       stage,
       durationMs: Date.now() - startedAt,
+      ...(usage ? { usage } : {}),
     } satisfies FuseStageTiming,
   };
 }
