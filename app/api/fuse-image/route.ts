@@ -2,6 +2,7 @@
  * /api/fuse-image
  * Generates a recipe preview image with OpenAI and returns optimized WebP as a data URL.
  */
+import type { MealType } from "@/lib/types";
 import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
@@ -10,6 +11,7 @@ type FuseImageRequest = {
   title: string;
   baseCuisine: string;
   fusionCuisine: string;
+  mealType: MealType;
 };
 
 const OPENAI_URL = "https://api.openai.com/v1/images/generations";
@@ -43,13 +45,49 @@ function isFuseImageRequest(value: unknown): value is FuseImageRequest {
   }
   const candidate = value as Record<string, unknown>;
   return (
-    typeof candidate.title === "string" &&
-    candidate.title.trim().length > 0 &&
-    typeof candidate.baseCuisine === "string" &&
-    candidate.baseCuisine.trim().length > 0 &&
-    typeof candidate.fusionCuisine === "string" &&
-    candidate.fusionCuisine.trim().length > 0
+      typeof candidate.title === "string" &&
+      candidate.title.trim().length > 0 &&
+      typeof candidate.baseCuisine === "string" &&
+      candidate.baseCuisine.trim().length > 0 &&
+      typeof candidate.fusionCuisine === "string" &&
+      candidate.fusionCuisine.trim().length > 0 &&
+      typeof candidate.mealType === "string" &&
+      candidate.mealType.trim().length > 0
   );
+}
+
+function buildImagePrompt(body: FuseImageRequest) {
+  if (body.mealType === "beverage") {
+    return [
+      "Create a clean, appetizing photo-style image of a realistic fusion beverage.",
+      `Drink title: ${body.title}`,
+      `Base cuisine: ${body.baseCuisine}`,
+      `Fusion cuisine: ${body.fusionCuisine}`,
+      "Show the drink served in a glass, cup, or cocktail vessel.",
+      "No plate, no bowl, no rice, no entree, no solid main dish.",
+      "Neutral background, no text, no watermarks.",
+    ].join("\n");
+  }
+
+  if (body.mealType === "dessert") {
+    return [
+      "Create a clean, appetizing photo-style image of a realistic fusion dessert.",
+      `Dessert title: ${body.title}`,
+      `Base cuisine: ${body.baseCuisine}`,
+      `Fusion cuisine: ${body.fusionCuisine}`,
+      "Show a plated dessert, pastry, cake, tart, ice cream, or sweet treat.",
+      "No savory entree presentation, no rice bowl, no meat, no soup.",
+      "Neutral background, no text, no watermarks.",
+    ].join("\n");
+  }
+
+  return [
+    "Create a clean, appetizing photo-style image of a fusion dish.",
+    `Dish title: ${body.title}`,
+    `Base cuisine: ${body.baseCuisine}`,
+    `Fusion cuisine: ${body.fusionCuisine}`,
+    "Single plate, neutral background, no text, no watermarks.",
+  ].join("\n");
 }
 
 export async function POST(request: Request) {
@@ -87,13 +125,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "OPENAI_API_KEY is missing." }, { status: 500 });
     }
 
-    const prompt = [
-      "Create a clean, appetizing photo-style image of a fusion dish.",
-      `Dish title: ${body.title}`,
-      `Base cuisine: ${body.baseCuisine}`,
-      `Fusion cuisine: ${body.fusionCuisine}`,
-      "Single plate, neutral background, no text, no watermarks.",
-    ].join("\n");
+    const prompt = buildImagePrompt(body);
 
     // Ask OpenAI for one food image.
     const response = await fetchWithTimeout(OPENAI_URL, {

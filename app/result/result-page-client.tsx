@@ -152,6 +152,7 @@ export function ResultPageClient({ initialRecipeId = null }: ResultPageClientPro
             title: record.recipe.title,
             baseCuisine: record.recipe.baseCuisine,
             fusionCuisine: record.recipe.fusionCuisine,
+            mealType: record.sourceInput.mealType,
           }),
         });
 
