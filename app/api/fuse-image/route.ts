@@ -63,8 +63,12 @@ function buildImagePrompt(body: FuseImageRequest) {
       `Drink title: ${body.title}`,
       `Base cuisine: ${body.baseCuisine}`,
       `Fusion cuisine: ${body.fusionCuisine}`,
-      "Show the drink served in a glass, cup, or cocktail vessel.",
-      "No plate, no bowl, no rice, no entree, no solid main dish.",
+      "The subject must be a drink only, not food.",
+      "Show the beverage served in a glass, cup, or cocktail vessel with visible liquid.",
+      "Keep the image focused on the drink itself, using garnish, color, herbs, citrus, ice, foam, or glassware to express the fusion.",
+      "If the title refers to a known drink such as mojito, cocktail, mocktail, soda, tea, coffee, juice, or smoothie, preserve that drink presentation.",
+      "Do not show plated food, bowls, rice, noodles, dumplings, buns, bread, salad, soup, meat, seafood, dessert, or any solid entree.",
+      "No plate, no bowl, no fork, no spoon, no table spread dominated by food.",
       "Neutral background, no text, no watermarks.",
     ].join("\n");
   }
