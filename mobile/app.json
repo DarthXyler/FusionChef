@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Flavor Fusion Chef",
+    "slug": "flavor-fusion-chef-ios-20260316",
+    "version": "1.0.0",
+    "scheme": "flavorfusionchef",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow Flavor Fusion Chef to use your camera so you can photograph recipes.",
+          "photosPermission": "Allow Flavor Fusion Chef to access your photo library so you can import recipe images."
+        }
+      ],
+      "expo-font"
+    ],
+    "ios": {
+      "bundleIdentifier": "com.flavorfusionchef.mobile",
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.flavorfusionchef.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "6a2902ff-7ed0-45b1-8cf2-61201a8d928a"
+      }
+    }
+  }
+}
