@@ -6,11 +6,12 @@
 import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit } from "@/lib/api-security";
-import { applyAnonymousIdentityCookie, getAnonymousIdentity } from "@/lib/anon-user";
+import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
 import {
   deleteCookbookRecordAndReturnImageUrl,
   getCookbookRecord,
 } from "@/lib/cookbook-db";
+import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import { deleteR2ImageByPublicUrl, getR2ObjectKeyFromPublicUrl } from "@/lib/r2-storage";
 
 const COOKBOOK_CACHE_CONTROL = "private, max-age=60, stale-while-revalidate=120";
@@ -51,6 +52,10 @@ function withCookbookCacheHeaders(response: NextResponse, etag: string) {
   response.headers.set("ETag", etag);
 }
 
+function withCookbookIdentityHeader(response: NextResponse, anonUserId: string) {
+  response.headers.set("x-flavor-fusion-anon-id", anonUserId);
+}
+
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
     // Detail fetch endpoint with ETag-based conditional responses.
@@ -69,10 +74,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Recipe id is required." }, { status: 400 });
     }
 
-    const identity = getAnonymousIdentity(request);
+    const identity = await resolveCookbookIdentity(request);
     const record = await getCookbookRecord(identity.anonUserId, recipeId);
     if (!record) {
       const response = NextResponse.json({ error: "Recipe not found." }, { status: 404 });
+      withCookbookIdentityHeader(response, identity.anonUserId);
       applyAnonymousIdentityCookie(response, identity);
       return response;
     }
@@ -81,12 +87,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
     if (isIfNoneMatchSatisfied(request.headers.get("if-none-match"), etag)) {
       const response = new NextResponse(null, { status: 304 });
       withCookbookCacheHeaders(response, etag);
+      withCookbookIdentityHeader(response, identity.anonUserId);
       applyAnonymousIdentityCookie(response, identity);
       return response;
     }
 
     const response = NextResponse.json({ record });
     withCookbookCacheHeaders(response, etag);
+    withCookbookIdentityHeader(response, identity.anonUserId);
     applyAnonymousIdentityCookie(response, identity);
     return response;
   } catch {
@@ -111,10 +119,11 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Recipe id is required." }, { status: 400 });
     }
 
-    const identity = getAnonymousIdentity(request);
+    const identity = await resolveCookbookIdentity(request);
     const result = await deleteCookbookRecordAndReturnImageUrl(identity.anonUserId, recipeId);
     if (!result.deleted) {
       const response = NextResponse.json({ error: "Recipe not found." }, { status: 404 });
+      withCookbookIdentityHeader(response, identity.anonUserId);
       applyAnonymousIdentityCookie(response, identity);
       return response;
     }
@@ -131,6 +140,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     }
 
     const response = NextResponse.json({ success: result.deleted });
+    withCookbookIdentityHeader(response, identity.anonUserId);
     applyAnonymousIdentityCookie(response, identity);
     return response;
   } catch {

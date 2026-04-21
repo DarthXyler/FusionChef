@@ -6,7 +6,7 @@ import type {
   GeneratedRecipeRecord,
   RecipeFusion,
 } from "../types/recipe";
-import { getMobileAnonymousId } from "./mobileIdentity";
+import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
 
 const COOKBOOK_SUMMARY_CACHE_VERSION = "v1";
 const COOKBOOK_DETAIL_CACHE_VERSION = "v1";
@@ -107,11 +107,21 @@ function isCookbookDetailCachePayload(value: unknown): value is CookbookDetailCa
 
 async function buildCookbookHeaders(extraHeaders?: Record<string, string>) {
   const mobileAnonId = await getMobileAnonymousId();
+  const mobileDeviceKey = await getMobileDeviceKey();
   return {
     "Content-Type": "application/json",
     "x-flavor-fusion-anon-id": mobileAnonId,
+    "x-flavor-fusion-device-key": mobileDeviceKey,
     ...extraHeaders,
   };
+}
+
+async function syncAnonymousIdFromResponse(response: Response) {
+  const canonicalAnonId = response.headers.get("x-flavor-fusion-anon-id")?.trim();
+  if (!canonicalAnonId) {
+    return;
+  }
+  await setMobileAnonymousId(canonicalAnonId);
 }
 
 async function getCookbookSummariesCacheKey() {
@@ -249,6 +259,7 @@ export async function saveCookbookRecipe(
   if (!response.ok) {
     throw new Error(await readErrorMessage(response, "Could not save recipe."));
   }
+  await syncAnonymousIdFromResponse(response);
 
   const payload = (await response.json()) as { record?: unknown };
   if (!isCookbookRecipeRecord(payload.record)) {
@@ -276,6 +287,7 @@ export async function fetchCookbookSummaries(cursor?: string | null): Promise<Co
   if (!response.ok) {
     throw new Error(await readErrorMessage(response, "Could not load cookbook."));
   }
+  await syncAnonymousIdFromResponse(response);
 
   const payload = (await response.json()) as {
     recipes?: unknown;
@@ -313,6 +325,7 @@ export async function fetchCookbookRecipe(recipeId: string): Promise<CookbookRec
   if (!response.ok) {
     throw new Error(await readErrorMessage(response, "Could not load recipe."));
   }
+  await syncAnonymousIdFromResponse(response);
 
   const payload = (await response.json()) as { record?: unknown };
   if (!isCookbookRecipeRecord(payload.record)) {
@@ -333,6 +346,7 @@ export async function deleteCookbookRecipe(recipeId: string): Promise<void> {
   if (!response.ok) {
     throw new Error(await readErrorMessage(response, "Could not delete recipe."));
   }
+  await syncAnonymousIdFromResponse(response);
 
   await Promise.all([
     removeCookbookDetailCache(recipeId),

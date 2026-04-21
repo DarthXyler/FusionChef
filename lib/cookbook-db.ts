@@ -481,6 +481,65 @@ export async function deleteCookbookRecordAndReturnImageUrl(
   };
 }
 
+export async function mergeCookbookAnonymousUsers(
+  sourceAnonUserId: string,
+  targetAnonUserId: string,
+) {
+  // Consolidates cookbook records from one anonymous id to another.
+  if (sourceAnonUserId === targetAnonUserId) {
+    return;
+  }
+
+  await ensureSchema();
+  await runStatements([
+    {
+      sql: `INSERT INTO cookbook_recipes (
+              row_id,
+              anon_user_id,
+              recipe_id,
+              recipe_json,
+              source_input_json,
+              image_url,
+              saved_at,
+              created_at,
+              updated_at
+            )
+            SELECT
+              lower(hex(randomblob(16))),
+              ?,
+              recipe_id,
+              recipe_json,
+              source_input_json,
+              image_url,
+              saved_at,
+              created_at,
+              updated_at
+            FROM cookbook_recipes
+            WHERE anon_user_id = ?
+            ON CONFLICT(anon_user_id, recipe_id) DO UPDATE SET
+              recipe_json = excluded.recipe_json,
+              source_input_json = excluded.source_input_json,
+              image_url = COALESCE(excluded.image_url, cookbook_recipes.image_url),
+              saved_at = CASE
+                WHEN excluded.saved_at > cookbook_recipes.saved_at THEN excluded.saved_at
+                ELSE cookbook_recipes.saved_at
+              END,
+              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+      args: [targetAnonUserId, sourceAnonUserId],
+    },
+    {
+      sql: `DELETE FROM cookbook_recipes
+            WHERE anon_user_id = ?`,
+      args: [sourceAnonUserId],
+    },
+  ]);
+
+  cookbookRecordListCache.delete(sourceAnonUserId);
+  cookbookRecordListCache.delete(targetAnonUserId);
+  invalidateCookbookSummaryListCache(sourceAnonUserId);
+  invalidateCookbookSummaryListCache(targetAnonUserId);
+}
+
 export async function listCookbookImageUrls() {
   // Used by orphan cleanup to detect referenced images.
   await ensureSchema();

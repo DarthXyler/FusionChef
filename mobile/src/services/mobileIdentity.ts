@@ -4,6 +4,9 @@ import * as SecureStore from "expo-secure-store";
 const MOBILE_ANON_ID_KEY = "flavor_fusion_mobile_anon_id";
 const MOBILE_ANON_ID_BACKUP_KEY = "flavor_fusion_mobile_anon_id_backup";
 const MOBILE_ANON_ID_SECURE_KEY = "flavor_fusion_mobile_anon_id_secure";
+const MOBILE_DEVICE_KEY = "flavor_fusion_mobile_device_key";
+const MOBILE_DEVICE_KEY_BACKUP = "flavor_fusion_mobile_device_key_backup";
+const MOBILE_DEVICE_KEY_SECURE = "flavor_fusion_mobile_device_key_secure";
 const COOKBOOK_SUMMARY_CACHE_PREFIX = "flavor_fusion_mobile_cookbook_summaries_v1:";
 const COOKBOOK_DETAIL_CACHE_PREFIX = "flavor_fusion_mobile_cookbook_detail_v1:";
 const UUID_PATTERN =
@@ -13,6 +16,8 @@ const UUID_IN_KEY_PATTERN =
 
 let resolvedMobileAnonymousId: string | null = null;
 let resolvingMobileAnonymousId: Promise<string> | null = null;
+let resolvedMobileDeviceKey: string | null = null;
+let resolvingMobileDeviceKey: Promise<string> | null = null;
 
 function generateUuidV4() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
@@ -132,6 +137,54 @@ async function resolveMobileAnonymousId() {
   return nextId;
 }
 
+async function readSecureDeviceKey() {
+  try {
+    return (await SecureStore.getItemAsync(MOBILE_DEVICE_KEY_SECURE))?.trim() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeSecureDeviceKey(id: string) {
+  try {
+    await SecureStore.setItemAsync(MOBILE_DEVICE_KEY_SECURE, id);
+  } catch {
+    // AsyncStorage remains primary fallback if SecureStore is unavailable.
+  }
+}
+
+async function persistDeviceKey(id: string) {
+  await AsyncStorage.multiSet([
+    [MOBILE_DEVICE_KEY, id],
+    [MOBILE_DEVICE_KEY_BACKUP, id],
+  ]);
+  await writeSecureDeviceKey(id);
+}
+
+async function resolveMobileDeviceKey() {
+  const storedPrimary = (await AsyncStorage.getItem(MOBILE_DEVICE_KEY))?.trim();
+  if (isValidAnonymousId(storedPrimary)) {
+    await persistDeviceKey(storedPrimary);
+    return storedPrimary;
+  }
+
+  const storedBackup = (await AsyncStorage.getItem(MOBILE_DEVICE_KEY_BACKUP))?.trim();
+  if (isValidAnonymousId(storedBackup)) {
+    await persistDeviceKey(storedBackup);
+    return storedBackup;
+  }
+
+  const secureStored = await readSecureDeviceKey();
+  if (isValidAnonymousId(secureStored)) {
+    await persistDeviceKey(secureStored);
+    return secureStored;
+  }
+
+  const nextId = generateUuidV4();
+  await persistDeviceKey(nextId);
+  return nextId;
+}
+
 export async function getMobileAnonymousId() {
   if (resolvedMobileAnonymousId) {
     return resolvedMobileAnonymousId;
@@ -149,4 +202,34 @@ export async function getMobileAnonymousId() {
   }
 
   return resolvingMobileAnonymousId;
+}
+
+export async function setMobileAnonymousId(nextId: string) {
+  const normalized = nextId.trim();
+  if (!isValidAnonymousId(normalized)) {
+    return false;
+  }
+
+  await persistAnonymousId(normalized);
+  resolvedMobileAnonymousId = normalized;
+  return true;
+}
+
+export async function getMobileDeviceKey() {
+  if (resolvedMobileDeviceKey) {
+    return resolvedMobileDeviceKey;
+  }
+
+  if (!resolvingMobileDeviceKey) {
+    resolvingMobileDeviceKey = resolveMobileDeviceKey()
+      .then((id) => {
+        resolvedMobileDeviceKey = id;
+        return id;
+      })
+      .finally(() => {
+        resolvingMobileDeviceKey = null;
+      });
+  }
+
+  return resolvingMobileDeviceKey;
 }

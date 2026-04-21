@@ -9,8 +9,9 @@ import type { CookbookRecipeRecord } from "@/lib/types";
 import type { FuseRequest, RecipeFusion } from "@/lib/types";
 import { isFuseRequest, isRecipeFusion } from "@/lib/validation";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
-import { applyAnonymousIdentityCookie, getAnonymousIdentity } from "@/lib/anon-user";
+import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
 import { listCookbookRecipeSummaries, upsertCookbookRecord } from "@/lib/cookbook-db";
+import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import {
   beginIdempotentRequest,
   clearIdempotentRequest,
@@ -83,6 +84,10 @@ function withCookbookCacheHeaders(response: NextResponse, etag: string) {
   response.headers.set("ETag", etag);
 }
 
+function withCookbookIdentityHeader(response: NextResponse, anonUserId: string) {
+  response.headers.set("x-flavor-fusion-anon-id", anonUserId);
+}
+
 function parsePositiveInt(value: string | null, fallback: number) {
   if (!value) {
     return fallback;
@@ -107,7 +112,7 @@ export async function GET(request: NextRequest) {
       return limited;
     }
 
-    const identity = getAnonymousIdentity(request);
+    const identity = await resolveCookbookIdentity(request);
     const cursor = request.nextUrl.searchParams.get("cursor")?.trim() || undefined;
     const pageSize = Math.min(
       parsePositiveInt(
@@ -131,12 +136,14 @@ export async function GET(request: NextRequest) {
     if (isIfNoneMatchSatisfied(request.headers.get("if-none-match"), etag)) {
       const response = new NextResponse(null, { status: 304 });
       withCookbookCacheHeaders(response, etag);
+      withCookbookIdentityHeader(response, identity.anonUserId);
       applyAnonymousIdentityCookie(response, identity);
       return response;
     }
 
     const response = NextResponse.json(responseBody);
     withCookbookCacheHeaders(response, etag);
+    withCookbookIdentityHeader(response, identity.anonUserId);
     applyAnonymousIdentityCookie(response, identity);
     return response;
   } catch {
@@ -166,7 +173,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
     }
 
-    const identity = getAnonymousIdentity(request);
+    const identity = await resolveCookbookIdentity(request);
     const idempotency = await beginIdempotentRequest({
       key: getIdempotencyKeyFromHeaders(request.headers),
       scope: `cookbook-save:${identity.anonUserId}`,
@@ -179,6 +186,7 @@ export async function POST(request: NextRequest) {
         { status: 409 },
       );
       response.headers.set("Idempotency-Status", "in-progress");
+      withCookbookIdentityHeader(response, identity.anonUserId);
       applyAnonymousIdentityCookie(response, identity);
       return response;
     }
@@ -188,6 +196,7 @@ export async function POST(request: NextRequest) {
         { status: 409 },
       );
       response.headers.set("Idempotency-Status", "conflict");
+      withCookbookIdentityHeader(response, identity.anonUserId);
       applyAnonymousIdentityCookie(response, identity);
       return response;
     }
@@ -197,6 +206,7 @@ export async function POST(request: NextRequest) {
         { status: idempotency.responseStatus },
       );
       response.headers.set("Idempotency-Status", "replayed");
+      withCookbookIdentityHeader(response, identity.anonUserId);
       applyAnonymousIdentityCookie(response, identity);
       return response;
     }
@@ -218,6 +228,7 @@ export async function POST(request: NextRequest) {
     if (idempotencyContext) {
       response.headers.set("Idempotency-Status", "stored");
     }
+    withCookbookIdentityHeader(response, identity.anonUserId);
     applyAnonymousIdentityCookie(response, identity);
     return response;
   } catch {
