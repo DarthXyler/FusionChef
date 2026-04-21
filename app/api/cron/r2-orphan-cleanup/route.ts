@@ -30,8 +30,17 @@ function requireCronAccess(request: NextRequest) {
     if (!cronSecret) {
       return null;
     }
-    const providedSecret = request.nextUrl.searchParams.get("secret");
-    if (providedSecret !== cronSecret) {
+    // Vercel cron sends `Authorization: Bearer <CRON_SECRET>`.
+    // Keep query-param fallback for backward compatibility with manual calls.
+    const authorization = request.headers.get("authorization") ?? "";
+    const providedSecretFromHeader = authorization.startsWith("Bearer ")
+      ? authorization.slice("Bearer ".length).trim()
+      : "";
+    const providedSecretFromQuery = request.nextUrl.searchParams.get("secret") ?? "";
+    const isAuthorized =
+      providedSecretFromHeader === cronSecret || providedSecretFromQuery === cronSecret;
+
+    if (!isAuthorized) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
     return null;
