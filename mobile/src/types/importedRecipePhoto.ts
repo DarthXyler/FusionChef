@@ -6,4 +6,5 @@ export type ImportedRecipePhoto = {
   height: number;
   aspectRatio: number;
   sourceLabel: ImportedRecipePhotoSource;
+  imageDataUrl?: string;
 };

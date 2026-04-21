@@ -27,7 +27,7 @@ import {
 import { useResponsiveFlags } from "../hooks/useResponsiveFlags";
 import type { HomeStackParamList } from "../navigation/types";
 import { sampleGeneratedRecipeRecord } from "../data/sampleGeneratedRecipe";
-import { buildMockExtractedText } from "../utils/mockOcr";
+import { fetchOcrExtractedText } from "../services/ocr";
 import type { ImportedRecipePhoto } from "../types/importedRecipePhoto";
 import type { DietaryStyle, FuseRequest, MealType, SpiceLevel } from "../types/recipe";
 import { styles } from "../styles/appStyles";
@@ -65,6 +65,7 @@ export function HomeScreen({
   const [isGenerating, setIsGenerating] = useState(false);
   const [importedRecipePhoto, setImportedRecipePhoto] = useState<ImportedRecipePhoto | null>(null);
   const [isImportingPhoto, setIsImportingPhoto] = useState(false);
+  const [isExtractingText, setIsExtractingText] = useState(false);
   const [mockExtractedText, setMockExtractedText] = useState("");
   const [isExtractionModalOpen, setIsExtractionModalOpen] = useState(false);
   const shouldShowSpiceLevel = mealType !== "dessert" && mealType !== "beverage";
@@ -79,6 +80,7 @@ export function HomeScreen({
     setMockExtractedText("");
     setIsExtractionModalOpen(false);
     setIsImportingPhoto(false);
+    setIsExtractingText(false);
     setIsGenerating(false);
   }
 
@@ -89,6 +91,56 @@ export function HomeScreen({
 
     resetHomeForm();
   }, [route.params?.resetToken]);
+
+  function buildImportedRecipePhoto(
+    asset: ImagePicker.ImagePickerAsset,
+    sourceLabel: ImportedRecipePhoto["sourceLabel"],
+  ): ImportedRecipePhoto {
+    const mimeType =
+      typeof asset.mimeType === "string" && asset.mimeType.startsWith("image/")
+        ? asset.mimeType
+        : "image/jpeg";
+    const imageDataUrl =
+      typeof asset.base64 === "string" && asset.base64.trim().length > 0
+        ? `data:${mimeType};base64,${asset.base64}`
+        : undefined;
+
+    return {
+      uri: asset.uri,
+      width: asset.width ?? 0,
+      height: asset.height ?? 0,
+      aspectRatio:
+        asset.width && asset.height && asset.height > 0 ? asset.width / asset.height : 3 / 4,
+      sourceLabel,
+      imageDataUrl,
+    };
+  }
+
+  async function runOcrExtraction(photo: ImportedRecipePhoto) {
+    if (!photo.imageDataUrl) {
+      Alert.alert(
+        "Extraction unavailable",
+        "Could not read image data from this photo. Try importing again.",
+      );
+      return;
+    }
+
+    setIsExtractingText(true);
+    try {
+      const extractedText = await fetchOcrExtractedText({
+        imageDataUrl: photo.imageDataUrl,
+      });
+      setMockExtractedText(extractedText);
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Could not extract recipe text right now.";
+      Alert.alert("Extraction failed", message);
+    } finally {
+      setIsExtractingText(false);
+    }
+  }
 
   async function handleTakePhoto() {
     if (isImportingPhoto) {
@@ -108,27 +160,15 @@ export function HomeScreen({
 
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: "images",
-        quality: 1,
+        base64: true,
+        quality: 0.8,
       });
 
       if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        const nextPhoto: ImportedRecipePhoto = {
-          uri: asset.uri,
-          width: asset.width ?? 0,
-          height: asset.height ?? 0,
-          aspectRatio:
-            asset.width && asset.height && asset.height > 0 ? asset.width / asset.height : 3 / 4,
-          sourceLabel: "Camera",
-        };
+        const nextPhoto = buildImportedRecipePhoto(result.assets[0], "Camera");
         setImportedRecipePhoto(nextPhoto);
-        setMockExtractedText(
-          buildMockExtractedText({
-            sourceLabel: nextPhoto.sourceLabel,
-            width: nextPhoto.width,
-            height: nextPhoto.height,
-          }),
-        );
+        setMockExtractedText("");
+        await runOcrExtraction(nextPhoto);
       }
     } catch {
       Alert.alert("Import failed", "Could not open the camera right now.");
@@ -155,27 +195,15 @@ export function HomeScreen({
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: "images",
-        quality: 1,
+        base64: true,
+        quality: 0.8,
       });
 
       if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        const nextPhoto: ImportedRecipePhoto = {
-          uri: asset.uri,
-          width: asset.width ?? 0,
-          height: asset.height ?? 0,
-          aspectRatio:
-            asset.width && asset.height && asset.height > 0 ? asset.width / asset.height : 3 / 4,
-          sourceLabel: "Photo Library",
-        };
+        const nextPhoto = buildImportedRecipePhoto(result.assets[0], "Photo Library");
         setImportedRecipePhoto(nextPhoto);
-        setMockExtractedText(
-          buildMockExtractedText({
-            sourceLabel: nextPhoto.sourceLabel,
-            width: nextPhoto.width,
-            height: nextPhoto.height,
-          }),
-        );
+        setMockExtractedText("");
+        await runOcrExtraction(nextPhoto);
       }
     } catch {
       Alert.alert("Import failed", "Could not open the photo library right now.");
@@ -222,18 +250,12 @@ export function HomeScreen({
     ]);
   }
 
-  function handleRegenerateMockExtraction() {
+  async function handleRegenerateMockExtraction() {
     if (!importedRecipePhoto) {
       return;
     }
 
-    setMockExtractedText(
-      buildMockExtractedText({
-        sourceLabel: importedRecipePhoto.sourceLabel,
-        width: importedRecipePhoto.width,
-        height: importedRecipePhoto.height,
-      }),
-    );
+    await runOcrExtraction(importedRecipePhoto);
   }
 
   function handleContinueWithExtractedText() {
@@ -273,6 +295,18 @@ export function HomeScreen({
     setIsGenerating(false);
   }
 
+  function handleUseSampleRecipe() {
+    setBaseRecipe(sampleGeneratedRecipeRecord.sourceInput.baseRecipe);
+    setMealType(sampleGeneratedRecipeRecord.sourceInput.mealType);
+    setFusionCuisine(DEFAULT_MOBILE_FUSION_CUISINE);
+    setDietaryStyle(sampleGeneratedRecipeRecord.sourceInput.dietaryStyle);
+    setSpiceLevel(sampleGeneratedRecipeRecord.sourceInput.spiceLevel);
+    setImportedRecipePhoto(null);
+    setMockExtractedText("");
+    setIsExtractionModalOpen(false);
+    setIsExtractingText(false);
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.screen}>
@@ -297,15 +331,56 @@ export function HomeScreen({
               Fuse any base recipe into a new cuisine.
             </Text>
             <Text style={styles.summary}>
-              Paste your recipe or import one from a photo, then choose a target cuisine,
-              meal type, dietary style, and spice level to generate a clean, practical
-              fusion version with shopping list and swaps.
+              Paste a recipe or import it from a photo, choose your target cuisine and
+              preferences, then generate a practical fusion version.
             </Text>
+          </View>
+
+          <View style={styles.homeHowItWorksCard}>
+            <Text style={styles.homeHowItWorksTitle}>How it works</Text>
+            <View style={styles.homeHowItWorksList}>
+              <View style={styles.homeHowItWorksRow}>
+                <View style={styles.homeHowItWorksStep}>
+                  <Text style={styles.homeHowItWorksStepText}>1</Text>
+                </View>
+                <Text style={styles.homeHowItWorksCopy}>
+                  Start with a recipe you already have.
+                </Text>
+              </View>
+              <View style={styles.homeHowItWorksRow}>
+                <View style={styles.homeHowItWorksStep}>
+                  <Text style={styles.homeHowItWorksStepText}>2</Text>
+                </View>
+                <Text style={styles.homeHowItWorksCopy}>
+                  Choose the cuisine you want to blend into.
+                </Text>
+              </View>
+              <View style={styles.homeHowItWorksRow}>
+                <View style={styles.homeHowItWorksStep}>
+                  <Text style={styles.homeHowItWorksStepText}>3</Text>
+                </View>
+                <Text style={styles.homeHowItWorksCopy}>
+                  Get a practical fusion version with steps, swaps, and a shopping list.
+                </Text>
+              </View>
+            </View>
           </View>
 
           <View style={styles.homeCard}>
             <View style={styles.formGroup}>
-              <Text style={styles.fieldLabel}>Base recipe</Text>
+              <View style={styles.fieldLabelRow}>
+                <Text style={styles.fieldLabel}>Base recipe</Text>
+                <Pressable
+                  accessibilityLabel="Fill the form with a sample recipe"
+                  onPress={handleUseSampleRecipe}
+                  style={({ pressed }) => [
+                    styles.helperActionChip,
+                    pressed && styles.menuButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.helperActionText}>Try sample</Text>
+                </Pressable>
+              </View>
               <View style={styles.recipeInputWrap}>
                 <TextInput
                   multiline
@@ -540,8 +615,16 @@ export function HomeScreen({
                   </View>
 
                   <View style={styles.modalActions}>
-                    <PrimaryButton label="Refresh Text" onPress={handleRegenerateMockExtraction} />
-                    <PrimaryButton label="Use This Text" onPress={handleContinueWithExtractedText} />
+                    <PrimaryButton
+                      disabled={isExtractingText}
+                      label={isExtractingText ? "Extracting..." : "Refresh Text"}
+                      onPress={() => void handleRegenerateMockExtraction()}
+                    />
+                    <PrimaryButton
+                      disabled={isExtractingText}
+                      label="Use This Text"
+                      onPress={handleContinueWithExtractedText}
+                    />
                   </View>
                 </View>
               </ScrollView>
