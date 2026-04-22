@@ -1,0 +1,41 @@
+# Mobile Monetization Security Checklist (S0-S3)
+
+This checklist tracks monetization hardening work for the mobile app rollout.
+
+## S0 - Baseline Security (Now)
+
+- [x] Admin-only runtime config endpoint added: `/api/admin/monetization/config`
+- [x] Dedicated admin token guard (`MONETIZATION_ADMIN_TOKEN`)
+- [x] Constant-time token comparison for admin auth
+- [x] Rate limiting on admin read/write config routes
+- [x] Idempotency enforced for config writes (`idempotency-key` required)
+- [x] Audit logs for config read/update success/failure events
+- [x] `Cache-Control: no-store` on admin config responses
+
+## S1 - Credits Ledger Safety
+
+- [ ] Add immutable credit ledger table (no balance-only writes)
+- [ ] Use reserve -> commit/release flow for every credit-spend action
+- [ ] Add reconciliation job for stuck reservations
+- [ ] Add idempotency keys for all spend/grant endpoints
+- [ ] Add durable server-side daily reset logic (timezone-safe)
+
+## S2 - Purchase Verification
+
+- [ ] Server-side verification for App Store receipts
+- [ ] Server-side verification for Google Play purchases
+- [ ] Anti-replay purchase protection (transaction uniqueness)
+- [ ] Fraud/risk events in audit log
+- [ ] Refund/reversal handling path in ledger
+
+## S3 - Ops & Governance
+
+- [ ] Admin RBAC (read-only ops vs finance ops vs super-admin)
+- [ ] Signed admin actions (or second-factor approval for high-risk actions)
+- [ ] Alerting for suspicious spend/grant spikes
+- [ ] Security review gate before enforcement mode moves to `enforce`
+- [ ] Incident runbook for emergency kill switch + recovery
+
+## Known Future Hardening
+
+- [ ] Replace spoofable anonymous identity header with signed session/identity tokens for mobile API calls
