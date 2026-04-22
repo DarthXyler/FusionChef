@@ -6,6 +6,8 @@ import {
   ActionSheetIOS,
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   type LayoutChangeEvent,
   Image,
   Modal,
@@ -32,6 +34,13 @@ import type { FuseRequest, GeneratedRecipeRecord } from "../types/recipe";
 import { buildShoppingItemKey, toTitleCase } from "../utils/recipeUi";
 import { formatRecipeShareText, formatShoppingListShareText } from "../utils/recipeShare";
 
+const LOADING_MESSAGES = [
+  "Collecting ingredients",
+  "Calculating serving time",
+  "Balancing fusion flavors",
+  "Finalizing your fusion recipe",
+] as const;
+
 export function RecipeWorkspaceScreen({
   navigation,
   route,
@@ -48,11 +57,15 @@ export function RecipeWorkspaceScreen({
   const [pendingSourceInput, setPendingSourceInput] = useState<FuseRequest | null>(null);
   const [isInitialFusePending, setIsInitialFusePending] = useState(false);
   const [pendingEllipsisCount, setPendingEllipsisCount] = useState(1);
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [isLoadingLiveRecipe, setIsLoadingLiveRecipe] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [isImageLoading, setIsImageLoading] = useState(false);
   const [imageError, setImageError] = useState("");
   const [isSavingCookbook, setIsSavingCookbook] = useState(false);
+  const loaderSpin = useRef(new Animated.Value(0)).current;
+  const loaderPulse = useRef(new Animated.Value(1)).current;
+  const loaderGlowOpacity = useRef(new Animated.Value(0.35)).current;
   const activeRecord = liveRecipeRecord ?? sampleGeneratedRecipeRecord;
   const activeRecipe = activeRecord.recipe;
   const activeSourceInput =
@@ -68,6 +81,19 @@ export function RecipeWorkspaceScreen({
   const featuredIngredients = useMemo(() => activeRecipe.ingredients.slice(0, 4), [activeRecipe]);
   const featuredSteps = useMemo(() => activeRecipe.steps.slice(0, 3), [activeRecipe]);
   const pendingEllipsis = ".".repeat(pendingEllipsisCount);
+  const pendingMessage = `${LOADING_MESSAGES[loadingMessageIndex]}${pendingEllipsis}`;
+  const isHeroCardBusy = isInitialFusePending || isImageLoading;
+  const heroCardWaitingMessage = isInitialFusePending
+    ? "Preparing your fusion recipe..."
+    : isImageLoading
+      ? "Finishing recipe presentation..."
+      : imageError
+        ? "Recipe is ready."
+        : "Preparing your fusion recipe...";
+  const loaderSpinInterpolate = loaderSpin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
 
   useEffect(() => {
     setShoppingChecks({});
@@ -76,17 +102,88 @@ export function RecipeWorkspaceScreen({
   useEffect(() => {
     if (!isInitialFusePending) {
       setPendingEllipsisCount(1);
+      setLoadingMessageIndex(0);
       return;
     }
 
-    const intervalId = setInterval(() => {
+    const ellipsisIntervalId = setInterval(() => {
       setPendingEllipsisCount((current) => (current >= 3 ? 1 : current + 1));
     }, 350);
 
+    const messageIntervalId = setInterval(() => {
+      setLoadingMessageIndex((current) =>
+        current >= LOADING_MESSAGES.length - 1 ? 0 : current + 1,
+      );
+    }, 1600);
+
     return () => {
-      clearInterval(intervalId);
+      clearInterval(ellipsisIntervalId);
+      clearInterval(messageIntervalId);
     };
   }, [isInitialFusePending]);
+
+  useEffect(() => {
+    if (!isHeroCardBusy) {
+      loaderSpin.stopAnimation();
+      loaderPulse.stopAnimation();
+      loaderGlowOpacity.stopAnimation();
+      loaderSpin.setValue(0);
+      loaderPulse.setValue(1);
+      loaderGlowOpacity.setValue(0.35);
+      return;
+    }
+
+    const spinLoop = Animated.loop(
+      Animated.timing(loaderSpin, {
+        toValue: 1,
+        duration: 1150,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(loaderPulse, {
+          toValue: 1.08,
+          duration: 700,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(loaderPulse, {
+          toValue: 0.96,
+          duration: 700,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    const glowLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(loaderGlowOpacity, {
+          toValue: 0.6,
+          duration: 700,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(loaderGlowOpacity, {
+          toValue: 0.25,
+          duration: 700,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    spinLoop.start();
+    pulseLoop.start();
+    glowLoop.start();
+
+    return () => {
+      spinLoop.stop();
+      pulseLoop.stop();
+      glowLoop.stop();
+    };
+  }, [isHeroCardBusy, loaderGlowOpacity, loaderPulse, loaderSpin]);
 
   useEffect(() => {
     const nextRecord = route.params?.initialRecord;
@@ -479,7 +576,7 @@ export function RecipeWorkspaceScreen({
                 </Text>
               ) : null}
               {isInitialFusePending ? (
-                <Text style={styles.pendingCopy}>{`Preparing your recipe${pendingEllipsis}`}</Text>
+                <Text style={styles.pendingCopy}>{pendingMessage}</Text>
               ) : null}
               {!isInitialFusePending ? (
                 <Text style={styles.meta}>
@@ -498,14 +595,35 @@ export function RecipeWorkspaceScreen({
             >
               {previewImageUrl ? (
                 <Image source={{ uri: previewImageUrl }} style={styles.heroImage} />
-              ) : isImageLoading ? (
+              ) : isHeroCardBusy ? (
                 <View style={styles.heroImageState}>
-                  <ActivityIndicator color="#10b981" size="small" style={styles.heroImageSpinner} />
-                  <Text style={styles.heroImageStateText}>Generating image...</Text>
+                  <View style={styles.premiumLoaderWrap}>
+                    <Animated.View
+                      style={[
+                        styles.premiumLoaderGlow,
+                        { opacity: loaderGlowOpacity, transform: [{ scale: loaderPulse }] },
+                      ]}
+                    />
+                    <Animated.View
+                      style={[
+                        styles.premiumLoaderRing,
+                        { transform: [{ rotate: loaderSpinInterpolate }] },
+                      ]}
+                    />
+                    <Animated.View
+                      style={[
+                        styles.premiumLoaderCore,
+                        { transform: [{ scale: loaderPulse }] },
+                      ]}
+                    >
+                      <View style={styles.premiumLoaderCoreDot} />
+                    </Animated.View>
+                  </View>
+                  <Text style={styles.heroImageStateText}>{heroCardWaitingMessage}</Text>
                 </View>
               ) : (
                 <View style={styles.heroImageState}>
-                  <Text style={styles.heroImageStateText}>{imageError || "Image unavailable"}</Text>
+                  <Text style={styles.heroImageStateText}>{heroCardWaitingMessage}</Text>
                 </View>
               )}
             </Pressable>

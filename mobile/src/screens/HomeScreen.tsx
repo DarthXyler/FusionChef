@@ -16,7 +16,7 @@ import {
   View,
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { PrimaryButton } from "../components/PrimaryButton";
 import {
   CUISINE_OPTIONS,
@@ -33,6 +33,17 @@ import type { DietaryStyle, FuseRequest, MealType, SpiceLevel } from "../types/r
 import { styles } from "../styles/appStyles";
 
 const DEFAULT_MOBILE_FUSION_CUISINE = CUISINE_OPTIONS[0] ?? "Japanese";
+const MAX_OCR_IMAGE_DATA_URL_CHARS = 3_700_000;
+const OCR_IMAGE_VARIANTS_BALANCED = [
+  { maxDimension: 1600, compress: 0.65 },
+  { maxDimension: 1280, compress: 0.55 },
+  { maxDimension: 960, compress: 0.45 },
+] as const;
+const OCR_IMAGE_VARIANTS_AGGRESSIVE = [
+  { maxDimension: 840, compress: 0.4 },
+  { maxDimension: 720, compress: 0.35 },
+  { maxDimension: 640, compress: 0.3 },
+] as const;
 const SPICE_LEVEL_STYLES: Record<
   SpiceLevel,
   {
@@ -48,10 +59,90 @@ const SPICE_LEVEL_STYLES: Record<
   5: { backgroundColor: "#fef2f2", borderColor: "#ef4444", textColor: "#991b1b" },
 };
 
+type ImageManipulatorModule = {
+  manipulateAsync: (
+    uri: string,
+    actions: Array<{ resize: { width?: number; height?: number } }>,
+    options: { compress: number; base64: true; format: "jpeg" | "png" | "webp" },
+  ) => Promise<{ base64?: string }>;
+  SaveFormat: { JPEG: "jpeg"; PNG: "png"; WEBP: "webp" };
+};
+
+let imageManipulatorModulePromise: Promise<ImageManipulatorModule | null> | null = null;
+
+async function loadImageManipulatorModule(): Promise<ImageManipulatorModule | null> {
+  if (!imageManipulatorModulePromise) {
+    imageManipulatorModulePromise = import("expo-image-manipulator")
+      .then((module) => ({
+        manipulateAsync: module.manipulateAsync as ImageManipulatorModule["manipulateAsync"],
+        SaveFormat: module.SaveFormat as ImageManipulatorModule["SaveFormat"],
+      }))
+      .catch(() => null);
+  }
+  return imageManipulatorModulePromise;
+}
+
+async function createOcrImageDataUrl(
+  uri: string,
+  sourceWidth: number,
+  sourceHeight: number,
+  mimeType: string,
+  fallbackBase64: string | undefined,
+  variants: ReadonlyArray<{ maxDimension: number; compress: number }>,
+) {
+  const imageManipulator = await loadImageManipulatorModule();
+
+  if (!imageManipulator) {
+    if (typeof fallbackBase64 === "string" && fallbackBase64.trim().length > 0) {
+      const fallbackDataUrl = `data:${mimeType};base64,${fallbackBase64}`;
+      if (fallbackDataUrl.length <= MAX_OCR_IMAGE_DATA_URL_CHARS) {
+        return fallbackDataUrl;
+      }
+    }
+    return undefined;
+  }
+
+  for (const variant of variants) {
+    const resizeAction =
+      sourceWidth > 0 && sourceHeight > 0
+        ? sourceWidth >= sourceHeight
+          ? [{ resize: { width: Math.min(sourceWidth, variant.maxDimension) } }]
+          : [{ resize: { height: Math.min(sourceHeight, variant.maxDimension) } }]
+        : [];
+
+    const processed = await imageManipulator.manipulateAsync(uri, resizeAction, {
+      compress: variant.compress,
+      format: imageManipulator.SaveFormat.JPEG,
+      base64: true,
+    });
+
+    if (typeof processed.base64 !== "string" || processed.base64.trim().length === 0) {
+      continue;
+    }
+
+    const imageDataUrl = `data:image/jpeg;base64,${processed.base64}`;
+    if (imageDataUrl.length <= MAX_OCR_IMAGE_DATA_URL_CHARS) {
+      return imageDataUrl;
+    }
+  }
+
+  return undefined;
+}
+
+function isLikelyImageSizeError(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("request is too large") ||
+    normalized.includes("invalid imagedataurl") ||
+    normalized.includes("too large")
+  );
+}
+
 export function HomeScreen({
   navigation,
   route,
 }: NativeStackScreenProps<HomeStackParamList, "Home">) {
+  const insets = useSafeAreaInsets();
   const { isCompactScreen, isVeryCompactScreen } = useResponsiveFlags();
   const [baseRecipe, setBaseRecipe] = useState(sampleGeneratedRecipeRecord.sourceInput.baseRecipe);
   const [mealType, setMealType] = useState<MealType>(sampleGeneratedRecipeRecord.sourceInput.mealType);
@@ -92,18 +183,35 @@ export function HomeScreen({
     resetHomeForm();
   }, [route.params?.resetToken]);
 
-  function buildImportedRecipePhoto(
+  async function buildImportedRecipePhoto(
     asset: ImagePicker.ImagePickerAsset,
     sourceLabel: ImportedRecipePhoto["sourceLabel"],
-  ): ImportedRecipePhoto {
+  ): Promise<ImportedRecipePhoto> {
+    const sourceWidth = asset.width ?? 0;
+    const sourceHeight = asset.height ?? 0;
     const mimeType =
       typeof asset.mimeType === "string" && asset.mimeType.startsWith("image/")
         ? asset.mimeType
         : "image/jpeg";
+    const fallbackBase64 =
+      typeof asset.base64 === "string" && asset.base64.trim().length > 0 ? asset.base64 : undefined;
     const imageDataUrl =
-      typeof asset.base64 === "string" && asset.base64.trim().length > 0
-        ? `data:${mimeType};base64,${asset.base64}`
-        : undefined;
+      (await createOcrImageDataUrl(
+        asset.uri,
+        sourceWidth,
+        sourceHeight,
+        mimeType,
+        fallbackBase64,
+        OCR_IMAGE_VARIANTS_BALANCED,
+      )) ??
+      (await createOcrImageDataUrl(
+        asset.uri,
+        sourceWidth,
+        sourceHeight,
+        mimeType,
+        fallbackBase64,
+        OCR_IMAGE_VARIANTS_AGGRESSIVE,
+      ));
 
     return {
       uri: asset.uri,
@@ -117,20 +225,74 @@ export function HomeScreen({
   }
 
   async function runOcrExtraction(photo: ImportedRecipePhoto) {
-    if (!photo.imageDataUrl) {
-      Alert.alert(
-        "Extraction unavailable",
-        "Could not read image data from this photo. Try importing again.",
-      );
-      return;
-    }
-
     setIsExtractingText(true);
     try {
-      const extractedText = await fetchOcrExtractedText({
-        imageDataUrl: photo.imageDataUrl,
-      });
-      setMockExtractedText(extractedText);
+      let workingPhoto = photo;
+      let hasRetriedWithAggressiveCompression = false;
+
+      while (true) {
+        if (!workingPhoto.imageDataUrl) {
+          const fallbackDataUrl = await createOcrImageDataUrl(
+            workingPhoto.uri,
+            workingPhoto.width,
+            workingPhoto.height,
+            "image/jpeg",
+            undefined,
+            OCR_IMAGE_VARIANTS_AGGRESSIVE,
+          );
+          if (!fallbackDataUrl) {
+            Alert.alert(
+              "Extraction unavailable",
+              "Could not process this image for extraction. Try a clearer photo.",
+            );
+            return;
+          }
+          workingPhoto = { ...workingPhoto, imageDataUrl: fallbackDataUrl };
+          setImportedRecipePhoto((current) =>
+            current && current.uri === workingPhoto.uri
+              ? { ...current, imageDataUrl: fallbackDataUrl }
+              : current,
+          );
+          hasRetriedWithAggressiveCompression = true;
+        }
+
+        try {
+          const extractedText = await fetchOcrExtractedText({
+            imageDataUrl: workingPhoto.imageDataUrl,
+          });
+          setMockExtractedText(extractedText);
+          return;
+        } catch (error) {
+          const message =
+            error instanceof Error && error.message.trim().length > 0
+              ? error.message
+              : "Could not extract recipe text right now.";
+
+          if (!hasRetriedWithAggressiveCompression && isLikelyImageSizeError(message)) {
+            const retryDataUrl = await createOcrImageDataUrl(
+              workingPhoto.uri,
+              workingPhoto.width,
+              workingPhoto.height,
+              "image/jpeg",
+              undefined,
+              OCR_IMAGE_VARIANTS_AGGRESSIVE,
+            );
+            if (retryDataUrl && retryDataUrl !== workingPhoto.imageDataUrl) {
+              workingPhoto = { ...workingPhoto, imageDataUrl: retryDataUrl };
+              setImportedRecipePhoto((current) =>
+                current && current.uri === workingPhoto.uri
+                  ? { ...current, imageDataUrl: retryDataUrl }
+                  : current,
+              );
+              hasRetriedWithAggressiveCompression = true;
+              continue;
+            }
+          }
+
+          Alert.alert("Extraction failed", message);
+          return;
+        }
+      }
     } catch (error) {
       const message =
         error instanceof Error && error.message.trim().length > 0
@@ -165,7 +327,7 @@ export function HomeScreen({
       });
 
       if (!result.canceled && result.assets[0]) {
-        const nextPhoto = buildImportedRecipePhoto(result.assets[0], "Camera");
+        const nextPhoto = await buildImportedRecipePhoto(result.assets[0], "Camera");
         setImportedRecipePhoto(nextPhoto);
         setMockExtractedText("");
         await runOcrExtraction(nextPhoto);
@@ -200,7 +362,7 @@ export function HomeScreen({
       });
 
       if (!result.canceled && result.assets[0]) {
-        const nextPhoto = buildImportedRecipePhoto(result.assets[0], "Photo Library");
+        const nextPhoto = await buildImportedRecipePhoto(result.assets[0], "Photo Library");
         setImportedRecipePhoto(nextPhoto);
         setMockExtractedText("");
         await runOcrExtraction(nextPhoto);
@@ -564,7 +726,12 @@ export function HomeScreen({
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.modalScrollContent}
               >
-                <View style={styles.modalSheet}>
+                <View
+                  style={[
+                    styles.modalSheet,
+                    { paddingTop: Math.max(insets.top + 12, 28) },
+                  ]}
+                >
                   <View
                     style={[
                       styles.modalHeader,
