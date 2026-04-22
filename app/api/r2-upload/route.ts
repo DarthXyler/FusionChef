@@ -29,6 +29,8 @@ const MAX_UPLOAD_BODY_BYTES = 4_000_000;
 const MAX_DATA_URL_LENGTH = 3_500_000;
 const MAX_DECODED_IMAGE_BYTES = 2_800_000;
 const MAX_TITLE_CHARS = 140;
+const STORED_IMAGE_SIZE = 768;
+const STORED_IMAGE_WEBP_QUALITY = 72;
 
 function getR2Client() {
   // Builds the S3-compatible R2 client only when credentials are present.
@@ -144,8 +146,8 @@ export async function POST(request: Request) {
     }
     // Re-encode as compact WebP to reduce storage and bandwidth cost.
     const optimized = await sharp(decoded)
-      .resize(512, 512, { fit: "cover" })
-      .webp({ quality: 60 })
+      .resize(STORED_IMAGE_SIZE, STORED_IMAGE_SIZE, { fit: "cover" })
+      .webp({ quality: STORED_IMAGE_WEBP_QUALITY })
       .toBuffer();
 
     const key = buildImageKey(body.title);

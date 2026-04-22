@@ -16,12 +16,25 @@ type FuseImageRequest = {
 
 const OPENAI_URL = "https://api.openai.com/v1/images/generations";
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1";
-const PREVIEW_SIZE = 512;
+const PREVIEW_SIZE = 768;
+const PREVIEW_WEBP_QUALITY = 72;
+const OPENAI_IMAGE_QUALITY = "medium";
 const OPENAI_IMAGE_TIMEOUT_MS = 25_000;
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 15_000;
 const MAX_IMAGE_REQUEST_BYTES = 12_000;
 const MAX_TITLE_CHARS = 140;
 const MAX_CUISINE_CHARS = 80;
+
+function buildPremiumStyleGuidance() {
+  return [
+    "Professional editorial food photography for a premium restaurant menu.",
+    "Hyper-realistic and appetizing with natural textures and believable plating.",
+    "Cinematic side lighting with soft fill and shallow depth of field.",
+    "Keep the hero subject sharply focused with clean composition and minimal props.",
+    "Rich natural color grading, subtle contrast, no surreal or cartoon look.",
+    "No text, watermark, logos, labels, people, or hands.",
+  ];
+}
 
 async function fetchWithTimeout(
   input: RequestInfo | URL,
@@ -57,9 +70,11 @@ function isFuseImageRequest(value: unknown): value is FuseImageRequest {
 }
 
 function buildImagePrompt(body: FuseImageRequest) {
+  const style = buildPremiumStyleGuidance();
+
   if (body.mealType === "beverage") {
     return [
-      "Create a clean, appetizing photo-style image of a realistic fusion beverage.",
+      "Create a realistic fusion beverage photo.",
       `Drink title: ${body.title}`,
       `Base cuisine: ${body.baseCuisine}`,
       `Fusion cuisine: ${body.fusionCuisine}`,
@@ -69,28 +84,32 @@ function buildImagePrompt(body: FuseImageRequest) {
       "If the title refers to a known drink such as mojito, cocktail, mocktail, soda, tea, coffee, juice, or smoothie, preserve that drink presentation.",
       "Do not show plated food, bowls, rice, noodles, dumplings, buns, bread, salad, soup, meat, seafood, dessert, or any solid entree.",
       "No plate, no bowl, no fork, no spoon, no table spread dominated by food.",
-      "Neutral background, no text, no watermarks.",
+      "Neutral background.",
+      ...style,
     ].join("\n");
   }
 
   if (body.mealType === "dessert") {
     return [
-      "Create a clean, appetizing photo-style image of a realistic fusion dessert.",
+      "Create a realistic fusion dessert photo.",
       `Dessert title: ${body.title}`,
       `Base cuisine: ${body.baseCuisine}`,
       `Fusion cuisine: ${body.fusionCuisine}`,
       "Show a plated dessert, pastry, cake, tart, ice cream, or sweet treat.",
       "No savory entree presentation, no rice bowl, no meat, no soup.",
-      "Neutral background, no text, no watermarks.",
+      "Neutral background.",
+      ...style,
     ].join("\n");
   }
 
   return [
-    "Create a clean, appetizing photo-style image of a fusion dish.",
+    "Create a realistic fusion dish photo.",
     `Dish title: ${body.title}`,
     `Base cuisine: ${body.baseCuisine}`,
     `Fusion cuisine: ${body.fusionCuisine}`,
-    "Single plate, neutral background, no text, no watermarks.",
+    "Show one plated dish as the hero subject.",
+    "Neutral background.",
+    ...style,
   ].join("\n");
 }
 
@@ -142,7 +161,7 @@ export async function POST(request: Request) {
         model: IMAGE_MODEL,
         prompt,
         size: "auto",
-        quality: "low",
+        quality: OPENAI_IMAGE_QUALITY,
         n: 1,
       }),
     }, OPENAI_IMAGE_TIMEOUT_MS);
@@ -180,7 +199,7 @@ export async function POST(request: Request) {
       // Normalize output size/format for consistent UI performance.
       const optimized = await sharp(imageBytes)
         .resize(PREVIEW_SIZE, PREVIEW_SIZE, { fit: "cover" })
-        .webp({ quality: 60 })
+        .webp({ quality: PREVIEW_WEBP_QUALITY })
         .toBuffer();
       return NextResponse.json({
         imageUrl: `data:image/webp;base64,${optimized.toString("base64")}`,
