@@ -18,12 +18,20 @@ const OPENAI_URL = "https://api.openai.com/v1/images/generations";
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1";
 const PREVIEW_SIZE = 768;
 const PREVIEW_WEBP_QUALITY = 72;
-const OPENAI_IMAGE_QUALITY = "medium";
-const OPENAI_IMAGE_TIMEOUT_MS = 25_000;
+const OPENAI_IMAGE_QUALITIES = ["medium", "low"] as const;
+const OPENAI_IMAGE_TIMEOUT_MS = 45_000;
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 15_000;
+const OPENAI_IMAGE_REQUEST_ATTEMPTS = 2;
+const OPENAI_IMAGE_RETRY_DELAY_MS = 900;
 const MAX_IMAGE_REQUEST_BYTES = 12_000;
 const MAX_TITLE_CHARS = 140;
 const MAX_CUISINE_CHARS = 80;
+
+type ImageFetchResult = {
+  imageBytes: Buffer | null;
+  status?: number;
+  reason?: string;
+};
 
 function buildPremiumStyleGuidance() {
   return [
@@ -48,6 +56,91 @@ async function fetchWithTimeout(
     return await fetch(input, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+function logFuseImage(event: Record<string, unknown>) {
+  console.info("[api/fuse-image]", JSON.stringify(event));
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function shouldRetryImageRequest(result: ImageFetchResult) {
+  if (!result.reason) {
+    return false;
+  }
+
+  if (result.reason === "request_timeout" || result.reason === "request_error") {
+    return true;
+  }
+
+  if (typeof result.status === "number") {
+    return result.status === 429 || result.status >= 500;
+  }
+
+  return false;
+}
+
+async function fetchGeneratedImageBytes(
+  apiKey: string,
+  prompt: string,
+  quality: (typeof OPENAI_IMAGE_QUALITIES)[number],
+) {
+  try {
+    const response = await fetchWithTimeout(
+      OPENAI_URL,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: IMAGE_MODEL,
+          prompt,
+          size: "auto",
+          quality,
+          n: 1,
+        }),
+      },
+      OPENAI_IMAGE_TIMEOUT_MS,
+    );
+
+    if (!response.ok) {
+      await response.text();
+      return { imageBytes: null, status: response.status, reason: "openai_generation_failed" };
+    }
+
+    const payload = (await response.json()) as {
+      data?: Array<{ url?: string; b64_json?: string }>;
+    };
+    const b64 = payload.data?.[0]?.b64_json;
+    const url = payload.data?.[0]?.url;
+
+    if (typeof b64 === "string" && b64.length > 0) {
+      return { imageBytes: Buffer.from(b64, "base64") };
+    }
+
+    if (typeof url !== "string" || url.length === 0) {
+      return { imageBytes: null, reason: "missing_image_payload" };
+    }
+
+    const imageResponse = await fetchWithTimeout(url, {}, IMAGE_DOWNLOAD_TIMEOUT_MS);
+    if (!imageResponse.ok) {
+      return { imageBytes: null, status: imageResponse.status, reason: "image_download_failed" };
+    }
+
+    const arrayBuffer = await imageResponse.arrayBuffer();
+    return { imageBytes: Buffer.from(arrayBuffer) };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return { imageBytes: null, reason: "request_timeout" };
+    }
+    return { imageBytes: null, reason: "request_error" };
   }
 }
 
@@ -114,6 +207,8 @@ function buildImagePrompt(body: FuseImageRequest) {
 }
 
 export async function POST(request: Request) {
+  const requestId = crypto.randomUUID();
+  const requestStartedAt = Date.now();
   try {
     // Request guardrails.
     const limited = await enforceRateLimit(request, {
@@ -150,49 +245,42 @@ export async function POST(request: Request) {
 
     const prompt = buildImagePrompt(body);
 
-    // Ask OpenAI for one food image.
-    const response = await fetchWithTimeout(OPENAI_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: IMAGE_MODEL,
-        prompt,
-        size: "auto",
-        quality: OPENAI_IMAGE_QUALITY,
-        n: 1,
-      }),
-    }, OPENAI_IMAGE_TIMEOUT_MS);
-
-  if (!response.ok) {
-    await response.text();
-    return NextResponse.json(
-      { error: "Image generation failed." },
-      { status: 502 },
-      );
-    }
-
-    const payload = (await response.json()) as {
-      data?: Array<{ url?: string; b64_json?: string }>;
-    };
-    const b64 = payload.data?.[0]?.b64_json;
-    const url = payload.data?.[0]?.url;
-
     let imageBytes: Buffer | null = null;
-    if (b64) {
-      imageBytes = Buffer.from(b64, "base64");
-    } else if (url) {
-      const imageResponse = await fetchWithTimeout(url, {}, IMAGE_DOWNLOAD_TIMEOUT_MS);
-      if (imageResponse.ok) {
-        const arrayBuffer = await imageResponse.arrayBuffer();
-        imageBytes = Buffer.from(arrayBuffer);
+    const attempts: Array<Record<string, unknown>> = [];
+    for (const quality of OPENAI_IMAGE_QUALITIES) {
+      for (let attempt = 1; attempt <= OPENAI_IMAGE_REQUEST_ATTEMPTS; attempt += 1) {
+        const result = await fetchGeneratedImageBytes(apiKey, prompt, quality);
+        attempts.push({
+          quality,
+          attempt,
+          status: result.status ?? null,
+          reason: result.reason ?? null,
+          ok: Boolean(result.imageBytes),
+        });
+
+        if (result.imageBytes) {
+          imageBytes = result.imageBytes;
+          break;
+        }
+
+        const hasMoreAttempts = attempt < OPENAI_IMAGE_REQUEST_ATTEMPTS;
+        if (hasMoreAttempts && shouldRetryImageRequest(result)) {
+          await sleep(OPENAI_IMAGE_RETRY_DELAY_MS * attempt);
+        } else {
+          break;
+        }
       }
+      if (imageBytes) break;
     }
 
     if (!imageBytes) {
-      return NextResponse.json({ error: "No image returned." }, { status: 502 });
+      logFuseImage({
+        requestId,
+        event: "request_failed",
+        totalDurationMs: Date.now() - requestStartedAt,
+        attempts,
+      });
+      return NextResponse.json({ error: "Image generation failed." }, { status: 502 });
     }
 
     try {
@@ -201,16 +289,41 @@ export async function POST(request: Request) {
         .resize(PREVIEW_SIZE, PREVIEW_SIZE, { fit: "cover" })
         .webp({ quality: PREVIEW_WEBP_QUALITY })
         .toBuffer();
+      logFuseImage({
+        requestId,
+        event: "request_succeeded",
+        totalDurationMs: Date.now() - requestStartedAt,
+        attempts,
+      });
       return NextResponse.json({
         imageUrl: `data:image/webp;base64,${optimized.toString("base64")}`,
       });
     } catch {
+      logFuseImage({
+        requestId,
+        event: "request_failed",
+        totalDurationMs: Date.now() - requestStartedAt,
+        attempts,
+        reason: "image_processing_failed",
+      });
       return NextResponse.json({ error: "Image processing failed." }, { status: 500 });
     }
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
+      logFuseImage({
+        requestId,
+        event: "request_failed",
+        totalDurationMs: Date.now() - requestStartedAt,
+        reason: "request_timeout",
+      });
       return NextResponse.json({ error: "Image generation timed out." }, { status: 504 });
     }
+    logFuseImage({
+      requestId,
+      event: "request_failed",
+      totalDurationMs: Date.now() - requestStartedAt,
+      reason: "unexpected_server_error",
+    });
     return NextResponse.json({ error: "Unexpected server error." }, { status: 500 });
   }
 }

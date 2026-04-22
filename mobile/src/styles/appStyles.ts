@@ -292,6 +292,23 @@ export const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: "center",
   },
+  heroImageRetryButton: {
+    alignItems: "center",
+    backgroundColor: "#10b981",
+    borderRadius: 999,
+    minHeight: 38,
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+  },
+  heroImageRetryButtonPressed: {
+    opacity: 0.86,
+  },
+  heroImageRetryButtonText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
   resultActionsRow: {
     flexDirection: "row",
     gap: 10,

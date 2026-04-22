@@ -40,6 +40,14 @@ const LOADING_MESSAGES = [
   "Balancing fusion flavors",
   "Finalizing your fusion recipe",
 ] as const;
+const IMAGE_FETCH_MAX_ATTEMPTS = 3;
+const IMAGE_FETCH_RETRY_DELAYS_MS = [1200, 2200] as const;
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 export function RecipeWorkspaceScreen({
   navigation,
@@ -62,6 +70,7 @@ export function RecipeWorkspaceScreen({
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [isImageLoading, setIsImageLoading] = useState(false);
   const [imageError, setImageError] = useState("");
+  const [imageReloadVersion, setImageReloadVersion] = useState(0);
   const [isSavingCookbook, setIsSavingCookbook] = useState(false);
   const loaderSpin = useRef(new Animated.Value(0)).current;
   const loaderPulse = useRef(new Animated.Value(1)).current;
@@ -86,10 +95,8 @@ export function RecipeWorkspaceScreen({
   const heroCardWaitingMessage = isInitialFusePending
     ? "Preparing your fusion recipe..."
     : isImageLoading
-      ? "Finishing recipe presentation..."
-      : imageError
-        ? "Recipe is ready."
-        : "Preparing your fusion recipe...";
+      ? "Adding final presentation details..."
+      : "Preparing your fusion recipe...";
   const loaderSpinInterpolate = loaderSpin.interpolate({
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
@@ -269,34 +276,49 @@ export function RecipeWorkspaceScreen({
       setPreviewImageUrl(null);
       setImageError("");
       setIsImageLoading(true);
+
+      let lastErrorMessage = "Image unavailable";
       try {
-        const imageUrl = await fetchRecipeImagePreview({
-          title: activeRecipe.title,
-          baseCuisine: activeRecipe.baseCuisine,
-          fusionCuisine: activeRecipe.fusionCuisine,
-          mealType: activeSourceInput.mealType,
-        });
-        if (!cancelled) {
-          setPreviewImageUrl(imageUrl);
-          setLiveRecipeRecord((current) =>
-            current && current.recipe.id === activeRecipe.id
-              ? {
-                  ...current,
-                  recipe: {
-                    ...current.recipe,
-                    imageUrl,
-                  },
-                }
-              : current,
-          );
+        for (let attempt = 0; attempt < IMAGE_FETCH_MAX_ATTEMPTS; attempt += 1) {
+          try {
+            const imageUrl = await fetchRecipeImagePreview({
+              title: activeRecipe.title,
+              baseCuisine: activeRecipe.baseCuisine,
+              fusionCuisine: activeRecipe.fusionCuisine,
+              mealType: activeSourceInput.mealType,
+            });
+            if (!cancelled) {
+              setPreviewImageUrl(imageUrl);
+              setLiveRecipeRecord((current) =>
+                current && current.recipe.id === activeRecipe.id
+                  ? {
+                      ...current,
+                      recipe: {
+                        ...current.recipe,
+                        imageUrl,
+                      },
+                    }
+                  : current,
+              );
+            }
+            return;
+          } catch (error) {
+            lastErrorMessage =
+              error instanceof Error && error.message.trim().length > 0
+                ? error.message
+                : "Image unavailable";
+            if (cancelled) {
+              return;
+            }
+            if (attempt < IMAGE_FETCH_MAX_ATTEMPTS - 1) {
+              const retryDelay = IMAGE_FETCH_RETRY_DELAYS_MS[attempt] ?? 2200;
+              await delay(retryDelay);
+            }
+          }
         }
-      } catch (error) {
+
         if (!cancelled) {
-          setImageError(
-            error instanceof Error && error.message.trim().length > 0
-              ? error.message
-              : "Image unavailable",
-          );
+          setImageError(lastErrorMessage);
         }
       } finally {
         if (!cancelled) {
@@ -317,9 +339,19 @@ export function RecipeWorkspaceScreen({
     activeRecipe.imageUrl,
     activeRecipe.title,
     activeSourceInput.mealType,
+    imageReloadVersion,
     isInitialFusePending,
     liveRecipeRecord,
   ]);
+
+  function handleRetryRecipeVisual() {
+    if (isImageLoading) {
+      return;
+    }
+
+    setImageError("");
+    setImageReloadVersion((current) => current + 1);
+  }
 
   async function handleShareRecipe() {
     try {
@@ -620,6 +652,21 @@ export function RecipeWorkspaceScreen({
                     </Animated.View>
                   </View>
                   <Text style={styles.heroImageStateText}>{heroCardWaitingMessage}</Text>
+                </View>
+              ) : imageError ? (
+                <View style={styles.heroImageState}>
+                  <Text style={styles.heroImageStateText}>
+                    Recipe is ready. We could not load the visual yet.
+                  </Text>
+                  <Pressable
+                    onPress={handleRetryRecipeVisual}
+                    style={({ pressed }) => [
+                      styles.heroImageRetryButton,
+                      pressed && styles.heroImageRetryButtonPressed,
+                    ]}
+                  >
+                    <Text style={styles.heroImageRetryButtonText}>Retry Visual</Text>
+                  </Pressable>
                 </View>
               ) : (
                 <View style={styles.heroImageState}>
