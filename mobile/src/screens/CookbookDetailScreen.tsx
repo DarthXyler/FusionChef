@@ -1,16 +1,23 @@
-import { useEffect, useState } from "react";
+import { BlurView } from "expo-blur";
+import * as Sharing from "expo-sharing";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Image,
+  type LayoutChangeEvent,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
+  Share,
   Text,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { captureRef } from "react-native-view-shot";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { SectionHeader } from "../components/SectionHeader";
 import { useMobileCookbook } from "../context/mobileCookbook";
@@ -19,6 +26,7 @@ import type { CookbookStackParamList } from "../navigation/types";
 import { styles } from "../styles/appStyles";
 import type { CookbookRecipeRecord } from "../types/recipe";
 import { buildShoppingItemKey, toTitleCase } from "../utils/recipeUi";
+import { formatRecipeShareText, formatShoppingListShareText } from "../utils/recipeShare";
 
 /**
  * Cookbook detail screen:
@@ -31,7 +39,11 @@ export function CookbookDetailScreen({
   route,
 }: NativeStackScreenProps<CookbookStackParamList, "CookbookDetail">) {
   const { isCompactScreen, isVeryCompactScreen } = useResponsiveFlags();
+  const recipeCardRef = useRef<View>(null);
   const { getRecord, loadRecord, refreshRecord, deleteRecord } = useMobileCookbook();
+  const [captureCardSize, setCaptureCardSize] = useState({ width: 0, height: 0 });
+  const [isSharingImage, setIsSharingImage] = useState(false);
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const [shoppingChecks, setShoppingChecks] = useState<Record<string, boolean>>({});
   const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
   const [record, setRecord] = useState<CookbookRecipeRecord | null>(
@@ -42,6 +54,21 @@ export function CookbookDetailScreen({
   const [isDeleting, setIsDeleting] = useState(false);
   const [isShowingCachedRecord, setIsShowingCachedRecord] = useState(record !== null);
   const [detailSyncError, setDetailSyncError] = useState("");
+
+  const recipe = record?.recipe ?? null;
+  const shareMessage = useMemo(
+    () => (recipe ? formatRecipeShareText(recipe) : ""),
+    [recipe],
+  );
+  const shoppingListShareMessage = useMemo(
+    () => (recipe ? formatShoppingListShareText(recipe) : ""),
+    [recipe],
+  );
+  const featuredIngredients = useMemo(
+    () => (recipe ? recipe.ingredients.slice(0, 4) : []),
+    [recipe],
+  );
+  const featuredSteps = useMemo(() => (recipe ? recipe.steps.slice(0, 3) : []), [recipe]);
 
   useEffect(() => {
     // Fast path: render cached record immediately, then refresh in background.
@@ -101,8 +128,6 @@ export function CookbookDetailScreen({
     };
   }, [getRecord, loadRecord, refreshRecord, route.params.recipeId]);
 
-  const recipe = record?.recipe ?? null;
-
   useEffect(() => {
     // Shopping checklist state is local to each recipe detail session.
     setShoppingChecks({});
@@ -111,6 +136,126 @@ export function CookbookDetailScreen({
   useEffect(() => {
     setIsImageViewerOpen(false);
   }, [recipe?.imageUrl]);
+
+  async function handleShareRecipe() {
+    if (!recipe) {
+      return;
+    }
+
+    try {
+      setIsActionsMenuOpen(false);
+      await Share.share({
+        message: shareMessage,
+        title: recipe.title,
+      });
+    } catch {
+      Alert.alert("Share unavailable", "Could not open the share sheet right now.");
+    }
+  }
+
+  async function handleShareShoppingList() {
+    if (!recipe) {
+      return;
+    }
+
+    try {
+      setIsActionsMenuOpen(false);
+      await Share.share({
+        message: shoppingListShareMessage,
+        title: `${recipe.title} shopping list`,
+      });
+    } catch {
+      Alert.alert("Share unavailable", "Could not open the share sheet right now.");
+    }
+  }
+
+  async function captureRecipeCardImage() {
+    if (!recipeCardRef.current) {
+      throw new Error("Recipe card is not ready for capture.");
+    }
+
+    const baseOptions = {
+      format: "png" as const,
+      quality: 1,
+      result: "tmpfile" as const,
+    };
+
+    const hasMeasuredSize = captureCardSize.width > 0 && captureCardSize.height > 0;
+    if (!hasMeasuredSize) {
+      return captureRef(recipeCardRef, baseOptions);
+    }
+
+    const scale = 3;
+    try {
+      return await captureRef(recipeCardRef, {
+        ...baseOptions,
+        width: Math.round(captureCardSize.width * scale),
+        height: Math.round(captureCardSize.height * scale),
+      });
+    } catch {
+      return captureRef(recipeCardRef, baseOptions);
+    }
+  }
+
+  async function handleShareRecipeCardImage() {
+    if (!recipe || !recipeCardRef.current || isSharingImage) {
+      return;
+    }
+
+    setIsSharingImage(true);
+    try {
+      setIsActionsMenuOpen(false);
+      const sharingAvailable = await Sharing.isAvailableAsync();
+      if (!sharingAvailable) {
+        Alert.alert("Share unavailable", "Image sharing is not available on this device.");
+        return;
+      }
+
+      const uri = await captureRecipeCardImage();
+      await Sharing.shareAsync(uri, {
+        dialogTitle: `${recipe.title} recipe card`,
+      });
+    } catch {
+      Alert.alert("Share unavailable", "Could not share the recipe card image right now.");
+    } finally {
+      setIsSharingImage(false);
+    }
+  }
+
+  function handleCaptureCardLayout(event: LayoutChangeEvent) {
+    const { width, height } = event.nativeEvent.layout;
+    if (width > 0 && height > 0) {
+      setCaptureCardSize({ width, height });
+    }
+  }
+
+  function handleOpenActionsMenu() {
+    if (!recipe) {
+      return;
+    }
+
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: [
+            "Cancel",
+            "Share Recipe Text",
+            "Share Shopping List",
+            isSharingImage ? "Sharing Image..." : "Share Recipe Card Image",
+          ],
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) void handleShareRecipe();
+          if (buttonIndex === 2) void handleShareShoppingList();
+          if (buttonIndex === 3 && !isSharingImage) void handleShareRecipeCardImage();
+        },
+      );
+      return;
+    }
+
+    setIsActionsMenuOpen((open) => !open);
+  }
 
   function handleToggleShoppingItem(key: string) {
     setShoppingChecks((current) => ({
@@ -159,7 +304,10 @@ export function CookbookDetailScreen({
             contentContainerStyle={[styles.content, isVeryCompactScreen && styles.contentCompact]}
           >
             <View style={styles.homeHeroCard}>
-              <Text style={styles.brand}>Flavor Fusion Chef</Text>
+              <View style={styles.fieldLabelRow}>
+                <Text style={styles.brand}>Flavor Fusion Chef</Text>
+                <View style={styles.menuButtonSpacer} />
+              </View>
               <Text style={styles.kicker}>Cookbook</Text>
               <Text
                 style={[
@@ -211,9 +359,40 @@ export function CookbookDetailScreen({
       <View style={styles.screen}>
         <ScrollView
           contentContainerStyle={[styles.content, isVeryCompactScreen && styles.contentCompact]}
+          onScrollBeginDrag={() => setIsActionsMenuOpen(false)}
         >
           <View style={styles.homeHeroCard}>
-            <Text style={styles.brand}>Flavor Fusion Chef</Text>
+            <View style={styles.fieldLabelRow}>
+              <Text style={styles.brand}>Flavor Fusion Chef</Text>
+              <View style={styles.menuAnchor}>
+                <Pressable
+                  accessibilityLabel="Open actions menu"
+                  accessibilityRole="button"
+                  onPress={handleOpenActionsMenu}
+                  style={({ pressed }) => [styles.menuButton, pressed && styles.menuButtonPressed]}
+                >
+                  <Text style={styles.menuDots}>{"\u22EE"}</Text>
+                </Pressable>
+
+                {Platform.OS !== "ios" && isActionsMenuOpen ? (
+                  <BlurView intensity={42} tint="light" style={styles.menuSheet}>
+                    <View style={styles.menuGlassTint}>
+                      <Pressable onPress={handleShareRecipe} style={styles.menuItem}>
+                        <Text style={styles.menuItemText}>Share Recipe Text</Text>
+                      </Pressable>
+                      <Pressable onPress={handleShareShoppingList} style={styles.menuItem}>
+                        <Text style={styles.menuItemText}>Share Shopping List</Text>
+                      </Pressable>
+                      <Pressable onPress={handleShareRecipeCardImage} style={styles.menuItem}>
+                        <Text style={styles.menuItemText}>
+                          {isSharingImage ? "Sharing Image..." : "Share Recipe Card Image"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </BlurView>
+                ) : null}
+              </View>
+            </View>
             <Text style={styles.kicker}>Cookbook</Text>
             <Text
               style={[
@@ -407,6 +586,105 @@ export function CookbookDetailScreen({
             </SafeAreaView>
           </Pressable>
         </Modal>
+      </View>
+
+      <View pointerEvents="none" style={styles.hiddenCaptureHost}>
+        <View
+          collapsable={false}
+          onLayout={handleCaptureCardLayout}
+          ref={recipeCardRef}
+          style={styles.captureCard}
+        >
+          <View style={styles.captureHeader}>
+            <View style={styles.captureBrandRow}>
+              <Text style={styles.captureBrand}>Flavor Fusion Chef</Text>
+              <Text style={styles.captureStamp}>Recipe Card</Text>
+            </View>
+            <Text style={styles.captureEyebrow}>
+              {recipe.baseCuisine} + {recipe.fusionCuisine}
+            </Text>
+            <Text style={styles.captureTitle}>{recipe.title}</Text>
+            <Text style={styles.captureSubtitle}>
+              A practical fusion recipe with shopping list, swaps, and easy sharing from your
+              phone.
+            </Text>
+            <View style={styles.badgeRow}>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{recipe.servings} servings</Text>
+              </View>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{recipe.timeMinutes} min</Text>
+              </View>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>Spice {recipe.spiceLevel}/5</Text>
+              </View>
+            </View>
+          </View>
+
+          {recipe.imageUrl ? (
+            <Image source={{ uri: recipe.imageUrl }} style={styles.captureHeroImage} />
+          ) : (
+            <View style={styles.captureHeroImageFallback}>
+              <Text style={styles.captureHeroImageFallbackText}>Recipe image unavailable</Text>
+            </View>
+          )}
+
+          <View style={styles.card}>
+            <View style={styles.capturePanel}>
+              <Text style={styles.capturePanelTitle}>What you&apos;ll need</Text>
+              <View style={styles.captureTagGrid}>
+                {featuredIngredients.map((ingredient) => (
+                  <View
+                    key={`${ingredient.item}-${ingredient.quantity}-tag`}
+                    style={styles.captureTag}
+                  >
+                    <Text style={styles.captureTagLabel}>
+                      {ingredient.quantity} {toTitleCase(ingredient.item)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.capturePanel}>
+              <Text style={styles.capturePanelTitle}>Ingredient highlights</Text>
+              {recipe.ingredients.map((ingredient) => (
+                <View key={`${ingredient.item}-${ingredient.quantity}`} style={styles.listRow}>
+                  <Text style={styles.listPrimary}>
+                    {ingredient.quantity} {toTitleCase(ingredient.item)}
+                  </Text>
+                  <Text style={styles.listSecondary}>{ingredient.notes}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.capturePanel}>
+              <Text style={styles.capturePanelTitle}>How it comes together</Text>
+              {featuredSteps.map((step, index) => (
+                <View key={`${index + 1}-${step}`} style={styles.stepRow}>
+                  <Text style={styles.stepIndex}>{index + 1}</Text>
+                  <Text style={styles.stepText}>{step}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={styles.captureNote}>
+              <Text style={styles.captureNoteLabel}>Nutrition note</Text>
+              <Text style={styles.captureNoteText}>{recipe.nutritionNotes}</Text>
+            </View>
+
+            <View style={styles.captureFooter}>
+              <Text style={styles.captureFooterTitle}>Shared from Flavor Fusion Chef</Text>
+              <Text style={styles.captureFooterText}>
+                Discover fusion recipes, shopping lists, and easy rerolls right from your phone.
+              </Text>
+            </View>
+          </View>
+        </View>
       </View>
     </SafeAreaView>
   );
