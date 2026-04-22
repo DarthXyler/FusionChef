@@ -68,6 +68,15 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const mergeFirstPageIntoSummaries = useCallback((incoming: CookbookRecipeSummary[]) => {
+    setCookbookSummaries((current) => {
+      const next =
+        current.length === 0 ? incoming : mergeCookbookSummaries(current, incoming);
+      void cacheCookbookSummaries(next);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -104,7 +113,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
     setIsCookbookLoading(true);
     try {
       const page = await fetchCookbookSummaries();
-      setCookbookSummaries(page.recipes);
+      mergeFirstPageIntoSummaries(page.recipes);
       setHasLoadedCookbook(true);
       setHasMoreCookbook(page.hasMore);
       setNextCookbookCursor(page.nextCursor);
@@ -120,13 +129,13 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsCookbookLoading(false);
     }
-  }, []);
+  }, [mergeFirstPageIntoSummaries]);
 
   const refreshSummaries = useCallback(async () => {
     setIsCookbookRefreshing(true);
     try {
       const page = await fetchCookbookSummaries();
-      setCookbookSummaries(page.recipes);
+      mergeFirstPageIntoSummaries(page.recipes);
       setHasLoadedCookbook(true);
       setHasMoreCookbook(page.hasMore);
       setNextCookbookCursor(page.nextCursor);
@@ -142,7 +151,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsCookbookRefreshing(false);
     }
-  }, []);
+  }, [mergeFirstPageIntoSummaries]);
 
   const loadMoreSummaries = useCallback(async () => {
     if (!hasLoadedCookbook || !hasMoreCookbook || !nextCookbookCursor || isCookbookLoadingMore) {
