@@ -14,11 +14,12 @@ This checklist tracks monetization hardening work for the mobile app rollout.
 
 ## S1 - Credits Ledger Safety
 
-- [ ] Add immutable credit ledger table (no balance-only writes)
-- [ ] Use reserve -> commit/release flow for every credit-spend action
+- [x] Add immutable credit ledger table (no balance-only writes)
+- [x] Use reserve -> commit/release flow for every credit-spend action
 - [ ] Add reconciliation job for stuck reservations
-- [ ] Add idempotency keys for all spend/grant endpoints
+- [x] Add idempotency keys for all spend/grant admin endpoints
 - [ ] Add durable server-side daily reset logic (timezone-safe)
+- [x] Add observe-only Fuse/Reroll usage tracking in `/api/fuse` with no enforcement
 
 ## S2 - Purchase Verification
 

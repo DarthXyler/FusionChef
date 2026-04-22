@@ -233,7 +233,7 @@ export function RecipeWorkspaceScreen({
 
     async function generateFromHome() {
       try {
-        const nextRecord = await fetchLiveRecipeRecord(pendingRequest!.input);
+        const nextRecord = await fetchLiveRecipeRecord(pendingRequest!.input, "fuse");
         if (cancelled) {
           return;
         }
@@ -459,7 +459,7 @@ export function RecipeWorkspaceScreen({
 
     setIsLoadingLiveRecipe(true);
     try {
-      const nextRecord = await fetchLiveRecipeRecord(activeRecord.sourceInput);
+      const nextRecord = await fetchLiveRecipeRecord(activeRecord.sourceInput, "reroll");
       setLiveRecipeRecord(nextRecord);
     } catch (error) {
       const message =

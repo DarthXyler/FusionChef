@@ -6,6 +6,9 @@ import type {
   RecipeFusion,
   SpiceLevel,
 } from "../types/recipe";
+import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
+
+type FuseActionKind = "fuse" | "reroll";
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
@@ -57,14 +60,24 @@ async function readErrorMessage(response: Response) {
 
 export async function fetchLiveRecipeRecord(
   input: FuseRequest,
+  action: FuseActionKind = "fuse",
 ): Promise<GeneratedRecipeRecord> {
+  const mobileAnonId = await getMobileAnonymousId();
+  const mobileDeviceKey = await getMobileDeviceKey();
   const response = await fetch(`${getApiBaseUrl()}/api/fuse`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "x-flavor-fusion-anon-id": mobileAnonId,
+      "x-flavor-fusion-device-key": mobileDeviceKey,
+      "x-flavor-fusion-action": action,
     },
     body: JSON.stringify(input),
   });
+  const canonicalAnonId = response.headers.get("x-flavor-fusion-anon-id")?.trim();
+  if (canonicalAnonId) {
+    await setMobileAnonymousId(canonicalAnonId);
+  }
 
   if (!response.ok) {
     throw new Error(await readErrorMessage(response));

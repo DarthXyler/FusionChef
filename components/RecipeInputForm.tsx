@@ -170,7 +170,10 @@ export function RecipeInputForm() {
       const response = await fetch("/api/fuse", {
         method: "POST",
         signal: controller.signal,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-flavor-fusion-action": "fuse",
+        },
         body: JSON.stringify(payload),
       });
 

@@ -6,8 +6,13 @@ import { executeTurso } from "@/lib/turso";
 
 const GLOBAL_CONFIG_KEY = "global";
 const DEFAULT_MAX_FREE_DAILY_ACTIONS = 20;
+const CONFIG_CACHE_TTL_MS = 10_000;
 
 let schemaReady: Promise<void> | null = null;
+let configCache: {
+  value: MonetizationRuntimeConfig;
+  expiresAtMs: number;
+} | null = null;
 
 export type MonetizationEnforcementMode = "off" | "observe" | "enforce";
 
@@ -111,6 +116,11 @@ async function ensureSchema() {
 }
 
 export async function getMonetizationRuntimeConfig() {
+  const now = Date.now();
+  if (configCache && now < configCache.expiresAtMs) {
+    return configCache.value;
+  }
+
   await ensureSchema();
   const result = await executeTurso({
     sql: `SELECT config_json, updated_at, updated_by
@@ -122,11 +132,16 @@ export async function getMonetizationRuntimeConfig() {
 
   const row = result.rows[0];
   if (!row) {
-    return normalizeConfig(
+    const fallback = normalizeConfig(
       null,
       new Date(0).toISOString(),
       "system_default",
     );
+    configCache = {
+      value: fallback,
+      expiresAtMs: Date.now() + CONFIG_CACHE_TTL_MS,
+    };
+    return fallback;
   }
 
   const rowData: MonetizationConfigRow = {
@@ -142,7 +157,12 @@ export async function getMonetizationRuntimeConfig() {
     parsed = null;
   }
 
-  return normalizeConfig(parsed, rowData.updated_at, rowData.updated_by);
+  const normalized = normalizeConfig(parsed, rowData.updated_at, rowData.updated_by);
+  configCache = {
+    value: normalized,
+    expiresAtMs: Date.now() + CONFIG_CACHE_TTL_MS,
+  };
+  return normalized;
 }
 
 function applyPatch(
@@ -214,9 +234,16 @@ export async function updateMonetizationRuntimeConfig(
     args: [GLOBAL_CONFIG_KEY, JSON.stringify(persisted), updatedAt, updatedBy],
   });
 
-  return {
+  const updatedConfig = {
     ...persisted,
     updatedAt,
     updatedBy,
   } satisfies MonetizationRuntimeConfig;
+
+  configCache = {
+    value: updatedConfig,
+    expiresAtMs: Date.now() + CONFIG_CACHE_TTL_MS,
+  };
+
+  return updatedConfig;
 }

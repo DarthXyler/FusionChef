@@ -199,7 +199,10 @@ export function ResultPageClient({ initialRecipeId = null }: ResultPageClientPro
       const response = await fetch("/api/fuse", {
         method: "POST",
         signal: controller.signal,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-flavor-fusion-action": "reroll",
+        },
         body: JSON.stringify(sourceInput),
       });
       const data = (await response.json()) as unknown;

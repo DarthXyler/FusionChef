@@ -3,8 +3,16 @@
  * Generates a structured fusion recipe JSON by calling OpenAI and validating output strictly.
  */
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import type { FuseRequest, RecipeFusion } from "@/lib/types";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
+import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
+import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
+import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
+import {
+  recordObservedMonetizationAction,
+  type MonetizationActionKind,
+} from "@/lib/monetization-ledger";
 import {
   isLikelyRecipeOrFoodName,
   RECIPE_INPUT_GUIDANCE_MESSAGE,
@@ -281,6 +289,49 @@ function logFuseTiming(event: Record<string, unknown>) {
   console.info("[api/fuse]", JSON.stringify(event));
 }
 
+function withCookbookIdentityHeader(response: NextResponse, anonUserId: string) {
+  response.headers.set("x-flavor-fusion-anon-id", anonUserId);
+}
+
+function getMonetizationActionKind(request: Request): MonetizationActionKind {
+  const action = request.headers.get("x-flavor-fusion-action")?.trim().toLowerCase();
+  return action === "reroll" ? "reroll" : "fuse";
+}
+
+async function observeFuseUsage(params: {
+  anonUserId: string;
+  actionKind: MonetizationActionKind;
+  requestId: string;
+  totalDurationMs: number;
+  success: boolean;
+  usedRepair: boolean;
+}) {
+  try {
+    const runtimeConfig = await getMonetizationRuntimeConfig();
+    if (!runtimeConfig.enabled || runtimeConfig.enforcementMode === "off") {
+      return;
+    }
+
+    await recordObservedMonetizationAction({
+      anonUserId: params.anonUserId,
+      actionKind: params.actionKind,
+      metadata: {
+        requestId: params.requestId,
+        success: params.success,
+        totalDurationMs: params.totalDurationMs,
+        usedRepair: params.usedRepair,
+        mode: runtimeConfig.enforcementMode,
+      },
+    });
+  } catch (error) {
+    logFuseTiming({
+      requestId: params.requestId,
+      event: "monetization_observe_failed",
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+  }
+}
+
 async function callOpenAI(
   messages: OpenAIMessage[],
   stage: string,
@@ -366,10 +417,21 @@ async function finalizeRecipe(
   return repairedRecipe;
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const requestId = crypto.randomUUID();
   const requestStartedAt = Date.now();
   const stageTimings: FuseStageTiming[] = [];
+  const monetizationActionKind = getMonetizationActionKind(request);
+  let identity: Awaited<ReturnType<typeof resolveCookbookIdentity>> | null = null;
+
+  const respond = (body: unknown, status = 200) => {
+    const response = NextResponse.json(body, { status });
+    if (identity) {
+      withCookbookIdentityHeader(response, identity.anonUserId);
+      applyAnonymousIdentityCookie(response, identity);
+    }
+    return response;
+  };
   try {
     // Basic abuse protection.
     const limited = await enforceRateLimit(request, {
@@ -382,47 +444,50 @@ export async function POST(request: Request) {
     }
 
     if (isRequestBodyTooLarge(request, MAX_FUSE_BODY_BYTES)) {
-      return NextResponse.json(
+      return respond(
         { error: "Request is too large." },
-        { status: 413 },
+        413,
       );
     }
 
     const body = (await request.json()) as unknown;
     if (!isFuseRequest(body)) {
-      return NextResponse.json(
+      return respond(
         { error: "Invalid request body for /api/fuse." },
-        { status: 400 },
+        400,
       );
     }
 
     const trimmedRecipe = body.baseRecipe.trim();
     if (trimmedRecipe.length > MAX_BASE_RECIPE_CHARS) {
-      return NextResponse.json(
+      return respond(
         { error: "Recipe text is too long. Please shorten it and try again." },
-        { status: 400 },
+        400,
       );
     }
 
     if (body.fusionCuisine.trim().length > MAX_FUSION_CUISINE_CHARS) {
-      return NextResponse.json(
+      return respond(
         { error: "Fusion cuisine is too long." },
-        { status: 400 },
+        400,
       );
     }
 
     if (!isLikelyRecipeOrFoodName(body.baseRecipe)) {
-      return NextResponse.json(
+      return respond(
         { error: RECIPE_INPUT_GUIDANCE_MESSAGE },
-        { status: 400 },
+        400,
       );
     }
 
     const input = normalizeFuseRequest(body);
+    identity = await resolveCookbookIdentity(request);
     const systemPrompt = buildSystemPrompt(request);
     logFuseTiming({
       requestId,
       event: "request_started",
+      actionKind: monetizationActionKind,
+      anonUserId: identity.anonUserId,
       mealType: input.mealType,
       dietaryStyle: input.dietaryStyle,
       fusionCuisine: input.fusionCuisine,
@@ -439,14 +504,24 @@ export async function POST(request: Request) {
     const firstParsed = parseRecipeFusionFromText(firstAttempt.content);
     if (firstParsed) {
       const finalizedRecipe = await finalizeRecipe(input, firstParsed, systemPrompt, stageTimings);
+      const totalDurationMs = Date.now() - requestStartedAt;
+      await observeFuseUsage({
+        anonUserId: identity.anonUserId,
+        actionKind: monetizationActionKind,
+        requestId,
+        totalDurationMs,
+        success: true,
+        usedRepair: false,
+      });
       logFuseTiming({
         requestId,
         event: "request_succeeded",
-        totalDurationMs: Date.now() - requestStartedAt,
+        actionKind: monetizationActionKind,
+        totalDurationMs,
         stageTimings,
         usedRepair: false,
       });
-      return NextResponse.json(finalizedRecipe);
+      return respond(finalizedRecipe);
     }
 
     // Repair attempt if first output is invalid.
@@ -462,37 +537,49 @@ export async function POST(request: Request) {
       logFuseTiming({
         requestId,
         event: "request_failed",
+        actionKind: monetizationActionKind,
         totalDurationMs: Date.now() - requestStartedAt,
         stageTimings,
         reason: "schema_parse_failed_after_repair",
       });
-      return NextResponse.json(
+      return respond(
         { error: "Model output could not be parsed as valid recipe JSON." },
-        { status: 502 },
+        502,
       );
     }
 
     const finalizedRecipe = await finalizeRecipe(input, repairedParsed, systemPrompt, stageTimings);
+    const totalDurationMs = Date.now() - requestStartedAt;
+    await observeFuseUsage({
+      anonUserId: identity.anonUserId,
+      actionKind: monetizationActionKind,
+      requestId,
+      totalDurationMs,
+      success: true,
+      usedRepair: true,
+    });
     logFuseTiming({
       requestId,
       event: "request_succeeded",
-      totalDurationMs: Date.now() - requestStartedAt,
+      actionKind: monetizationActionKind,
+      totalDurationMs,
       stageTimings,
       usedRepair: true,
     });
-    return NextResponse.json(finalizedRecipe);
+    return respond(finalizedRecipe);
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       logFuseTiming({
         requestId,
         event: "request_failed",
+        actionKind: monetizationActionKind,
         totalDurationMs: Date.now() - requestStartedAt,
         stageTimings,
         reason: "timeout",
       });
-      return NextResponse.json(
+      return respond(
         { error: "Recipe generation timed out. Please try again." },
-        { status: 504 },
+        504,
       );
     }
 
@@ -500,13 +587,14 @@ export async function POST(request: Request) {
       logFuseTiming({
         requestId,
         event: "request_failed",
+        actionKind: monetizationActionKind,
         totalDurationMs: Date.now() - requestStartedAt,
         stageTimings,
         reason: "upstream_openai_error",
       });
-      return NextResponse.json(
+      return respond(
         { error: "Recipe generation failed. Please try again." },
-        { status: 502 },
+        502,
       );
     }
 
@@ -514,29 +602,31 @@ export async function POST(request: Request) {
       logFuseTiming({
         requestId,
         event: "request_failed",
+        actionKind: monetizationActionKind,
         totalDurationMs: Date.now() - requestStartedAt,
         stageTimings,
         reason: "implausible_recipe",
       });
-      return NextResponse.json(
+      return respond(
         {
           error:
             "Could not generate a realistic recipe for that combination. Try adjusting the meal type or base recipe.",
         },
-        { status: 422 },
+        422,
       );
     }
 
     logFuseTiming({
       requestId,
       event: "request_failed",
+      actionKind: monetizationActionKind,
       totalDurationMs: Date.now() - requestStartedAt,
       stageTimings,
       reason: "unexpected_server_error",
     });
-    return NextResponse.json(
+    return respond(
       { error: "Unexpected server error." },
-      { status: 500 },
+      500,
     );
   }
 }
