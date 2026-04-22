@@ -13,6 +13,7 @@ import {
   recordObservedMonetizationAction,
   type MonetizationActionKind,
 } from "@/lib/monetization-ledger";
+import { recordDailyMonetizationUsage } from "@/lib/monetization-operations";
 import {
   isLikelyRecipeOrFoodName,
   RECIPE_INPUT_GUIDANCE_MESSAGE,
@@ -322,6 +323,10 @@ async function observeFuseUsage(params: {
         usedRepair: params.usedRepair,
         mode: runtimeConfig.enforcementMode,
       },
+    });
+    await recordDailyMonetizationUsage({
+      anonUserId: params.anonUserId,
+      actionKind: params.actionKind,
     });
   } catch (error) {
     logFuseTiming({

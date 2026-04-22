@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/r2-orphan-cleanup?maxAgeMinutes=180&maxDeletes=200",
       "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/cron/monetization-reconciliation?maxCandidates=300",
+      "schedule": "12 * * * *"
     }
   ]
 }

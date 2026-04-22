@@ -13,6 +13,10 @@ import {
   type MonetizationActionKind,
 } from "@/lib/monetization-ledger";
 import {
+  getTodayDailyMonetizationUsage,
+  listDailyMonetizationUsage,
+} from "@/lib/monetization-operations";
+import {
   logMonetizationAudit,
   requireMonetizationAdmin,
   withNoStore,
@@ -221,11 +225,19 @@ export async function GET(request: NextRequest) {
       anonUserId,
     });
 
-    const snapshot = await getCreditAccountSnapshot(anonUserId, {
-      reservationsLimit: Number.isFinite(reservationsLimit) ? reservationsLimit : 50,
-      ledgerLimit: Number.isFinite(ledgerLimit) ? ledgerLimit : 50,
+    const [snapshot, dailyUsage, todayUsage] = await Promise.all([
+      getCreditAccountSnapshot(anonUserId, {
+        reservationsLimit: Number.isFinite(reservationsLimit) ? reservationsLimit : 50,
+        ledgerLimit: Number.isFinite(ledgerLimit) ? ledgerLimit : 50,
+      }),
+      listDailyMonetizationUsage(anonUserId, 30),
+      getTodayDailyMonetizationUsage(anonUserId),
+    ]);
+    const response = NextResponse.json({
+      ...snapshot,
+      todayUsage,
+      dailyUsage,
     });
-    const response = NextResponse.json(snapshot);
     withNoStore(response);
 
     logMonetizationAudit({

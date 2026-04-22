@@ -16,10 +16,11 @@ This checklist tracks monetization hardening work for the mobile app rollout.
 
 - [x] Add immutable credit ledger table (no balance-only writes)
 - [x] Use reserve -> commit/release flow for every credit-spend action
-- [ ] Add reconciliation job for stuck reservations
+- [x] Add reconciliation job for stuck/expired reservations (`/api/cron/monetization-reconciliation`)
 - [x] Add idempotency keys for all spend/grant admin endpoints
-- [ ] Add durable server-side daily reset logic (timezone-safe)
+- [x] Add durable server-side daily reset logic (timezone-safe day key accounting)
 - [x] Add observe-only Fuse/Reroll usage tracking in `/api/fuse` with no enforcement
+- [x] Add admin reconciliation preview/run endpoint (`/api/admin/monetization/reconciliation`)
 
 ## S2 - Purchase Verification
 

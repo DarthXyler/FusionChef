@@ -249,6 +249,10 @@ async function ensureSchema() {
   return schemaReady;
 }
 
+export async function ensureMonetizationLedgerSchema() {
+  await ensureSchema();
+}
+
 async function ensureBalanceRow(anonUserId: string) {
   await executeTurso({
     sql: `INSERT INTO credit_balances (
