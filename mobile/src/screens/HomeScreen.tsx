@@ -32,6 +32,12 @@ import type { ImportedRecipePhoto } from "../types/importedRecipePhoto";
 import type { DietaryStyle, FuseRequest, MealType, SpiceLevel } from "../types/recipe";
 import { styles } from "../styles/appStyles";
 
+/**
+ * Home screen:
+ * - collects fusion inputs
+ * - supports recipe-photo import + OCR review/edit
+ * - navigates to RecipeWorkspace with a pending fuse request
+ */
 const DEFAULT_MOBILE_FUSION_CUISINE = CUISINE_OPTIONS[0] ?? "Japanese";
 const MAX_OCR_IMAGE_DATA_URL_CHARS = 3_700_000;
 const OCR_IMAGE_VARIANTS_BALANCED = [
@@ -90,6 +96,7 @@ async function createOcrImageDataUrl(
   fallbackBase64: string | undefined,
   variants: ReadonlyArray<{ maxDimension: number; compress: number }>,
 ) {
+  // Create the smallest acceptable OCR payload while preserving enough text detail.
   const imageManipulator = await loadImageManipulatorModule();
 
   if (!imageManipulator) {
@@ -162,6 +169,7 @@ export function HomeScreen({
   const shouldShowSpiceLevel = mealType !== "dessert" && mealType !== "beverage";
 
   function resetHomeForm() {
+    // Full reset used when user taps Home tab again.
     setBaseRecipe(sampleGeneratedRecipeRecord.sourceInput.baseRecipe);
     setMealType(sampleGeneratedRecipeRecord.sourceInput.mealType);
     setFusionCuisine(DEFAULT_MOBILE_FUSION_CUISINE);
@@ -176,6 +184,7 @@ export function HomeScreen({
   }
 
   useEffect(() => {
+    // Home tab re-tap signals a reset via navigation param token.
     if (!route.params?.resetToken) {
       return;
     }
@@ -187,6 +196,7 @@ export function HomeScreen({
     asset: ImagePicker.ImagePickerAsset,
     sourceLabel: ImportedRecipePhoto["sourceLabel"],
   ): Promise<ImportedRecipePhoto> {
+    // Balanced compression first; aggressive compression is fallback if payload stays too large.
     const sourceWidth = asset.width ?? 0;
     const sourceHeight = asset.height ?? 0;
     const mimeType =
@@ -225,6 +235,7 @@ export function HomeScreen({
   }
 
   async function runOcrExtraction(photo: ImportedRecipePhoto) {
+    // OCR can fail on large payloads; retry once with more aggressive compression.
     setIsExtractingText(true);
     try {
       let workingPhoto = photo;
@@ -327,6 +338,7 @@ export function HomeScreen({
       });
 
       if (!result.canceled && result.assets[0]) {
+        // Import flow always goes through review modal so user can edit OCR text.
         const nextPhoto = await buildImportedRecipePhoto(result.assets[0], "Camera");
         setImportedRecipePhoto(nextPhoto);
         setMockExtractedText("");
@@ -448,6 +460,7 @@ export function HomeScreen({
 
     Keyboard.dismiss();
     setIsGenerating(true);
+    // Workspace immediately shows loading UI and performs /api/fuse asynchronously.
     navigation.navigate("RecipeWorkspace", {
       pendingRequest: {
         input: pendingInput,

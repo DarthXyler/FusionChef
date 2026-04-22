@@ -22,6 +22,12 @@ import type { CookbookStackParamList } from "../navigation/types";
 import type { CookbookRecipeSummary } from "../types/recipe";
 import { styles } from "../styles/appStyles";
 
+/**
+ * Cookbook list screen:
+ * - server-backed paginated list
+ * - local search + sort on loaded rows
+ * - pull-to-refresh + infinite load
+ */
 type CookbookSortOption = "newest" | "oldest" | "title";
 
 export function CookbookListScreen({
@@ -47,6 +53,7 @@ export function CookbookListScreen({
   const [sortBy, setSortBy] = useState<CookbookSortOption>("newest");
 
   useEffect(() => {
+    // First mount load; subsequent tab returns use context cache/state.
     if (hasLoaded) {
       return;
     }
@@ -64,6 +71,7 @@ export function CookbookListScreen({
   }, [hasLoaded, loadSummaries]);
 
   const filteredSummaries = useMemo(() => {
+    // Keep filtering/sorting client-side for already fetched pages.
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const baseList =
       normalizedQuery.length === 0
@@ -128,6 +136,7 @@ export function CookbookListScreen({
   }
 
   function handleDeleteFromList(summary: CookbookRecipeSummary) {
+    // Optimistic local removal is handled inside the mobileCookbook context.
     if (deletingRecipeId) {
       return;
     }
@@ -166,6 +175,7 @@ export function CookbookListScreen({
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           onEndReached={() => {
+            // Infinite pagination: fetch the next cursor page when list nears the end.
             void loadMoreSummaries().catch((error) => {
               const message =
                 error instanceof Error && error.message.trim().length > 0
@@ -177,6 +187,7 @@ export function CookbookListScreen({
           onEndReachedThreshold={0.5}
           refreshing={isRefreshing}
           onRefresh={() => {
+            // Pull-to-refresh resets to freshest head page from API.
             void refreshSummaries().catch((error) => {
               const message =
                 error instanceof Error && error.message.trim().length > 0

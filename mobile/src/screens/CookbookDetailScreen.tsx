@@ -20,6 +20,12 @@ import { styles } from "../styles/appStyles";
 import type { CookbookRecipeRecord } from "../types/recipe";
 import { buildShoppingItemKey, toTitleCase } from "../utils/recipeUi";
 
+/**
+ * Cookbook detail screen:
+ * - opens one saved recipe
+ * - refreshes from API while showing cached data when available
+ * - supports checklist interactions and delete
+ */
 export function CookbookDetailScreen({
   navigation,
   route,
@@ -38,6 +44,7 @@ export function CookbookDetailScreen({
   const [detailSyncError, setDetailSyncError] = useState("");
 
   useEffect(() => {
+    // Fast path: render cached record immediately, then refresh in background.
     const cachedRecord = getRecord(route.params.recipeId);
     if (cachedRecord) {
       setRecord(cachedRecord);
@@ -62,6 +69,7 @@ export function CookbookDetailScreen({
 
     let cancelled = false;
     setIsLoading(true);
+    // Cold path: no cache available, load full detail from API.
     void loadRecord(route.params.recipeId)
       .then((nextRecord) => {
         if (cancelled) {
@@ -96,6 +104,7 @@ export function CookbookDetailScreen({
   const recipe = record?.recipe ?? null;
 
   useEffect(() => {
+    // Shopping checklist state is local to each recipe detail session.
     setShoppingChecks({});
   }, [recipe?.id]);
 
@@ -121,6 +130,7 @@ export function CookbookDetailScreen({
         text: "Delete",
         style: "destructive",
         onPress: () => {
+          // Delete from API + local cache, then return to list.
           void (async () => {
             setIsDeleting(true);
             try {

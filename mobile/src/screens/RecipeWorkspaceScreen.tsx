@@ -34,6 +34,12 @@ import type { FuseRequest, GeneratedRecipeRecord } from "../types/recipe";
 import { buildShoppingItemKey, toTitleCase } from "../utils/recipeUi";
 import { formatRecipeShareText, formatShoppingListShareText } from "../utils/recipeShare";
 
+/**
+ * Recipe workspace screen:
+ * - displays pending/live fused recipe state
+ * - loads recipe image asynchronously with retries
+ * - supports save/reroll/share actions
+ */
 const LOADING_MESSAGES = [
   "Collecting ingredients",
   "Calculating serving time",
@@ -103,10 +109,12 @@ export function RecipeWorkspaceScreen({
   });
 
   useEffect(() => {
+    // Reset shopping checklist when recipe changes.
     setShoppingChecks({});
   }, [activeRecipe.id]);
 
   useEffect(() => {
+    // Animate loader text while initial fuse request is pending.
     if (!isInitialFusePending) {
       setPendingEllipsisCount(1);
       setLoadingMessageIndex(0);
@@ -130,6 +138,7 @@ export function RecipeWorkspaceScreen({
   }, [isInitialFusePending]);
 
   useEffect(() => {
+    // Premium loader ring animation for pending/image-loading hero state.
     if (!isHeroCardBusy) {
       loaderSpin.stopAnimation();
       loaderPulse.stopAnimation();
@@ -193,6 +202,7 @@ export function RecipeWorkspaceScreen({
   }, [isHeroCardBusy, loaderGlowOpacity, loaderPulse, loaderSpin]);
 
   useEffect(() => {
+    // Route can pass a fully generated record (e.g., reroll complete).
     const nextRecord = route.params?.initialRecord;
     if (!nextRecord) {
       return;
@@ -207,6 +217,7 @@ export function RecipeWorkspaceScreen({
   }, [route.params?.initialRecord]);
 
   useEffect(() => {
+    // Initial generation path: fetch live recipe from Home form input.
     const pendingRequest = route.params?.pendingRequest;
     if (!pendingRequest) {
       return;
@@ -255,6 +266,9 @@ export function RecipeWorkspaceScreen({
   }, [route.params?.pendingRequest]);
 
   useEffect(() => {
+    // Image loading pipeline:
+    // 1) use built-in recipe image when available
+    // 2) else call /api/fuse-image with retry/backoff
     if (isInitialFusePending && !liveRecipeRecord) {
       setPreviewImageUrl(null);
       setImageError("");
@@ -438,6 +452,7 @@ export function RecipeWorkspaceScreen({
   }
 
   async function handleLoadLiveRecipe() {
+    // Reroll path reuses the same source input and replaces active live record.
     if (isLoadingLiveRecipe) {
       return;
     }
@@ -468,6 +483,7 @@ export function RecipeWorkspaceScreen({
   }
 
   async function handleSaveToCookbook() {
+    // Ensure current preview image is persisted when user saves from workspace.
     if (isSavingCookbook) {
       return;
     }
