@@ -10,6 +10,40 @@ import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "
 
 type FuseActionKind = "fuse" | "reroll";
 
+type FuseErrorPayload = {
+  error?: unknown;
+  reason?: unknown;
+  purchaseRequired?: unknown;
+  actionKind?: unknown;
+  freeActionLimit?: unknown;
+  usedToday?: unknown;
+  freeActionsRemaining?: unknown;
+  balance?: unknown;
+};
+
+export class FuseRequestError extends Error {
+  status: number;
+  reason: string | null;
+  purchaseRequired: boolean;
+  details: FuseErrorPayload;
+
+  constructor(status: number, details: FuseErrorPayload, fallbackMessage: string) {
+    const message =
+      typeof details.error === "string" && details.error.trim().length > 0
+        ? details.error
+        : fallbackMessage;
+    super(message);
+    this.name = "FuseRequestError";
+    this.status = status;
+    this.reason =
+      typeof details.reason === "string" && details.reason.trim().length > 0
+        ? details.reason
+        : null;
+    this.purchaseRequired = details.purchaseRequired === true;
+    this.details = details;
+  }
+}
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -49,12 +83,10 @@ function isRecipeFusion(value: unknown): value is RecipeFusion {
 
 async function readErrorMessage(response: Response) {
   try {
-    const payload = (await response.json()) as { error?: unknown };
-    return typeof payload.error === "string" && payload.error.trim().length > 0
-      ? payload.error
-      : "The live recipe request failed.";
+    const payload = (await response.json()) as FuseErrorPayload;
+    return new FuseRequestError(response.status, payload, "The live recipe request failed.");
   } catch {
-    return "The live recipe request failed.";
+    return new FuseRequestError(response.status, {}, "The live recipe request failed.");
   }
 }
 
@@ -80,7 +112,7 @@ export async function fetchLiveRecipeRecord(
   }
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
+    throw await readErrorMessage(response);
   }
 
   const payload = (await response.json()) as unknown;

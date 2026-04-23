@@ -10,10 +10,17 @@ import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
 import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
 import {
+  commitReservedCredits,
+  getCreditBalance,
   recordObservedMonetizationAction,
+  releaseReservedCredits,
+  reserveCredits,
   type MonetizationActionKind,
 } from "@/lib/monetization-ledger";
-import { recordDailyMonetizationUsage } from "@/lib/monetization-operations";
+import {
+  getTodayDailyMonetizationUsage,
+  recordDailyMonetizationUsage,
+} from "@/lib/monetization-operations";
 import {
   isLikelyRecipeOrFoodName,
   RECIPE_INPUT_GUIDANCE_MESSAGE,
@@ -40,6 +47,17 @@ type FuseStageTiming = {
   };
 };
 
+type MonetizationPreflightResult = {
+  blocked: boolean;
+  runtimeEnabled: boolean;
+  enforcementMode: "off" | "observe" | "enforce";
+  freeActionLimit: number;
+  usedToday: number;
+  freeActionsRemaining: number;
+  reservationId: string | null;
+  balance: Awaited<ReturnType<typeof getCreditBalance>> | null;
+};
+
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const MODEL = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
 const OPENAI_TIMEOUT_MS = 30_000;
@@ -48,6 +66,8 @@ const MAX_BASE_RECIPE_CHARS = 10_000;
 const MAX_FUSION_CUISINE_CHARS = 80;
 const DEFAULT_GENERATION_TEMPERATURE = 0.85;
 const REPAIR_TEMPERATURE = 0.35;
+const CREDIT_COST_PER_ACTION = 1;
+const CREDIT_RESERVATION_TTL_MS = 10 * 60 * 1_000;
 const EGG_PATTERN = /\begg(s)?\b/i;
 const COCONUT_DAIRY_PATTERN = /\bcoconut\s+(milk|cream|yogurt|curd)\b/i;
 const IMPROBABLE_DESSERT_OR_BEVERAGE_PATTERN =
@@ -299,6 +319,159 @@ function getMonetizationActionKind(request: Request): MonetizationActionKind {
   return action === "reroll" ? "reroll" : "fuse";
 }
 
+function getFreeActionLimitForKind(
+  actionKind: MonetizationActionKind,
+  config: Awaited<ReturnType<typeof getMonetizationRuntimeConfig>>,
+) {
+  return actionKind === "reroll" ? config.freeDailyRerollActions : config.freeDailyFuseActions;
+}
+
+function getUsedTodayForKind(
+  actionKind: MonetizationActionKind,
+  usage: Awaited<ReturnType<typeof getTodayDailyMonetizationUsage>>,
+) {
+  return actionKind === "reroll" ? usage.rerollCount : usage.fuseCount;
+}
+
+async function preflightFuseMonetization(params: {
+  anonUserId: string;
+  actionKind: MonetizationActionKind;
+  requestId: string;
+}) {
+  const runtimeConfig = await getMonetizationRuntimeConfig();
+  if (!runtimeConfig.enabled || runtimeConfig.enforcementMode !== "enforce") {
+    return {
+      blocked: false,
+      runtimeEnabled: runtimeConfig.enabled,
+      enforcementMode: runtimeConfig.enforcementMode,
+      freeActionLimit: 0,
+      usedToday: 0,
+      freeActionsRemaining: 0,
+      reservationId: null,
+      balance: null,
+    } satisfies MonetizationPreflightResult;
+  }
+
+  const todayUsage = await getTodayDailyMonetizationUsage(params.anonUserId);
+  const freeActionLimit = getFreeActionLimitForKind(params.actionKind, runtimeConfig);
+  const usedToday = getUsedTodayForKind(params.actionKind, todayUsage);
+  const freeActionsRemaining = Math.max(0, freeActionLimit - usedToday);
+
+  if (freeActionsRemaining > 0) {
+    return {
+      blocked: false,
+      runtimeEnabled: runtimeConfig.enabled,
+      enforcementMode: runtimeConfig.enforcementMode,
+      freeActionLimit,
+      usedToday,
+      freeActionsRemaining,
+      reservationId: null,
+      balance: null,
+    } satisfies MonetizationPreflightResult;
+  }
+
+  const reserveResult = await reserveCredits({
+    anonUserId: params.anonUserId,
+    amount: CREDIT_COST_PER_ACTION,
+    actionKind: params.actionKind,
+    actor: "api_fuse_enforcement",
+    reason: "Credit spend for Fuse API action.",
+    expiresAt: new Date(Date.now() + CREDIT_RESERVATION_TTL_MS).toISOString(),
+    idempotencyScope: "api-fuse-credit-reserve",
+    idempotencyKey: params.requestId,
+    metadata: {
+      requestId: params.requestId,
+      actionKind: params.actionKind,
+    },
+  });
+
+  if (!reserveResult.ok) {
+    const balance = await getCreditBalance(params.anonUserId);
+    return {
+      blocked: true,
+      runtimeEnabled: runtimeConfig.enabled,
+      enforcementMode: runtimeConfig.enforcementMode,
+      freeActionLimit,
+      usedToday,
+      freeActionsRemaining: 0,
+      reservationId: null,
+      balance,
+    } satisfies MonetizationPreflightResult;
+  }
+
+  return {
+    blocked: false,
+    runtimeEnabled: runtimeConfig.enabled,
+    enforcementMode: runtimeConfig.enforcementMode,
+    freeActionLimit,
+    usedToday,
+    freeActionsRemaining: 0,
+    reservationId: reserveResult.reservation.reservationId,
+    balance: reserveResult.balance,
+  } satisfies MonetizationPreflightResult;
+}
+
+async function finalizeReservedFuseCredit(params: {
+  anonUserId: string;
+  reservationId: string;
+  requestId: string;
+  actionKind: MonetizationActionKind;
+  target: "commit" | "release";
+}) {
+  if (params.target === "commit") {
+    const commitResult = await commitReservedCredits({
+      anonUserId: params.anonUserId,
+      reservationId: params.reservationId,
+      actor: "api_fuse_enforcement",
+      reason: "Fuse API request completed successfully.",
+      idempotencyScope: "api-fuse-credit-commit",
+      idempotencyKey: params.requestId,
+      metadata: {
+        requestId: params.requestId,
+        actionKind: params.actionKind,
+      },
+    });
+
+    if (!commitResult.ok) {
+      throw new Error("CREDIT_RESERVATION_COMMIT_FAILED");
+    }
+    return;
+  }
+
+  try {
+    const releaseResult = await releaseReservedCredits({
+      anonUserId: params.anonUserId,
+      reservationId: params.reservationId,
+      actor: "api_fuse_enforcement",
+      reason: "Fuse API request failed before completion.",
+      idempotencyScope: "api-fuse-credit-release",
+      idempotencyKey: params.requestId,
+      metadata: {
+        requestId: params.requestId,
+        actionKind: params.actionKind,
+      },
+    });
+
+    if (!releaseResult.ok && releaseResult.reason !== "already_finalized") {
+      logFuseTiming({
+        requestId: params.requestId,
+        event: "credit_release_failed",
+        actionKind: params.actionKind,
+        reason: releaseResult.reason,
+        reservationId: params.reservationId,
+      });
+    }
+  } catch (error) {
+    logFuseTiming({
+      requestId: params.requestId,
+      event: "credit_release_failed",
+      actionKind: params.actionKind,
+      reason: error instanceof Error ? error.message : "release_exception",
+      reservationId: params.reservationId,
+    });
+  }
+}
+
 async function observeFuseUsage(params: {
   anonUserId: string;
   actionKind: MonetizationActionKind;
@@ -428,6 +601,7 @@ export async function POST(request: NextRequest) {
   const stageTimings: FuseStageTiming[] = [];
   const monetizationActionKind = getMonetizationActionKind(request);
   let identity: Awaited<ReturnType<typeof resolveCookbookIdentity>> | null = null;
+  let reservedCreditReservationId: string | null = null;
 
   const respond = (body: unknown, status = 200) => {
     const response = NextResponse.json(body, { status });
@@ -487,12 +661,53 @@ export async function POST(request: NextRequest) {
 
     const input = normalizeFuseRequest(body);
     identity = await resolveCookbookIdentity(request);
+    const monetizationPreflight = await preflightFuseMonetization({
+      anonUserId: identity.anonUserId,
+      actionKind: monetizationActionKind,
+      requestId,
+    });
+
+    if (monetizationPreflight.blocked) {
+      logFuseTiming({
+        requestId,
+        event: "request_blocked_insufficient_credits",
+        actionKind: monetizationActionKind,
+        anonUserId: identity.anonUserId,
+        enforcementMode: monetizationPreflight.enforcementMode,
+        freeActionLimit: monetizationPreflight.freeActionLimit,
+        usedToday: monetizationPreflight.usedToday,
+        freeActionsRemaining: monetizationPreflight.freeActionsRemaining,
+        availableCredits: monetizationPreflight.balance?.availableCredits ?? 0,
+      });
+      return respond(
+        {
+          error: "You are out of credits for this action. Buy more credits to continue.",
+          reason: "insufficient_credits",
+          actionKind: monetizationActionKind,
+          purchaseRequired: true,
+          creditsRequired: CREDIT_COST_PER_ACTION,
+          freeActionLimit: monetizationPreflight.freeActionLimit,
+          usedToday: monetizationPreflight.usedToday,
+          freeActionsRemaining: monetizationPreflight.freeActionsRemaining,
+          balance: monetizationPreflight.balance,
+        },
+        402,
+      );
+    }
+
+    reservedCreditReservationId = monetizationPreflight.reservationId;
     const systemPrompt = buildSystemPrompt(request);
     logFuseTiming({
       requestId,
       event: "request_started",
       actionKind: monetizationActionKind,
       anonUserId: identity.anonUserId,
+      enforcementMode: monetizationPreflight.enforcementMode,
+      runtimeEnabled: monetizationPreflight.runtimeEnabled,
+      freeActionLimit: monetizationPreflight.freeActionLimit,
+      usedToday: monetizationPreflight.usedToday,
+      freeActionsRemaining: monetizationPreflight.freeActionsRemaining,
+      reservedCredit: reservedCreditReservationId !== null,
       mealType: input.mealType,
       dietaryStyle: input.dietaryStyle,
       fusionCuisine: input.fusionCuisine,
@@ -509,6 +724,16 @@ export async function POST(request: NextRequest) {
     const firstParsed = parseRecipeFusionFromText(firstAttempt.content);
     if (firstParsed) {
       const finalizedRecipe = await finalizeRecipe(input, firstParsed, systemPrompt, stageTimings);
+      if (reservedCreditReservationId) {
+        await finalizeReservedFuseCredit({
+          anonUserId: identity.anonUserId,
+          reservationId: reservedCreditReservationId,
+          requestId,
+          actionKind: monetizationActionKind,
+          target: "commit",
+        });
+        reservedCreditReservationId = null;
+      }
       const totalDurationMs = Date.now() - requestStartedAt;
       await observeFuseUsage({
         anonUserId: identity.anonUserId,
@@ -539,6 +764,16 @@ export async function POST(request: NextRequest) {
     stageTimings.push(repairedAttempt.timing);
     const repairedParsed = parseRecipeFusionFromText(repairedAttempt.content);
     if (!repairedParsed) {
+      if (reservedCreditReservationId) {
+        await finalizeReservedFuseCredit({
+          anonUserId: identity.anonUserId,
+          reservationId: reservedCreditReservationId,
+          requestId,
+          actionKind: monetizationActionKind,
+          target: "release",
+        });
+        reservedCreditReservationId = null;
+      }
       logFuseTiming({
         requestId,
         event: "request_failed",
@@ -554,6 +789,16 @@ export async function POST(request: NextRequest) {
     }
 
     const finalizedRecipe = await finalizeRecipe(input, repairedParsed, systemPrompt, stageTimings);
+    if (reservedCreditReservationId) {
+      await finalizeReservedFuseCredit({
+        anonUserId: identity.anonUserId,
+        reservationId: reservedCreditReservationId,
+        requestId,
+        actionKind: monetizationActionKind,
+        target: "commit",
+      });
+      reservedCreditReservationId = null;
+    }
     const totalDurationMs = Date.now() - requestStartedAt;
     await observeFuseUsage({
       anonUserId: identity.anonUserId,
@@ -573,6 +818,32 @@ export async function POST(request: NextRequest) {
     });
     return respond(finalizedRecipe);
   } catch (error) {
+    if (identity && reservedCreditReservationId) {
+      await finalizeReservedFuseCredit({
+        anonUserId: identity.anonUserId,
+        reservationId: reservedCreditReservationId,
+        requestId,
+        actionKind: monetizationActionKind,
+        target: "release",
+      });
+      reservedCreditReservationId = null;
+    }
+
+    if (error instanceof Error && error.message === "CREDIT_RESERVATION_COMMIT_FAILED") {
+      logFuseTiming({
+        requestId,
+        event: "request_failed",
+        actionKind: monetizationActionKind,
+        totalDurationMs: Date.now() - requestStartedAt,
+        stageTimings,
+        reason: "credit_commit_failed",
+      });
+      return respond(
+        { error: "Could not finalize credit usage. Please retry." },
+        500,
+      );
+    }
+
     if (error instanceof Error && error.name === "AbortError") {
       logFuseTiming({
         requestId,

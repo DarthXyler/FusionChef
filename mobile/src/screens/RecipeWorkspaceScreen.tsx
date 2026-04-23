@@ -1,6 +1,6 @@
 import { BlurView } from "expo-blur";
 import * as Sharing from "expo-sharing";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import {
   ActionSheetIOS,
@@ -27,8 +27,13 @@ import { sampleGeneratedRecipeRecord } from "../data/sampleGeneratedRecipe";
 import { useResponsiveFlags } from "../hooks/useResponsiveFlags";
 import type { HomeStackParamList } from "../navigation/types";
 import { DIETARY_OPTIONS } from "../config/recipeOptions";
-import { fetchLiveRecipeRecord } from "../services/fuse";
+import { fetchLiveRecipeRecord, FuseRequestError } from "../services/fuse";
 import { fetchRecipeImagePreview } from "../services/fuseImage";
+import {
+  fetchMonetizationAccountSnapshot,
+  getConfiguredAppleProductIds,
+  purchaseAppleCredits,
+} from "../services/monetization";
 import { styles } from "../styles/appStyles";
 import type { FuseRequest, GeneratedRecipeRecord } from "../types/recipe";
 import { buildShoppingItemKey, toTitleCase } from "../utils/recipeUi";
@@ -49,10 +54,67 @@ const LOADING_MESSAGES = [
 const IMAGE_FETCH_MAX_ATTEMPTS = 3;
 const IMAGE_FETCH_RETRY_DELAYS_MS = [1200, 2200] as const;
 
+type CreditPackOption = {
+  productId: string;
+  credits: number;
+};
+
 function delay(ms: number) {
   return new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function isInsufficientCreditsError(error: unknown): error is FuseRequestError {
+  return (
+    error instanceof FuseRequestError &&
+    error.status === 402 &&
+    error.reason === "insufficient_credits"
+  );
+}
+
+async function selectAppleCreditPack(options: CreditPackOption[]) {
+  if (options.length === 0) {
+    return null;
+  }
+
+  if (Platform.OS === "ios") {
+    return new Promise<CreditPackOption | null>((resolve) => {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ["Cancel", ...options.map((option) => `${option.credits} credits`)],
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 0) {
+            resolve(null);
+            return;
+          }
+          const selected = options[buttonIndex - 1];
+          resolve(selected ?? null);
+        },
+      );
+    });
+  }
+
+  return new Promise<CreditPackOption | null>((resolve) => {
+    Alert.alert("Buy credits", "Choose a credit pack to continue.", [
+      { text: "Cancel", style: "cancel", onPress: () => resolve(null) },
+      ...options.map((option) => ({
+        text: `${option.credits} credits`,
+        onPress: () => resolve(option),
+      })),
+    ]);
+  });
+}
+
+function inferCreditsFromProductId(productId: string) {
+  const match = productId.match(/(\d+)(?!.*\d)/);
+  if (!match) {
+    return 0;
+  }
+  const parsed = Number.parseInt(match[1] ?? "", 10);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export function RecipeWorkspaceScreen({
@@ -78,6 +140,8 @@ export function RecipeWorkspaceScreen({
   const [imageError, setImageError] = useState("");
   const [imageReloadVersion, setImageReloadVersion] = useState(0);
   const [isSavingCookbook, setIsSavingCookbook] = useState(false);
+  const [isPurchasingCredits, setIsPurchasingCredits] = useState(false);
+  const isPurchasingCreditsRef = useRef(false);
   const loaderSpin = useRef(new Animated.Value(0)).current;
   const loaderPulse = useRef(new Animated.Value(1)).current;
   const loaderGlowOpacity = useRef(new Animated.Value(0.35)).current;
@@ -107,6 +171,81 @@ export function RecipeWorkspaceScreen({
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
   });
+
+  const getAppleCreditPackOptions = useCallback(async () => {
+    const configuredFallback = getConfiguredAppleProductIds().map((productId) => ({
+      productId,
+      credits: inferCreditsFromProductId(productId),
+    }));
+
+    try {
+      const account = await fetchMonetizationAccountSnapshot();
+      const applePacks = account.products
+        .filter((product) => product.provider === "apple_app_store")
+        .map((product) => ({ productId: product.productId, credits: product.credits }))
+        .sort((left, right) => left.credits - right.credits);
+      if (applePacks.length > 0) {
+        return applePacks;
+      }
+    } catch {
+      // Fall back to configured product ids when account endpoint is unavailable.
+    }
+
+    return configuredFallback;
+  }, []);
+
+  const handleCreditRecoveryPurchase = useCallback(async () => {
+    if (isPurchasingCreditsRef.current) {
+      return false;
+    }
+
+    isPurchasingCreditsRef.current = true;
+    setIsPurchasingCredits(true);
+    try {
+      const options = await getAppleCreditPackOptions();
+      if (options.length === 0) {
+        Alert.alert("Credits unavailable", "No credit packs are configured yet.");
+        return false;
+      }
+
+      const selectedPack = await selectAppleCreditPack(options);
+      if (!selectedPack) {
+        return false;
+      }
+
+      const purchase = await purchaseAppleCredits(selectedPack.productId);
+      const grantedCredits = purchase.verification.grantedCredits;
+      Alert.alert(
+        "Credits added",
+        grantedCredits > 0
+          ? `${grantedCredits} credits were added to your account.`
+          : "Purchase verified. Your credits are ready.",
+      );
+      return true;
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Could not complete purchase right now.";
+      if (message === "Purchase canceled.") {
+        return false;
+      }
+      Alert.alert("Purchase failed", message);
+      return false;
+    } finally {
+      isPurchasingCreditsRef.current = false;
+      setIsPurchasingCredits(false);
+    }
+  }, [getAppleCreditPackOptions]);
+
+  const handleBackToEdit = useCallback(() => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate("Home");
+  }, [navigation]);
 
   useEffect(() => {
     // Reset shopping checklist when recipe changes.
@@ -245,6 +384,34 @@ export function RecipeWorkspaceScreen({
           return;
         }
 
+        if (isInsufficientCreditsError(error)) {
+          const purchasedCredits = await handleCreditRecoveryPurchase();
+          if (purchasedCredits && !cancelled) {
+            try {
+              const retriedRecord = await fetchLiveRecipeRecord(pendingRequest!.input, "fuse");
+              if (!cancelled) {
+                setLiveRecipeRecord(retriedRecord);
+                setPendingSourceInput(retriedRecord.sourceInput);
+              }
+              return;
+            } catch (retryError) {
+              const retryMessage =
+                retryError instanceof Error && retryError.message.trim().length > 0
+                  ? retryError.message
+                  : "Could not generate a recipe right now.";
+              Alert.alert("Generation failed", retryMessage);
+              return;
+            }
+          }
+
+          Alert.alert(
+            "Need credits",
+            "You need credits to continue fusing recipes. We sent you back so you can edit or try later.",
+          );
+          handleBackToEdit();
+          return;
+        }
+
         const message =
           error instanceof Error && error.message.trim().length > 0
             ? error.message
@@ -263,7 +430,7 @@ export function RecipeWorkspaceScreen({
     return () => {
       cancelled = true;
     };
-  }, [route.params?.pendingRequest]);
+  }, [handleBackToEdit, handleCreditRecoveryPurchase, route.params?.pendingRequest]);
 
   useEffect(() => {
     // Image loading pipeline:
@@ -453,7 +620,7 @@ export function RecipeWorkspaceScreen({
 
   async function handleLoadLiveRecipe() {
     // Reroll path reuses the same source input and replaces active live record.
-    if (isLoadingLiveRecipe) {
+    if (isLoadingLiveRecipe || isPurchasingCredits) {
       return;
     }
 
@@ -462,6 +629,26 @@ export function RecipeWorkspaceScreen({
       const nextRecord = await fetchLiveRecipeRecord(activeRecord.sourceInput, "reroll");
       setLiveRecipeRecord(nextRecord);
     } catch (error) {
+      if (isInsufficientCreditsError(error)) {
+        const purchasedCredits = await handleCreditRecoveryPurchase();
+        if (purchasedCredits) {
+          try {
+            const retriedRecord = await fetchLiveRecipeRecord(activeRecord.sourceInput, "reroll");
+            setLiveRecipeRecord(retriedRecord);
+            return;
+          } catch (retryError) {
+            const retryMessage =
+              retryError instanceof Error && retryError.message.trim().length > 0
+                ? retryError.message
+                : "Could not load a live recipe right now.";
+            Alert.alert("Reroll failed", retryMessage);
+            return;
+          }
+        }
+        Alert.alert("Need credits", "Add credits to continue rerolling recipes.");
+        return;
+      }
+
       const message =
         error instanceof Error && error.message.trim().length > 0
           ? error.message
@@ -471,15 +658,6 @@ export function RecipeWorkspaceScreen({
     } finally {
       setIsLoadingLiveRecipe(false);
     }
-  }
-
-  function handleBackToEdit() {
-    if (navigation.canGoBack()) {
-      navigation.goBack();
-      return;
-    }
-
-    navigation.navigate("Home");
   }
 
   async function handleSaveToCookbook() {
@@ -700,11 +878,12 @@ export function RecipeWorkspaceScreen({
               >
                 <Pressable
                   onPress={handleSaveToCookbook}
-                  disabled={isSavingCookbook}
+                  disabled={isSavingCookbook || isPurchasingCredits}
                   style={({ pressed }) => [
                     styles.resultActionPrimary,
                     isCompactScreen && styles.resultActionCompact,
-                    (pressed || isSavingCookbook) && styles.resultActionPressed,
+                    (pressed || isSavingCookbook || isPurchasingCredits) &&
+                      styles.resultActionPressed,
                   ]}
                 >
                   <View style={styles.resultActionContent}>
@@ -721,11 +900,12 @@ export function RecipeWorkspaceScreen({
                 </Pressable>
                 <Pressable
                   onPress={handleLoadLiveRecipe}
-                  disabled={isLoadingLiveRecipe}
+                  disabled={isLoadingLiveRecipe || isPurchasingCredits}
                   style={({ pressed }) => [
                     styles.resultActionPrimary,
                     isCompactScreen && styles.resultActionCompact,
-                    (pressed || isLoadingLiveRecipe) && styles.resultActionPressed,
+                    (pressed || isLoadingLiveRecipe || isPurchasingCredits) &&
+                      styles.resultActionPressed,
                   ]}
                 >
                   <View style={styles.resultActionContent}>
