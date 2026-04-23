@@ -12,6 +12,7 @@ import {
   reserveCredits,
   type MonetizationActionKind,
 } from "@/lib/monetization-ledger";
+import { listRecentPurchasesForUser } from "@/lib/monetization-purchases";
 import {
   getTodayDailyMonetizationUsage,
   listDailyMonetizationUsage,
@@ -225,18 +226,20 @@ export async function GET(request: NextRequest) {
       anonUserId,
     });
 
-    const [snapshot, dailyUsage, todayUsage] = await Promise.all([
+    const [snapshot, dailyUsage, todayUsage, purchases] = await Promise.all([
       getCreditAccountSnapshot(anonUserId, {
         reservationsLimit: Number.isFinite(reservationsLimit) ? reservationsLimit : 50,
         ledgerLimit: Number.isFinite(ledgerLimit) ? ledgerLimit : 50,
       }),
       listDailyMonetizationUsage(anonUserId, 30),
       getTodayDailyMonetizationUsage(anonUserId),
+      listRecentPurchasesForUser(anonUserId, 30),
     ]);
     const response = NextResponse.json({
       ...snapshot,
       todayUsage,
       dailyUsage,
+      purchases,
     });
     withNoStore(response);
 

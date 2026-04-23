@@ -24,11 +24,11 @@ This checklist tracks monetization hardening work for the mobile app rollout.
 
 ## S2 - Purchase Verification
 
-- [ ] Server-side verification for App Store receipts
-- [ ] Server-side verification for Google Play purchases
-- [ ] Anti-replay purchase protection (transaction uniqueness)
-- [ ] Fraud/risk events in audit log
-- [ ] Refund/reversal handling path in ledger
+- [x] Server-side verification for App Store purchases (`/api/monetization/purchases/verify`)
+- [x] Server-side verification for Google Play purchases (`/api/monetization/purchases/verify`)
+- [x] Anti-replay purchase protection (unique `provider + provider_transaction_id`)
+- [x] Fraud/risk events in verification/reversal logs
+- [x] Refund/reversal handling path in ledger (`/api/admin/monetization/purchases/reversal`)
 
 ## S3 - Ops & Governance
 

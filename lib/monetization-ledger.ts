@@ -15,6 +15,8 @@ export type CreditLedgerEvent =
   | "observe_fuse"
   | "observe_reroll"
   | "grant"
+  | "purchase_grant"
+  | "purchase_reversal"
   | "reserve"
   | "commit"
   | "release";
@@ -395,6 +397,7 @@ export async function grantCredits(params: {
   amount: number;
   reason?: string;
   actor: string;
+  eventType?: "grant" | "purchase_grant";
   idempotencyScope?: string | null;
   idempotencyKey?: string | null;
   metadata?: Record<string, unknown>;
@@ -403,6 +406,7 @@ export async function grantCredits(params: {
   await ensureSchema();
   await ensureBalanceRow(params.anonUserId);
 
+  const eventType = params.eventType ?? "grant";
   const nowIso = new Date().toISOString();
   const entryId = randomUUID();
   const result = await executeTurso({
@@ -431,7 +435,7 @@ export async function grantCredits(params: {
           SELECT
             ?,
             ?,
-            'grant',
+            ?,
             ?,
             updated.available_credits,
             updated.pending_credits,
@@ -461,6 +465,7 @@ export async function grantCredits(params: {
       params.anonUserId,
       entryId,
       params.anonUserId,
+      eventType,
       params.amount,
       params.idempotencyScope ?? null,
       params.idempotencyKey ?? null,
@@ -634,6 +639,115 @@ export async function reserveCredits(params: {
     ok: true,
     reservation,
     balance,
+  };
+}
+
+export async function applyPurchaseReversalDeduction(params: {
+  anonUserId: string;
+  amount: number;
+  reason?: string;
+  actor: string;
+  idempotencyScope?: string | null;
+  idempotencyKey?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  assertPositiveCreditAmount(params.amount);
+  await ensureSchema();
+  await ensureBalanceRow(params.anonUserId);
+
+  const nowIso = new Date().toISOString();
+  const entryId = randomUUID();
+  const result = await executeTurso({
+    sql: `WITH updated AS (
+            UPDATE credit_balances
+            SET
+              available_credits = available_credits - ?,
+              updated_at = ?
+            WHERE anon_user_id = ?
+              AND available_credits >= ?
+            RETURNING available_credits, pending_credits
+          )
+          INSERT INTO credit_ledger_entries (
+            entry_id,
+            anon_user_id,
+            event_type,
+            amount,
+            balance_available_after,
+            balance_pending_after,
+            reservation_id,
+            idempotency_scope,
+            idempotency_key,
+            actor,
+            metadata_json,
+            created_at
+          )
+          SELECT
+            ?,
+            ?,
+            'purchase_reversal',
+            ?,
+            updated.available_credits,
+            updated.pending_credits,
+            NULL,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?
+          FROM updated
+          RETURNING
+            entry_id,
+            anon_user_id,
+            event_type,
+            amount,
+            balance_available_after,
+            balance_pending_after,
+            reservation_id,
+            idempotency_scope,
+            idempotency_key,
+            actor,
+            metadata_json,
+            created_at`,
+    args: [
+      params.amount,
+      nowIso,
+      params.anonUserId,
+      params.amount,
+      entryId,
+      params.anonUserId,
+      -params.amount,
+      params.idempotencyScope ?? null,
+      params.idempotencyKey ?? null,
+      params.actor,
+      toMetadataJson({
+        reason: params.reason ?? "",
+        ...(params.metadata ?? {}),
+      }),
+      nowIso,
+    ],
+  });
+
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  if (!row) {
+    const balance = await fetchBalance(params.anonUserId);
+    return {
+      ok: false as const,
+      reason: "insufficient_credits" as const,
+      balance,
+    };
+  }
+
+  const ledgerEntry = rowToLedgerEntry(row);
+  const balance: CreditBalance = {
+    anonUserId: params.anonUserId,
+    availableCredits: ledgerEntry.balanceAvailableAfter,
+    pendingCredits: ledgerEntry.balancePendingAfter,
+    updatedAt: nowIso,
+  };
+  return {
+    ok: true as const,
+    balance,
+    ledgerEntry,
   };
 }
 
