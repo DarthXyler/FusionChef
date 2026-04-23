@@ -25,10 +25,16 @@ This checklist tracks monetization hardening work for the mobile app rollout.
 ## S2 - Purchase Verification
 
 - [x] Server-side verification for App Store purchases (`/api/monetization/purchases/verify`)
-- [x] Server-side verification for Google Play purchases (`/api/monetization/purchases/verify`)
+- [ ] Server-side verification for Google Play purchases (`/api/monetization/purchases/verify`) - deferred (not in current release scope)
 - [x] Anti-replay purchase protection (unique `provider + provider_transaction_id`)
 - [x] Fraud/risk events in verification/reversal logs
 - [x] Refund/reversal handling path in ledger (`/api/admin/monetization/purchases/reversal`)
+
+## Deferred Scope (Post-Apple Launch)
+
+- [ ] Configure Google Play service account credentials in Vercel
+- [ ] Enable Google Play Android Developer API and finalize Play Console API access
+- [ ] Run Google sandbox E2E purchase verification tests
 
 ## S3 - Ops & Governance
 

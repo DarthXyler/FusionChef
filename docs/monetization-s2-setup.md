@@ -13,6 +13,11 @@
 
 ## Required Environment Variables
 
+## Current Release Scope
+
+- Apple App Store purchase verification: **active scope**
+- Google Play purchase verification: **deferred to a later release**
+
 ### Shared
 
 - `MONETIZATION_CREDIT_PACKS_JSON`
