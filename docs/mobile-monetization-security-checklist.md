@@ -47,3 +47,55 @@ This checklist tracks monetization hardening work for the mobile app rollout.
 ## Known Future Hardening
 
 - [ ] Replace spoofable anonymous identity header with signed session/identity tokens for mobile API calls
+
+## S4 - Admin Auth Upgrade (Login + Passkey + Token Fallback)
+
+Goal: move from token-only admin access to user-friendly, strongly authenticated admin login.
+
+### S4.1 - Auth Foundation
+
+- [ ] Add admin auth provider for web admin routes (`/admin/*`) with:
+- [ ] Google OAuth login
+- [ ] Email magic-link login
+- [ ] Passkey (WebAuthn) login
+- [ ] Add admin user table with allowlisted emails
+- [ ] Add admin session table with device/session metadata
+- [ ] Enforce HTTPS-only secure session cookies
+
+### S4.2 - Admin Access Guardrails
+
+- [ ] Restrict `/admin/monetization` UI route to authenticated admin users only
+- [ ] Restrict admin APIs to authenticated admin users only (not just token)
+- [ ] Keep `MONETIZATION_ADMIN_TOKEN` as break-glass fallback for incidents
+- [ ] Add feature flag to temporarily disable token fallback if abuse detected
+
+### S4.3 - Passkey and Account Recovery UX
+
+- [ ] Add passkey enrollment UI after first successful admin login
+- [ ] Support multiple passkeys per admin account (phone + laptop)
+- [ ] Add account recovery path via verified email magic link
+- [ ] Add step-up check for sensitive actions (for example: moving to `enforce` mode)
+
+### S4.4 - Audit and Security Logging
+
+- [ ] Log admin auth events: login success/failure, logout, passkey create/delete
+- [ ] Log admin authorization events for config/reconciliation endpoints
+- [ ] Add immutable audit trail fields: actor, action, requestId, ip, userAgent, outcome
+- [ ] Add alerting for suspicious admin activity (repeated failures, unusual IP/geo)
+
+### S4.5 - Rollout and Cutover
+
+- [ ] Phase A: ship auth in shadow mode (login works; token path still primary)
+- [ ] Phase B: make auth primary, keep token fallback for emergency use
+- [ ] Phase C: require auth + optional step-up for critical admin actions
+- [ ] Publish runbook: token rotation, admin lockout recovery, incident response
+
+## Monetization Admin UID Decision (Locked)
+
+- [ ] Do not build/expand compensation UI on anonymous user IDs.
+- [ ] After account login is live, implement compensation workflows on account UID only.
+- [ ] Compensation panel scope (post-login):
+- [ ] Search user by account email/UID
+- [ ] Grant/deduct credits by account UID
+- [ ] Require reason + actor for every manual adjustment
+- [ ] Persist immutable audit trail for compensation actions
