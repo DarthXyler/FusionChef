@@ -132,6 +132,16 @@ function toIsoLabel(value: string) {
   return date.toLocaleString();
 }
 
+function isPresetActive(preset: Preset, current: RuntimeConfig) {
+  return (
+    current.enabled === preset.config.enabled &&
+    current.enforcementMode === preset.config.enforcementMode &&
+    current.freeDailyFuseActions === preset.config.freeDailyFuseActions &&
+    current.freeDailyRerollActions === preset.config.freeDailyRerollActions &&
+    current.allowCompActions === preset.config.allowCompActions
+  );
+}
+
 type Preset = {
   label: string;
   description: string;
@@ -484,17 +494,29 @@ export function AdminMonetizationConfigPanel() {
       <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-emerald-900">Quick Presets</h2>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.label}
-              type="button"
-              onClick={() => applyPreset(preset)}
-              className="cursor-pointer rounded-2xl border border-zinc-300 bg-zinc-50 p-4 text-left transition hover:border-emerald-400 hover:bg-emerald-50"
-            >
-              <p className="font-semibold text-zinc-900">{preset.label}</p>
-              <p className="mt-1 text-sm text-zinc-600">{preset.description}</p>
-            </button>
-          ))}
+          {PRESETS.map((preset) => {
+            const active = isPresetActive(preset, form);
+            return (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => applyPreset(preset)}
+                className={[
+                  "cursor-pointer rounded-2xl border p-4 text-left transition",
+                  active
+                    ? "border-emerald-700 bg-emerald-600"
+                    : "border-zinc-300 bg-zinc-50 hover:border-emerald-400 hover:bg-emerald-50",
+                ].join(" ")}
+              >
+                <p className={active ? "font-semibold text-white" : "font-semibold text-zinc-900"}>
+                  {preset.label}
+                </p>
+                <p className={active ? "mt-1 text-sm text-emerald-50" : "mt-1 text-sm text-zinc-600"}>
+                  {preset.description}
+                </p>
+              </button>
+            );
+          })}
         </div>
       </section>
 
