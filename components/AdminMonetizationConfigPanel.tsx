@@ -29,6 +29,48 @@ type ReconciliationSummary = {
   failed: number;
 };
 
+type ObserveRuntime = {
+  enabled: boolean;
+  enforcementMode: EnforcementMode;
+  freeDailyFuseActions: number;
+  freeDailyRerollActions: number;
+};
+
+type ObserveSnapshot24h = {
+  fuseActions: number;
+  rerollActions: number;
+  totalActions: number;
+  uniqueUsers: number;
+};
+
+type ObserveTodayEstimate = {
+  overQuotaActions: number;
+  estimatedBlockedActions: number;
+  wouldBlockPercentage: number;
+};
+
+type ObserveTrendRow = {
+  dayKey: string;
+  fuseActions: number;
+  rerollActions: number;
+  totalActions: number;
+  uniqueUsers: number;
+  overQuotaActions: number;
+  estimatedBlockedActions: number;
+  wouldBlockPercentage: number;
+};
+
+type ObserveTopUserRow = {
+  anonUserId: string;
+  fuseCount: number;
+  rerollCount: number;
+  totalActions: number;
+  availableCredits: number;
+  overQuotaActions: number;
+  estimatedBlockedActions: number;
+  wouldBlockNow: boolean;
+};
+
 const TOKEN_STORAGE_KEY = "flavor-fusion-admin-token:v1";
 const ACTOR_STORAGE_KEY = "flavor-fusion-admin-actor:v1";
 
@@ -40,6 +82,26 @@ const DEFAULT_FORM: RuntimeConfig = {
   allowCompActions: true,
   updatedAt: "",
   updatedBy: "",
+};
+
+const DEFAULT_OBSERVE_RUNTIME: ObserveRuntime = {
+  enabled: false,
+  enforcementMode: "off",
+  freeDailyFuseActions: 0,
+  freeDailyRerollActions: 0,
+};
+
+const DEFAULT_OBSERVE_SNAPSHOT: ObserveSnapshot24h = {
+  fuseActions: 0,
+  rerollActions: 0,
+  totalActions: 0,
+  uniqueUsers: 0,
+};
+
+const DEFAULT_OBSERVE_TODAY: ObserveTodayEstimate = {
+  overQuotaActions: 0,
+  estimatedBlockedActions: 0,
+  wouldBlockPercentage: 0,
 };
 
 function generateIdempotencyKey(scope: string) {
@@ -121,6 +183,24 @@ function clampReconciliationLimit(value: number) {
   return normalized;
 }
 
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return value;
+}
+
+function toInteger(value: unknown, fallback = 0) {
+  return Math.trunc(toNumber(value, fallback));
+}
+
+function maskAnonUserId(value: string) {
+  if (value.length <= 12) {
+    return value;
+  }
+  return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
 function toIsoLabel(value: string) {
   if (!value) {
     return "N/A";
@@ -130,6 +210,82 @@ function toIsoLabel(value: string) {
     return value;
   }
   return date.toLocaleString();
+}
+
+function isObserveRuntime(value: unknown): value is ObserveRuntime {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.enabled === "boolean" &&
+    (candidate.enforcementMode === "off" ||
+      candidate.enforcementMode === "observe" ||
+      candidate.enforcementMode === "enforce") &&
+    typeof candidate.freeDailyFuseActions === "number" &&
+    Number.isFinite(candidate.freeDailyFuseActions) &&
+    typeof candidate.freeDailyRerollActions === "number" &&
+    Number.isFinite(candidate.freeDailyRerollActions)
+  );
+}
+
+function isObserveSnapshot24h(value: unknown): value is ObserveSnapshot24h {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.fuseActions === "number" &&
+    typeof candidate.rerollActions === "number" &&
+    typeof candidate.totalActions === "number" &&
+    typeof candidate.uniqueUsers === "number"
+  );
+}
+
+function isObserveTodayEstimate(value: unknown): value is ObserveTodayEstimate {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.overQuotaActions === "number" &&
+    typeof candidate.estimatedBlockedActions === "number" &&
+    typeof candidate.wouldBlockPercentage === "number"
+  );
+}
+
+function isObserveTrendRow(value: unknown): value is ObserveTrendRow {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.dayKey === "string" &&
+    typeof candidate.fuseActions === "number" &&
+    typeof candidate.rerollActions === "number" &&
+    typeof candidate.totalActions === "number" &&
+    typeof candidate.uniqueUsers === "number" &&
+    typeof candidate.overQuotaActions === "number" &&
+    typeof candidate.estimatedBlockedActions === "number" &&
+    typeof candidate.wouldBlockPercentage === "number"
+  );
+}
+
+function isObserveTopUserRow(value: unknown): value is ObserveTopUserRow {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.anonUserId === "string" &&
+    typeof candidate.fuseCount === "number" &&
+    typeof candidate.rerollCount === "number" &&
+    typeof candidate.totalActions === "number" &&
+    typeof candidate.availableCredits === "number" &&
+    typeof candidate.overQuotaActions === "number" &&
+    typeof candidate.estimatedBlockedActions === "number" &&
+    typeof candidate.wouldBlockNow === "boolean"
+  );
 }
 
 function isPresetActive(preset: Preset, current: RuntimeConfig) {
@@ -206,6 +362,17 @@ export function AdminMonetizationConfigPanel() {
   const [reconciliationSummary, setReconciliationSummary] = useState<ReconciliationSummary | null>(
     null,
   );
+  const [isLoadingObserveReport, setIsLoadingObserveReport] = useState(false);
+  const [observeGeneratedAt, setObserveGeneratedAt] = useState("");
+  const [observeTimezone, setObserveTimezone] = useState("UTC");
+  const [observeTodayDayKey, setObserveTodayDayKey] = useState("");
+  const [observeRuntime, setObserveRuntime] = useState<ObserveRuntime>(DEFAULT_OBSERVE_RUNTIME);
+  const [observeSnapshot24h, setObserveSnapshot24h] =
+    useState<ObserveSnapshot24h>(DEFAULT_OBSERVE_SNAPSHOT);
+  const [observeTodayEstimate, setObserveTodayEstimate] =
+    useState<ObserveTodayEstimate>(DEFAULT_OBSERVE_TODAY);
+  const [observeTrend, setObserveTrend] = useState<ObserveTrendRow[]>([]);
+  const [observeTopUsers, setObserveTopUsers] = useState<ObserveTopUserRow[]>([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -258,6 +425,7 @@ export function AdminMonetizationConfigPanel() {
       if (typeof window !== "undefined") {
         window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
       }
+      await loadObserveReport({ silent: true });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load config.");
     } finally {
@@ -315,10 +483,92 @@ export function AdminMonetizationConfigPanel() {
         window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
         window.sessionStorage.setItem(ACTOR_STORAGE_KEY, actor);
       }
+      await loadObserveReport({ silent: true });
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save config.");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function loadObserveReport(options?: { silent?: boolean }) {
+    const token = adminToken.trim();
+    if (!token) {
+      setError("Enter your admin token first.");
+      return;
+    }
+
+    setIsLoadingObserveReport(true);
+    if (!options?.silent) {
+      setError("");
+      setSuccess("");
+    }
+
+    try {
+      const response = await fetch(
+        "/api/admin/monetization/observe-report?trendDays=7&topUsersLimit=10",
+        {
+          method: "GET",
+          headers: {
+            "x-admin-token": token,
+          },
+          cache: "no-store",
+        },
+      );
+      const payload = (await response.json()) as {
+        runtime?: unknown;
+        generatedAt?: unknown;
+        timezone?: unknown;
+        todayDayKey?: unknown;
+        snapshot24h?: unknown;
+        todayEstimate?: unknown;
+        trend?: unknown;
+        topUsers?: unknown;
+        error?: unknown;
+      };
+      if (!response.ok) {
+        throw new Error(
+          typeof payload.error === "string"
+            ? payload.error
+            : "Could not load observe analytics.",
+        );
+      }
+      if (
+        !isObserveRuntime(payload.runtime) ||
+        !isObserveSnapshot24h(payload.snapshot24h) ||
+        !isObserveTodayEstimate(payload.todayEstimate)
+      ) {
+        throw new Error("Observe analytics response format was invalid.");
+      }
+
+      const trendRows = Array.isArray(payload.trend) ? payload.trend.filter(isObserveTrendRow) : [];
+      const topUserRows = Array.isArray(payload.topUsers)
+        ? payload.topUsers.filter(isObserveTopUserRow)
+        : [];
+
+      setObserveRuntime(payload.runtime);
+      setObserveSnapshot24h(payload.snapshot24h);
+      setObserveTodayEstimate(payload.todayEstimate);
+      setObserveTrend(trendRows);
+      setObserveTopUsers(topUserRows);
+      setObserveGeneratedAt(typeof payload.generatedAt === "string" ? payload.generatedAt : "");
+      setObserveTimezone(typeof payload.timezone === "string" ? payload.timezone : "UTC");
+      setObserveTodayDayKey(typeof payload.todayDayKey === "string" ? payload.todayDayKey : "");
+
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+      }
+      if (!options?.silent) {
+        setSuccess("Observe analytics loaded.");
+      }
+    } catch (observeError) {
+      setError(
+        observeError instanceof Error
+          ? observeError.message
+          : "Could not load observe analytics.",
+      );
+    } finally {
+      setIsLoadingObserveReport(false);
     }
   }
 
@@ -517,6 +767,175 @@ export function AdminMonetizationConfigPanel() {
               </button>
             );
           })}
+        </div>
+      </section>
+
+      <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-emerald-900">Observe Analytics</h2>
+            <p className="text-sm text-zinc-700">
+              Readiness report for credits enforcement. In observe mode this does not block users.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              void loadObserveReport();
+            }}
+            disabled={isLoadingObserveReport}
+            className="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isLoadingObserveReport ? "Refreshing..." : "Refresh Analytics"}
+          </button>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+          <p>
+            Runtime Mode:{" "}
+            <span className="font-semibold text-zinc-900">{observeRuntime.enforcementMode}</span>
+            {" | "}Enabled:{" "}
+            <span className="font-semibold text-zinc-900">
+              {observeRuntime.enabled ? "true" : "false"}
+            </span>
+          </p>
+          <p>
+            Free Daily Limits:{" "}
+            <span className="font-semibold text-zinc-900">
+              Fuse {toInteger(observeRuntime.freeDailyFuseActions)} / Reroll{" "}
+              {toInteger(observeRuntime.freeDailyRerollActions)}
+            </span>
+          </p>
+          <p>
+            Last Updated:{" "}
+            <span className="font-semibold text-zinc-900">{toIsoLabel(observeGeneratedAt)}</span>
+            {" | "}Timezone: <span className="font-semibold text-zinc-900">{observeTimezone}</span>
+            {" | "}Day Key: <span className="font-semibold text-zinc-900">{observeTodayDayKey || "N/A"}</span>
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Fuse (24h)</p>
+            <p className="text-2xl font-semibold text-emerald-900">{observeSnapshot24h.fuseActions}</p>
+          </div>
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Reroll (24h)</p>
+            <p className="text-2xl font-semibold text-emerald-900">{observeSnapshot24h.rerollActions}</p>
+          </div>
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Unique Users (24h)</p>
+            <p className="text-2xl font-semibold text-emerald-900">{observeSnapshot24h.uniqueUsers}</p>
+          </div>
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Estimated Block % (Today)</p>
+            <p className="text-2xl font-semibold text-emerald-900">{observeTodayEstimate.wouldBlockPercentage}%</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+          <p>
+            Over-Quota Actions (Today):{" "}
+            <span className="font-semibold text-zinc-900">{observeTodayEstimate.overQuotaActions}</span>
+          </p>
+          <p>
+            Estimated Would-Block Actions (Today):{" "}
+            <span className="font-semibold text-zinc-900">{observeTodayEstimate.estimatedBlockedActions}</span>
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-900">
+            Daily Trend
+          </h3>
+          {observeTrend.length === 0 ? (
+            <p className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+              No trend data yet.
+            </p>
+          ) : (
+            <div className="max-h-64 overflow-auto rounded-xl border border-zinc-200 bg-white">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead className="bg-zinc-50 text-zinc-700">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">Day</th>
+                    <th className="px-3 py-2 font-semibold">Fuse</th>
+                    <th className="px-3 py-2 font-semibold">Reroll</th>
+                    <th className="px-3 py-2 font-semibold">Total</th>
+                    <th className="px-3 py-2 font-semibold">Users</th>
+                    <th className="px-3 py-2 font-semibold">Over Quota</th>
+                    <th className="px-3 py-2 font-semibold">Estimated Blocked</th>
+                    <th className="px-3 py-2 font-semibold">Would Block %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {observeTrend.map((row) => (
+                    <tr key={row.dayKey} className="border-t border-zinc-100 text-zinc-800">
+                      <td className="px-3 py-2 font-semibold">{row.dayKey}</td>
+                      <td className="px-3 py-2">{row.fuseActions}</td>
+                      <td className="px-3 py-2">{row.rerollActions}</td>
+                      <td className="px-3 py-2">{row.totalActions}</td>
+                      <td className="px-3 py-2">{row.uniqueUsers}</td>
+                      <td className="px-3 py-2">{row.overQuotaActions}</td>
+                      <td className="px-3 py-2">{row.estimatedBlockedActions}</td>
+                      <td className="px-3 py-2">{row.wouldBlockPercentage}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-900">
+            Top Pressure Users (Today)
+          </h3>
+          {observeTopUsers.length === 0 ? (
+            <p className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+              No user pressure data yet.
+            </p>
+          ) : (
+            <div className="max-h-64 overflow-auto rounded-xl border border-zinc-200 bg-white">
+              <table className="w-full min-w-[820px] text-left text-sm">
+                <thead className="bg-zinc-50 text-zinc-700">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">User</th>
+                    <th className="px-3 py-2 font-semibold">Fuse</th>
+                    <th className="px-3 py-2 font-semibold">Reroll</th>
+                    <th className="px-3 py-2 font-semibold">Total</th>
+                    <th className="px-3 py-2 font-semibold">Available Credits</th>
+                    <th className="px-3 py-2 font-semibold">Over Quota</th>
+                    <th className="px-3 py-2 font-semibold">Est. Blocked</th>
+                    <th className="px-3 py-2 font-semibold">Would Block Now</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {observeTopUsers.map((row) => (
+                    <tr key={row.anonUserId} className="border-t border-zinc-100 text-zinc-800">
+                      <td className="px-3 py-2 font-mono text-xs">{maskAnonUserId(row.anonUserId)}</td>
+                      <td className="px-3 py-2">{row.fuseCount}</td>
+                      <td className="px-3 py-2">{row.rerollCount}</td>
+                      <td className="px-3 py-2">{row.totalActions}</td>
+                      <td className="px-3 py-2">{row.availableCredits}</td>
+                      <td className="px-3 py-2">{row.overQuotaActions}</td>
+                      <td className="px-3 py-2">{row.estimatedBlockedActions}</td>
+                      <td className="px-3 py-2">
+                        {row.wouldBlockNow ? (
+                          <span className="rounded-lg bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-800">
+                            Yes
+                          </span>
+                        ) : (
+                          <span className="rounded-lg bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-700">
+                            No
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </section>
 
