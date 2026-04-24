@@ -474,7 +474,7 @@ export function AdminMonetizationConfigPanel() {
             type="button"
             onClick={readConfig}
             disabled={isLoading}
-            className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+            className="cursor-pointer rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isLoading ? "Loading..." : "Load Current Config"}
           </button>
@@ -489,7 +489,7 @@ export function AdminMonetizationConfigPanel() {
               key={preset.label}
               type="button"
               onClick={() => applyPreset(preset)}
-              className="rounded-2xl border border-zinc-300 bg-zinc-50 p-4 text-left transition hover:border-emerald-400 hover:bg-emerald-50"
+              className="cursor-pointer rounded-2xl border border-zinc-300 bg-zinc-50 p-4 text-left transition hover:border-emerald-400 hover:bg-emerald-50"
             >
               <p className="font-semibold text-zinc-900">{preset.label}</p>
               <p className="mt-1 text-sm text-zinc-600">{preset.description}</p>
@@ -530,7 +530,7 @@ export function AdminMonetizationConfigPanel() {
               void loadReconciliationPreview();
             }}
             disabled={isLoadingReconciliationPreview}
-            className="rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isLoadingReconciliationPreview ? "Loading Preview..." : "Preview Expired Reservations"}
           </button>
@@ -538,7 +538,7 @@ export function AdminMonetizationConfigPanel() {
             type="button"
             onClick={runReconciliationNow}
             disabled={isRunningReconciliation}
-            className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+            className="cursor-pointer rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isRunningReconciliation ? "Running..." : "Run Reconciliation Now"}
           </button>
@@ -681,7 +681,7 @@ export function AdminMonetizationConfigPanel() {
             type="button"
             onClick={saveConfig}
             disabled={isSaving}
-            className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+            className="cursor-pointer rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSaving ? "Saving..." : "Save Config"}
           </button>
@@ -689,7 +689,7 @@ export function AdminMonetizationConfigPanel() {
             type="button"
             onClick={readConfig}
             disabled={isLoading}
-            className="rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Refresh
           </button>
