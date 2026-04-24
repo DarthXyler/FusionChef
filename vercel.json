@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/monetization-reconciliation?maxCandidates=300",
-      "schedule": "12 * * * *"
+      "schedule": "12 4 * * *"
     }
   ]
 }
