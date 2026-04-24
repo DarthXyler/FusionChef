@@ -71,6 +71,18 @@ type ObserveTopUserRow = {
   wouldBlockNow: boolean;
 };
 
+type PanelKey =
+  | "adminAccess"
+  | "quickPresets"
+  | "observeAnalytics"
+  | "reconciliation"
+  | "runtimeSettings";
+
+type PanelNoticeState = {
+  error: string;
+  success: string;
+};
+
 const TOKEN_STORAGE_KEY = "flavor-fusion-admin-token:v1";
 const ACTOR_STORAGE_KEY = "flavor-fusion-admin-actor:v1";
 
@@ -102,6 +114,14 @@ const DEFAULT_OBSERVE_TODAY: ObserveTodayEstimate = {
   overQuotaActions: 0,
   estimatedBlockedActions: 0,
   wouldBlockPercentage: 0,
+};
+
+const DEFAULT_PANEL_NOTICES: Record<PanelKey, PanelNoticeState> = {
+  adminAccess: { error: "", success: "" },
+  quickPresets: { error: "", success: "" },
+  observeAnalytics: { error: "", success: "" },
+  reconciliation: { error: "", success: "" },
+  runtimeSettings: { error: "", success: "" },
 };
 
 function generateIdempotencyKey(scope: string) {
@@ -373,8 +393,29 @@ export function AdminMonetizationConfigPanel() {
     useState<ObserveTodayEstimate>(DEFAULT_OBSERVE_TODAY);
   const [observeTrend, setObserveTrend] = useState<ObserveTrendRow[]>([]);
   const [observeTopUsers, setObserveTopUsers] = useState<ObserveTopUserRow[]>([]);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [panelNotices, setPanelNotices] =
+    useState<Record<PanelKey, PanelNoticeState>>(DEFAULT_PANEL_NOTICES);
+
+  function clearPanelNotice(panelKey: PanelKey) {
+    setPanelNotices((current) => ({
+      ...current,
+      [panelKey]: { error: "", success: "" },
+    }));
+  }
+
+  function setPanelError(panelKey: PanelKey, message: string) {
+    setPanelNotices((current) => ({
+      ...current,
+      [panelKey]: { error: message, success: "" },
+    }));
+  }
+
+  function setPanelSuccess(panelKey: PanelKey, message: string) {
+    setPanelNotices((current) => ({
+      ...current,
+      [panelKey]: { error: "", success: message },
+    }));
+  }
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -391,16 +432,15 @@ export function AdminMonetizationConfigPanel() {
     }
   }, []);
 
-  async function readConfig() {
+  async function readConfig(origin: "adminAccess" | "runtimeSettings" = "adminAccess") {
     const token = adminToken.trim();
     if (!token) {
-      setError("Enter your admin token first.");
+      setPanelError(origin, "Enter your admin token first.");
       return;
     }
 
     setIsLoading(true);
-    setError("");
-    setSuccess("");
+    clearPanelNotice(origin);
 
     try {
       const response = await fetch("/api/admin/monetization/config", {
@@ -421,13 +461,13 @@ export function AdminMonetizationConfigPanel() {
       }
 
       setForm(payload.config);
-      setSuccess("Loaded current runtime config.");
+      setPanelSuccess(origin, "Loaded current runtime config.");
       if (typeof window !== "undefined") {
         window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
       }
       await loadObserveReport({ silent: true });
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Could not load config.");
+      setPanelError(origin, loadError instanceof Error ? loadError.message : "Could not load config.");
     } finally {
       setIsLoading(false);
     }
@@ -437,17 +477,16 @@ export function AdminMonetizationConfigPanel() {
     const token = adminToken.trim();
     const actor = adminActor.trim();
     if (!token) {
-      setError("Enter your admin token first.");
+      setPanelError("runtimeSettings", "Enter your admin token first.");
       return;
     }
     if (!actor) {
-      setError("Enter an actor name (who is making the change).");
+      setPanelError("runtimeSettings", "Enter an actor name (who is making the change).");
       return;
     }
 
     setIsSaving(true);
-    setError("");
-    setSuccess("");
+    clearPanelNotice("runtimeSettings");
 
     try {
       const response = await fetch("/api/admin/monetization/config", {
@@ -478,14 +517,17 @@ export function AdminMonetizationConfigPanel() {
       }
 
       setForm(payload.config);
-      setSuccess("Monetization runtime config saved.");
+      setPanelSuccess("runtimeSettings", "Monetization runtime config saved.");
       if (typeof window !== "undefined") {
         window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
         window.sessionStorage.setItem(ACTOR_STORAGE_KEY, actor);
       }
       await loadObserveReport({ silent: true });
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save config.");
+      setPanelError(
+        "runtimeSettings",
+        saveError instanceof Error ? saveError.message : "Could not save config.",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -494,14 +536,15 @@ export function AdminMonetizationConfigPanel() {
   async function loadObserveReport(options?: { silent?: boolean }) {
     const token = adminToken.trim();
     if (!token) {
-      setError("Enter your admin token first.");
+      if (!options?.silent) {
+        setPanelError("observeAnalytics", "Enter your admin token first.");
+      }
       return;
     }
 
     setIsLoadingObserveReport(true);
     if (!options?.silent) {
-      setError("");
-      setSuccess("");
+      clearPanelNotice("observeAnalytics");
     }
 
     try {
@@ -559,14 +602,17 @@ export function AdminMonetizationConfigPanel() {
         window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
       }
       if (!options?.silent) {
-        setSuccess("Observe analytics loaded.");
+        setPanelSuccess("observeAnalytics", "Observe analytics loaded.");
       }
     } catch (observeError) {
-      setError(
-        observeError instanceof Error
-          ? observeError.message
-          : "Could not load observe analytics.",
-      );
+      if (!options?.silent) {
+        setPanelError(
+          "observeAnalytics",
+          observeError instanceof Error
+            ? observeError.message
+            : "Could not load observe analytics.",
+        );
+      }
     } finally {
       setIsLoadingObserveReport(false);
     }
@@ -575,15 +621,16 @@ export function AdminMonetizationConfigPanel() {
   async function loadReconciliationPreview(options?: { silent?: boolean }) {
     const token = adminToken.trim();
     if (!token) {
-      setError("Enter your admin token first.");
+      if (!options?.silent) {
+        setPanelError("reconciliation", "Enter your admin token first.");
+      }
       return;
     }
 
     const previewLimit = clampReconciliationLimit(reconciliationMaxCandidates);
     setIsLoadingReconciliationPreview(true);
     if (!options?.silent) {
-      setError("");
-      setSuccess("");
+      clearPanelNotice("reconciliation");
     }
 
     try {
@@ -613,13 +660,18 @@ export function AdminMonetizationConfigPanel() {
       setReconciliationPreview(validRows);
       setReconciliationSummary(null);
       if (!options?.silent) {
-        setSuccess(`Loaded preview: ${validRows.length} expired reservation(s).`);
+        setPanelSuccess("reconciliation", `Loaded preview: ${validRows.length} expired reservation(s).`);
       }
       if (typeof window !== "undefined") {
         window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
       }
     } catch (previewError) {
-      setError(previewError instanceof Error ? previewError.message : "Could not load preview.");
+      if (!options?.silent) {
+        setPanelError(
+          "reconciliation",
+          previewError instanceof Error ? previewError.message : "Could not load preview.",
+        );
+      }
     } finally {
       setIsLoadingReconciliationPreview(false);
     }
@@ -629,18 +681,17 @@ export function AdminMonetizationConfigPanel() {
     const token = adminToken.trim();
     const actor = adminActor.trim();
     if (!token) {
-      setError("Enter your admin token first.");
+      setPanelError("reconciliation", "Enter your admin token first.");
       return;
     }
     if (!actor) {
-      setError("Enter an actor name (who is making the change).");
+      setPanelError("reconciliation", "Enter an actor name (who is making the change).");
       return;
     }
 
     const maxCandidates = clampReconciliationLimit(reconciliationMaxCandidates);
     setIsRunningReconciliation(true);
-    setError("");
-    setSuccess("");
+    clearPanelNotice("reconciliation");
 
     try {
       const response = await fetch(
@@ -665,7 +716,8 @@ export function AdminMonetizationConfigPanel() {
       }
 
       setReconciliationSummary(payload.summary);
-      setSuccess(
+      setPanelSuccess(
+        "reconciliation",
         `Reconciliation complete. Released ${payload.summary.released} of ${payload.summary.scanned} scanned reservation(s).`,
       );
       if (typeof window !== "undefined") {
@@ -675,7 +727,10 @@ export function AdminMonetizationConfigPanel() {
 
       await loadReconciliationPreview({ silent: true });
     } catch (runError) {
-      setError(runError instanceof Error ? runError.message : "Could not run reconciliation.");
+      setPanelError(
+        "reconciliation",
+        runError instanceof Error ? runError.message : "Could not run reconciliation.",
+      );
     } finally {
       setIsRunningReconciliation(false);
     }
@@ -686,8 +741,7 @@ export function AdminMonetizationConfigPanel() {
       ...current,
       ...preset.config,
     }));
-    setError("");
-    setSuccess(`Preset applied: ${preset.label}`);
+    setPanelSuccess("quickPresets", `Preset applied: ${preset.label}`);
   }
 
   return (
@@ -732,13 +786,25 @@ export function AdminMonetizationConfigPanel() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={readConfig}
+            onClick={() => {
+              void readConfig("adminAccess");
+            }}
             disabled={isLoading}
             className="cursor-pointer rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isLoading ? "Loading..." : "Load Current Config"}
           </button>
         </div>
+        {panelNotices.adminAccess.error ? (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {panelNotices.adminAccess.error}
+          </p>
+        ) : null}
+        {panelNotices.adminAccess.success ? (
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {panelNotices.adminAccess.success}
+          </p>
+        ) : null}
       </section>
 
       <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -768,6 +834,16 @@ export function AdminMonetizationConfigPanel() {
             );
           })}
         </div>
+        {panelNotices.quickPresets.error ? (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {panelNotices.quickPresets.error}
+          </p>
+        ) : null}
+        {panelNotices.quickPresets.success ? (
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {panelNotices.quickPresets.success}
+          </p>
+        ) : null}
       </section>
 
       <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -828,7 +904,7 @@ export function AdminMonetizationConfigPanel() {
             <p className="text-2xl font-semibold text-emerald-900">{observeSnapshot24h.uniqueUsers}</p>
           </div>
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Estimated Block % (Today)</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Estimated Paywall Hits % (Today)</p>
             <p className="text-2xl font-semibold text-emerald-900">{observeTodayEstimate.wouldBlockPercentage}%</p>
           </div>
         </div>
@@ -839,7 +915,7 @@ export function AdminMonetizationConfigPanel() {
             <span className="font-semibold text-zinc-900">{observeTodayEstimate.overQuotaActions}</span>
           </p>
           <p>
-            Estimated Would-Block Actions (Today):{" "}
+            Estimated Paywall Hits (Today):{" "}
             <span className="font-semibold text-zinc-900">{observeTodayEstimate.estimatedBlockedActions}</span>
           </p>
         </div>
@@ -863,8 +939,8 @@ export function AdminMonetizationConfigPanel() {
                     <th className="px-3 py-2 font-semibold">Total</th>
                     <th className="px-3 py-2 font-semibold">Users</th>
                     <th className="px-3 py-2 font-semibold">Over Quota</th>
-                    <th className="px-3 py-2 font-semibold">Estimated Blocked</th>
-                    <th className="px-3 py-2 font-semibold">Would Block %</th>
+                    <th className="px-3 py-2 font-semibold">Estimated Paywall Hits</th>
+                    <th className="px-3 py-2 font-semibold">Paywall Hit %</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -905,8 +981,8 @@ export function AdminMonetizationConfigPanel() {
                     <th className="px-3 py-2 font-semibold">Total</th>
                     <th className="px-3 py-2 font-semibold">Available Credits</th>
                     <th className="px-3 py-2 font-semibold">Over Quota</th>
-                    <th className="px-3 py-2 font-semibold">Est. Blocked</th>
-                    <th className="px-3 py-2 font-semibold">Would Block Now</th>
+                    <th className="px-3 py-2 font-semibold">Est. Paywall Hits</th>
+                    <th className="px-3 py-2 font-semibold">Paywall Hit Now</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -937,6 +1013,16 @@ export function AdminMonetizationConfigPanel() {
             </div>
           )}
         </div>
+        {panelNotices.observeAnalytics.error ? (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {panelNotices.observeAnalytics.error}
+          </p>
+        ) : null}
+        {panelNotices.observeAnalytics.success ? (
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {panelNotices.observeAnalytics.success}
+          </p>
+        ) : null}
       </section>
 
       <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -1028,6 +1114,16 @@ export function AdminMonetizationConfigPanel() {
             </div>
           )}
         </div>
+        {panelNotices.reconciliation.error ? (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {panelNotices.reconciliation.error}
+          </p>
+        ) : null}
+        {panelNotices.reconciliation.success ? (
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {panelNotices.reconciliation.success}
+          </p>
+        ) : null}
       </section>
 
       <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -1128,22 +1224,23 @@ export function AdminMonetizationConfigPanel() {
           </button>
           <button
             type="button"
-            onClick={readConfig}
+            onClick={() => {
+              void readConfig("runtimeSettings");
+            }}
             disabled={isLoading}
             className="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Refresh
           </button>
         </div>
-
-        {error ? (
+        {panelNotices.runtimeSettings.error ? (
           <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
+            {panelNotices.runtimeSettings.error}
           </p>
         ) : null}
-        {success ? (
+        {panelNotices.runtimeSettings.success ? (
           <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {success}
+            {panelNotices.runtimeSettings.success}
           </p>
         ) : null}
       </section>
