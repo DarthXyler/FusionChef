@@ -1134,15 +1134,23 @@ export function AdminMonetizationConfigPanel() {
 
       <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-emerald-900">Runtime Settings</h2>
+        <p className="text-sm text-zinc-700">
+          These settings apply globally to all users. Use them to control rollout behavior without redeploying.
+        </p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <label className="flex items-center gap-3 rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-900">
-            <input
-              type="checkbox"
-              checked={form.enabled}
-              onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
-              className="h-4 w-4 accent-emerald-600"
-            />
-            Credits Enabled
+          <label className="space-y-2 rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-900">
+            <span className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                checked={form.enabled}
+                onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
+                className="h-4 w-4 accent-emerald-600"
+              />
+              Credits Enabled
+            </span>
+            <span className="block text-xs font-normal text-zinc-600">
+              Master switch for monetization. Off disables credit logic entirely. On follows the selected enforcement mode.
+            </span>
           </label>
 
           <label className="space-y-2 text-sm font-semibold text-emerald-900">
@@ -1161,6 +1169,9 @@ export function AdminMonetizationConfigPanel() {
               <option value="observe">observe (track only)</option>
               <option value="enforce">enforce (block when no credits)</option>
             </select>
+            <p className="text-xs font-normal text-zinc-600">
+              `off`: no monetization behavior. `observe`: record usage and simulate paywall impact, no blocking. `enforce`: apply free limits, then require credits.
+            </p>
           </label>
 
           <label className="space-y-2 text-sm font-semibold text-emerald-900">
@@ -1178,6 +1189,9 @@ export function AdminMonetizationConfigPanel() {
               }
               className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-base font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
             />
+            <p className="text-xs font-normal text-zinc-600">
+              Number of free Fuse actions each user gets per day before credit spend starts in enforce mode. Range: 0-20.
+            </p>
           </label>
 
           <label className="space-y-2 text-sm font-semibold text-emerald-900">
@@ -1195,18 +1209,26 @@ export function AdminMonetizationConfigPanel() {
               }
               className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-base font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
             />
+            <p className="text-xs font-normal text-zinc-600">
+              Number of free Reroll actions each user gets per day before credit spend starts in enforce mode. Range: 0-20.
+            </p>
           </label>
 
-          <label className="flex items-center gap-3 rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-900 md:col-span-2">
-            <input
-              type="checkbox"
-              checked={form.allowCompActions}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, allowCompActions: event.target.checked }))
-              }
-              className="h-4 w-4 accent-emerald-600"
-            />
-            Allow compensation actions (manual credit grants)
+          <label className="space-y-2 rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-900 md:col-span-2">
+            <span className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                checked={form.allowCompActions}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, allowCompActions: event.target.checked }))
+                }
+                className="h-4 w-4 accent-emerald-600"
+              />
+              Allow compensation actions (manual credit grants)
+            </span>
+            <span className="block text-xs font-normal text-zinc-600">
+              Global safety switch for admin compensation flows. This does not grant free credits to all users by itself; it only allows/disables support-side grant actions.
+            </span>
           </label>
         </div>
 
