@@ -188,7 +188,7 @@ const ADMIN_TABS: Array<{ key: AdminTab; label: string }> = [
   { key: "presets", label: "Presets" },
   { key: "pricing", label: "Pricing" },
   { key: "analytics", label: "Analytics" },
-  { key: "runtime", label: "Runtime" },
+  { key: "runtime", label: "Policy" },
   { key: "reconciliation", label: "Reconciliation" },
 ];
 
@@ -1660,7 +1660,7 @@ export function AdminMonetizationConfigPanel() {
 
       {activeTab === "runtime" ? (
       <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-emerald-900">Runtime Settings</h2>
+        <h2 className="text-lg font-semibold text-emerald-900">Monetization Policy</h2>
         <p className="text-sm text-zinc-700">
           These settings apply globally to all users. Use them to control rollout behavior without redeploying.
         </p>
