@@ -924,6 +924,9 @@ export function AdminMonetizationConfigPanel() {
           <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-900">
             Daily Trend
           </h3>
+          <p className="text-sm text-zinc-700">
+            Day-by-day action volume and estimated paywall pressure based on current free limits.
+          </p>
           {observeTrend.length === 0 ? (
             <p className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
               No trend data yet.
@@ -966,6 +969,9 @@ export function AdminMonetizationConfigPanel() {
           <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-900">
             Top Pressure Users (Today)
           </h3>
+          <p className="text-sm text-zinc-700">
+            Users most likely to hit credit limits today, useful for tuning free limits and support actions.
+          </p>
           {observeTopUsers.length === 0 ? (
             <p className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
               No user pressure data yet.
