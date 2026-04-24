@@ -7,6 +7,8 @@ import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import {
   getMonetizationRuntimeConfig,
   MonetizationConfigValidationError,
+  type MonetizationPackageKey,
+  type MonetizationPricingPackage,
   updateMonetizationRuntimeConfig,
   type MonetizationRuntimeConfigPatch,
 } from "@/lib/monetization-config";
@@ -24,11 +26,125 @@ import {
 } from "@/lib/idempotency";
 
 const MAX_CONFIG_BODY_BYTES = 20_000;
+const PACKAGE_KEYS = ["pack_1", "pack_2", "pack_3"] as const;
 
 class RequestValidationError extends Error {}
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parsePricingPackages(value: unknown) {
+  if (!Array.isArray(value)) {
+    throw new RequestValidationError("pricingPackages must be an array.");
+  }
+  const parsed: MonetizationPricingPackage[] = value.map((entry) => {
+    if (!isObjectRecord(entry)) {
+      throw new RequestValidationError("Each pricing package must be an object.");
+    }
+    const rawPackageKey = entry.packageKey;
+    if (
+      rawPackageKey !== "pack_1" &&
+      rawPackageKey !== "pack_2" &&
+      rawPackageKey !== "pack_3"
+    ) {
+      throw new RequestValidationError("pricing packageKey must be pack_1, pack_2, or pack_3.");
+    }
+    const packageKey: MonetizationPackageKey = rawPackageKey;
+    if (typeof entry.label !== "string" || !entry.label.trim()) {
+      throw new RequestValidationError("pricing package label is required.");
+    }
+    if (typeof entry.credits !== "number" || !Number.isFinite(entry.credits)) {
+      throw new RequestValidationError("pricing package credits must be a number.");
+    }
+    if (typeof entry.displayPriceUsd !== "number" || !Number.isFinite(entry.displayPriceUsd)) {
+      throw new RequestValidationError("pricing package displayPriceUsd must be a number.");
+    }
+    if (typeof entry.appleProductId !== "string" || !entry.appleProductId.trim()) {
+      throw new RequestValidationError("pricing package appleProductId is required.");
+    }
+    if (typeof entry.googleProductId !== "string") {
+      throw new RequestValidationError("pricing package googleProductId must be a string.");
+    }
+    if (typeof entry.active !== "boolean") {
+      throw new RequestValidationError("pricing package active must be boolean.");
+    }
+    return {
+      packageKey,
+      label: entry.label.trim(),
+      credits: Math.trunc(entry.credits),
+      displayPriceUsd: Math.round(entry.displayPriceUsd * 100) / 100,
+      appleProductId: entry.appleProductId.trim(),
+      googleProductId: entry.googleProductId.trim(),
+      active: entry.active,
+    };
+  });
+
+  const seenKeys = new Set<string>();
+  for (const entry of parsed) {
+    if (seenKeys.has(entry.packageKey)) {
+      throw new RequestValidationError("pricingPackages packageKey must be unique.");
+    }
+    seenKeys.add(entry.packageKey);
+  }
+  for (const requiredKey of PACKAGE_KEYS) {
+    if (!seenKeys.has(requiredKey)) {
+      throw new RequestValidationError("pricingPackages must include pack_1, pack_2, and pack_3.");
+    }
+  }
+  return parsed;
+}
+
+function parseSeasonalOffers(value: unknown) {
+  if (!Array.isArray(value)) {
+    throw new RequestValidationError("seasonalOffers must be an array.");
+  }
+  return value.map((entry) => {
+    if (!isObjectRecord(entry)) {
+      throw new RequestValidationError("Each seasonal offer must be an object.");
+    }
+    if (typeof entry.offerId !== "string" || !entry.offerId.trim()) {
+      throw new RequestValidationError("seasonal offer offerId is required.");
+    }
+    if (typeof entry.name !== "string" || !entry.name.trim()) {
+      throw new RequestValidationError("seasonal offer name is required.");
+    }
+    if (typeof entry.startDate !== "string" || !entry.startDate.trim()) {
+      throw new RequestValidationError("seasonal offer startDate is required.");
+    }
+    if (typeof entry.endDate !== "string" || !entry.endDate.trim()) {
+      throw new RequestValidationError("seasonal offer endDate is required.");
+    }
+    if (!isObjectRecord(entry.discountPercentByPackage)) {
+      throw new RequestValidationError("seasonal offer discountPercentByPackage is required.");
+    }
+    const discount = entry.discountPercentByPackage;
+    const pack1 = typeof discount.pack_1 === "number" ? Math.trunc(discount.pack_1) : NaN;
+    const pack2 = typeof discount.pack_2 === "number" ? Math.trunc(discount.pack_2) : NaN;
+    const pack3 = typeof discount.pack_3 === "number" ? Math.trunc(discount.pack_3) : NaN;
+    if (
+      !Number.isFinite(pack1) ||
+      !Number.isFinite(pack2) ||
+      !Number.isFinite(pack3)
+    ) {
+      throw new RequestValidationError("seasonal offer package discounts must be numbers.");
+    }
+    if (typeof entry.active !== "boolean") {
+      throw new RequestValidationError("seasonal offer active must be boolean.");
+    }
+    return {
+      offerId: entry.offerId.trim(),
+      name: entry.name.trim(),
+      startDate: entry.startDate.trim(),
+      endDate: entry.endDate.trim(),
+      discountPercentByPackage: {
+        pack_1: pack1,
+        pack_2: pack2,
+        pack_3: pack3,
+      },
+      active: entry.active,
+    };
+  });
 }
 
 function parseConfigPatch(body: unknown): MonetizationRuntimeConfigPatch {
@@ -75,6 +191,14 @@ function parseConfigPatch(body: unknown): MonetizationRuntimeConfigPatch {
       throw new RequestValidationError("allowCompActions must be boolean.");
     }
     patch.allowCompActions = body.allowCompActions;
+  }
+
+  if (typeof body.pricingPackages !== "undefined") {
+    patch.pricingPackages = parsePricingPackages(body.pricingPackages);
+  }
+
+  if (typeof body.seasonalOffers !== "undefined") {
+    patch.seasonalOffers = parseSeasonalOffers(body.seasonalOffers);
   }
 
   if (Object.keys(patch).length === 0) {

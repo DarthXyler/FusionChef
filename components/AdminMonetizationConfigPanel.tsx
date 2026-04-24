@@ -3,6 +3,26 @@
 import { useEffect, useState } from "react";
 
 type EnforcementMode = "off" | "observe" | "enforce";
+type PackageKey = "pack_1" | "pack_2" | "pack_3";
+
+type PricingPackageConfig = {
+  packageKey: PackageKey;
+  label: string;
+  credits: number;
+  displayPriceUsd: number;
+  appleProductId: string;
+  googleProductId: string;
+  active: boolean;
+};
+
+type SeasonalOfferConfig = {
+  offerId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  discountPercentByPackage: Record<PackageKey, number>;
+  active: boolean;
+};
 
 type RuntimeConfig = {
   enabled: boolean;
@@ -10,6 +30,8 @@ type RuntimeConfig = {
   freeDailyFuseActions: number;
   freeDailyRerollActions: number;
   allowCompActions: boolean;
+  pricingPackages: PricingPackageConfig[];
+  seasonalOffers: SeasonalOfferConfig[];
   updatedAt: string;
   updatedBy: string;
 };
@@ -74,6 +96,7 @@ type ObserveTopUserRow = {
 type PanelKey =
   | "adminAccess"
   | "quickPresets"
+  | "pricing"
   | "observeAnalytics"
   | "reconciliation"
   | "runtimeSettings";
@@ -83,10 +106,41 @@ type PanelNoticeState = {
   success: string;
 };
 
-type AdminTab = "access" | "presets" | "analytics" | "runtime" | "reconciliation";
+type AdminTab = "access" | "presets" | "pricing" | "analytics" | "runtime" | "reconciliation";
 
 const TOKEN_STORAGE_KEY = "flavor-fusion-admin-token:v1";
 const ACTOR_STORAGE_KEY = "flavor-fusion-admin-actor:v1";
+const PACKAGE_KEYS: PackageKey[] = ["pack_1", "pack_2", "pack_3"];
+
+const DEFAULT_PRICING_PACKAGES: PricingPackageConfig[] = [
+  {
+    packageKey: "pack_1",
+    label: "Starter Pack",
+    credits: 20,
+    displayPriceUsd: 2.99,
+    appleProductId: "com.flavorfusion.credits.20",
+    googleProductId: "credits_20",
+    active: true,
+  },
+  {
+    packageKey: "pack_2",
+    label: "Chef Pack",
+    credits: 50,
+    displayPriceUsd: 6.99,
+    appleProductId: "com.flavorfusion.credits.50",
+    googleProductId: "credits_50",
+    active: true,
+  },
+  {
+    packageKey: "pack_3",
+    label: "Pro Pack",
+    credits: 120,
+    displayPriceUsd: 14.99,
+    appleProductId: "com.flavorfusion.credits.120",
+    googleProductId: "credits_120",
+    active: true,
+  },
+];
 
 const DEFAULT_FORM: RuntimeConfig = {
   enabled: false,
@@ -94,6 +148,8 @@ const DEFAULT_FORM: RuntimeConfig = {
   freeDailyFuseActions: 0,
   freeDailyRerollActions: 0,
   allowCompActions: true,
+  pricingPackages: DEFAULT_PRICING_PACKAGES,
+  seasonalOffers: [],
   updatedAt: "",
   updatedBy: "",
 };
@@ -121,6 +177,7 @@ const DEFAULT_OBSERVE_TODAY: ObserveTodayEstimate = {
 const DEFAULT_PANEL_NOTICES: Record<PanelKey, PanelNoticeState> = {
   adminAccess: { error: "", success: "" },
   quickPresets: { error: "", success: "" },
+  pricing: { error: "", success: "" },
   observeAnalytics: { error: "", success: "" },
   reconciliation: { error: "", success: "" },
   runtimeSettings: { error: "", success: "" },
@@ -129,6 +186,7 @@ const DEFAULT_PANEL_NOTICES: Record<PanelKey, PanelNoticeState> = {
 const ADMIN_TABS: Array<{ key: AdminTab; label: string }> = [
   { key: "access", label: "Access" },
   { key: "presets", label: "Presets" },
+  { key: "pricing", label: "Pricing" },
   { key: "analytics", label: "Analytics" },
   { key: "runtime", label: "Runtime" },
   { key: "reconciliation", label: "Reconciliation" },
@@ -154,8 +212,60 @@ function isRuntimeConfig(value: unknown): value is RuntimeConfig {
     typeof candidate.freeDailyRerollActions === "number" &&
     Number.isFinite(candidate.freeDailyRerollActions) &&
     typeof candidate.allowCompActions === "boolean" &&
+    Array.isArray(candidate.pricingPackages) &&
+    candidate.pricingPackages.every(isPricingPackageConfig) &&
+    Array.isArray(candidate.seasonalOffers) &&
+    candidate.seasonalOffers.every(isSeasonalOfferConfig) &&
     typeof candidate.updatedAt === "string" &&
     typeof candidate.updatedBy === "string"
+  );
+}
+
+function isPricingPackageConfig(value: unknown): value is PricingPackageConfig {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    (candidate.packageKey === "pack_1" ||
+      candidate.packageKey === "pack_2" ||
+      candidate.packageKey === "pack_3") &&
+    typeof candidate.label === "string" &&
+    typeof candidate.credits === "number" &&
+    Number.isFinite(candidate.credits) &&
+    typeof candidate.displayPriceUsd === "number" &&
+    Number.isFinite(candidate.displayPriceUsd) &&
+    typeof candidate.appleProductId === "string" &&
+    typeof candidate.googleProductId === "string" &&
+    typeof candidate.active === "boolean"
+  );
+}
+
+function isSeasonalOfferConfig(value: unknown): value is SeasonalOfferConfig {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.offerId !== "string" ||
+    typeof candidate.name !== "string" ||
+    typeof candidate.startDate !== "string" ||
+    typeof candidate.endDate !== "string" ||
+    typeof candidate.active !== "boolean" ||
+    typeof candidate.discountPercentByPackage !== "object" ||
+    candidate.discountPercentByPackage === null ||
+    Array.isArray(candidate.discountPercentByPackage)
+  ) {
+    return false;
+  }
+  const discountMap = candidate.discountPercentByPackage as Record<string, unknown>;
+  return (
+    typeof discountMap.pack_1 === "number" &&
+    Number.isFinite(discountMap.pack_1) &&
+    typeof discountMap.pack_2 === "number" &&
+    Number.isFinite(discountMap.pack_2) &&
+    typeof discountMap.pack_3 === "number" &&
+    Number.isFinite(discountMap.pack_3)
   );
 }
 
@@ -209,6 +319,42 @@ function clampReconciliationLimit(value: number) {
   }
   if (normalized > 1000) {
     return 1000;
+  }
+  return normalized;
+}
+
+function clampPackageCredits(value: number) {
+  const normalized = Math.trunc(value);
+  if (normalized < 1) {
+    return 1;
+  }
+  if (normalized > 100_000) {
+    return 100_000;
+  }
+  return normalized;
+}
+
+function clampPackagePrice(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0.49;
+  }
+  const normalized = Math.round(value * 100) / 100;
+  if (normalized < 0.49) {
+    return 0.49;
+  }
+  if (normalized > 999.99) {
+    return 999.99;
+  }
+  return normalized;
+}
+
+function clampDiscountPercent(value: number) {
+  const normalized = Math.trunc(value);
+  if (normalized < 0) {
+    return 0;
+  }
+  if (normalized > 90) {
+    return 90;
   }
   return normalized;
 }
@@ -443,7 +589,9 @@ export function AdminMonetizationConfigPanel() {
     }
   }, []);
 
-  async function readConfig(origin: "adminAccess" | "runtimeSettings" = "adminAccess") {
+  async function readConfig(
+    origin: "adminAccess" | "runtimeSettings" | "pricing" = "adminAccess",
+  ) {
     const token = adminToken.trim();
     if (!token) {
       setPanelError(origin, "Enter your admin token first.");
@@ -484,20 +632,20 @@ export function AdminMonetizationConfigPanel() {
     }
   }
 
-  async function saveConfig() {
+  async function saveConfig(origin: "runtimeSettings" | "pricing" = "runtimeSettings") {
     const token = adminToken.trim();
     const actor = adminActor.trim();
     if (!token) {
-      setPanelError("runtimeSettings", "Enter your admin token first.");
+      setPanelError(origin, "Enter your admin token first.");
       return;
     }
     if (!actor) {
-      setPanelError("runtimeSettings", "Enter an actor name (who is making the change).");
+      setPanelError(origin, "Enter an actor name (who is making the change).");
       return;
     }
 
     setIsSaving(true);
-    clearPanelNotice("runtimeSettings");
+    clearPanelNotice(origin);
 
     try {
       const response = await fetch("/api/admin/monetization/config", {
@@ -514,6 +662,8 @@ export function AdminMonetizationConfigPanel() {
           freeDailyFuseActions: clampDailyLimit(form.freeDailyFuseActions),
           freeDailyRerollActions: clampDailyLimit(form.freeDailyRerollActions),
           allowCompActions: form.allowCompActions,
+          pricingPackages: form.pricingPackages,
+          seasonalOffers: form.seasonalOffers,
         }),
       });
 
@@ -528,7 +678,7 @@ export function AdminMonetizationConfigPanel() {
       }
 
       setForm(payload.config);
-      setPanelSuccess("runtimeSettings", "Monetization runtime config saved.");
+      setPanelSuccess(origin, "Monetization runtime config saved.");
       if (typeof window !== "undefined") {
         window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
         window.sessionStorage.setItem(ACTOR_STORAGE_KEY, actor);
@@ -536,7 +686,7 @@ export function AdminMonetizationConfigPanel() {
       await loadObserveReport({ silent: true });
     } catch (saveError) {
       setPanelError(
-        "runtimeSettings",
+        origin,
         saveError instanceof Error ? saveError.message : "Could not save config.",
       );
     } finally {
@@ -755,6 +905,145 @@ export function AdminMonetizationConfigPanel() {
     setPanelSuccess("quickPresets", `Preset applied: ${preset.label}`);
   }
 
+  function updatePricingPackageField(
+    packageKey: PackageKey,
+    field: keyof Omit<PricingPackageConfig, "packageKey">,
+    value: string | number | boolean,
+  ) {
+    setForm((current) => ({
+      ...current,
+      pricingPackages: current.pricingPackages.map((pack) => {
+        if (pack.packageKey !== packageKey) {
+          return pack;
+        }
+        if (field === "credits" && typeof value === "number") {
+          return { ...pack, credits: clampPackageCredits(value) };
+        }
+        if (field === "displayPriceUsd" && typeof value === "number") {
+          return { ...pack, displayPriceUsd: clampPackagePrice(value) };
+        }
+        if (field === "active" && typeof value === "boolean") {
+          return { ...pack, active: value };
+        }
+        if (
+          (field === "label" || field === "appleProductId" || field === "googleProductId") &&
+          typeof value === "string"
+        ) {
+          return { ...pack, [field]: value };
+        }
+        return pack;
+      }),
+    }));
+  }
+
+  function createBlankSeasonalOffer(): SeasonalOfferConfig {
+    const today = new Date();
+    const startDate = today.toISOString().slice(0, 10);
+    const endDate = startDate;
+    return {
+      offerId: `offer-${Date.now()}`,
+      name: "New Seasonal Offer",
+      startDate,
+      endDate,
+      discountPercentByPackage: {
+        pack_1: 0,
+        pack_2: 0,
+        pack_3: 0,
+      },
+      active: true,
+    };
+  }
+
+  function addSeasonalOffer() {
+    setForm((current) => ({
+      ...current,
+      seasonalOffers: [...current.seasonalOffers, createBlankSeasonalOffer()],
+    }));
+    setPanelSuccess("pricing", "Added seasonal offer row. Fill values, then click Save in this panel.");
+  }
+
+  function removeSeasonalOffer(offerId: string) {
+    setForm((current) => ({
+      ...current,
+      seasonalOffers: current.seasonalOffers.filter((offer) => offer.offerId !== offerId),
+    }));
+  }
+
+  function updateSeasonalOfferField(
+    offerId: string,
+    field: "name" | "startDate" | "endDate" | "active",
+    value: string | boolean,
+  ) {
+    setForm((current) => ({
+      ...current,
+      seasonalOffers: current.seasonalOffers.map((offer) => {
+        if (offer.offerId !== offerId) {
+          return offer;
+        }
+        if (field === "active" && typeof value === "boolean") {
+          return { ...offer, active: value };
+        }
+        if ((field === "name" || field === "startDate" || field === "endDate") && typeof value === "string") {
+          return { ...offer, [field]: value };
+        }
+        return offer;
+      }),
+    }));
+  }
+
+  function updateSeasonalOfferDiscount(
+    offerId: string,
+    packageKey: PackageKey,
+    value: number,
+  ) {
+    setForm((current) => ({
+      ...current,
+      seasonalOffers: current.seasonalOffers.map((offer) => {
+        if (offer.offerId !== offerId) {
+          return offer;
+        }
+        return {
+          ...offer,
+          discountPercentByPackage: {
+            ...offer.discountPercentByPackage,
+            [packageKey]: clampDiscountPercent(value),
+          },
+        };
+      }),
+    }));
+  }
+
+  function applyAllPackageDiscount(offerId: string, value: number) {
+    const clamped = clampDiscountPercent(value);
+    setForm((current) => ({
+      ...current,
+      seasonalOffers: current.seasonalOffers.map((offer) => {
+        if (offer.offerId !== offerId) {
+          return offer;
+        }
+        return {
+          ...offer,
+          discountPercentByPackage: {
+            pack_1: clamped,
+            pack_2: clamped,
+            pack_3: clamped,
+          },
+        };
+      }),
+    }));
+  }
+
+  function getUniformDiscountValue(offer: SeasonalOfferConfig) {
+    const first = offer.discountPercentByPackage.pack_1;
+    if (
+      offer.discountPercentByPackage.pack_2 === first &&
+      offer.discountPercentByPackage.pack_3 === first
+    ) {
+      return first;
+    }
+    return null;
+  }
+
   return (
     <div className="mx-auto w-full max-w-3xl animate-rise-in space-y-6">
       <section className="space-y-2 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -772,7 +1061,7 @@ export function AdminMonetizationConfigPanel() {
 
       <section className="space-y-3 rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm">
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-600">Admin Console</p>
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
           {ADMIN_TABS.map((tab) => {
             const isActive = activeTab === tab.key;
             return (
@@ -880,6 +1169,303 @@ export function AdminMonetizationConfigPanel() {
         {panelNotices.quickPresets.success ? (
           <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
             {panelNotices.quickPresets.success}
+          </p>
+        ) : null}
+      </section>
+      ) : null}
+
+      {activeTab === "pricing" ? (
+      <section className="space-y-5 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <div>
+          <h2 className="text-lg font-semibold text-emerald-900">Pricing and Seasonal Offers</h2>
+          <p className="text-sm text-zinc-700">
+            Manage the three credit packages and seasonal discounts without changing code.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-900">
+            Credit Packages
+          </h3>
+          <div className="space-y-3">
+            {form.pricingPackages.map((pack) => (
+              <div
+                key={pack.packageKey}
+                className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4"
+              >
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <label className="space-y-1 text-sm font-semibold text-emerald-900">
+                    Label
+                    <input
+                      type="text"
+                      value={pack.label}
+                      onChange={(event) =>
+                        updatePricingPackageField(pack.packageKey, "label", event.target.value)
+                      }
+                      className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                    />
+                  </label>
+                  <label className="space-y-1 text-sm font-semibold text-emerald-900">
+                    Credits
+                    <input
+                      type="number"
+                      min={1}
+                      max={100000}
+                      value={pack.credits}
+                      onChange={(event) =>
+                        updatePricingPackageField(
+                          pack.packageKey,
+                          "credits",
+                          Number(event.target.value),
+                        )
+                      }
+                      className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                    />
+                  </label>
+                  <label className="space-y-1 text-sm font-semibold text-emerald-900">
+                    Price (USD)
+                    <input
+                      type="number"
+                      min={0.49}
+                      max={999.99}
+                      step={0.01}
+                      value={pack.displayPriceUsd}
+                      onChange={(event) =>
+                        updatePricingPackageField(
+                          pack.packageKey,
+                          "displayPriceUsd",
+                          Number(event.target.value),
+                        )
+                      }
+                      className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                    />
+                  </label>
+                  <label className="space-y-1 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900">
+                    <span className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={pack.active}
+                        onChange={(event) =>
+                          updatePricingPackageField(
+                            pack.packageKey,
+                            "active",
+                            event.target.checked,
+                          )
+                        }
+                        className="h-4 w-4 accent-emerald-600"
+                      />
+                      Package Active
+                    </span>
+                    <span className="block text-xs font-normal text-zinc-600">
+                      Inactive packages are hidden from purchase options.
+                    </span>
+                  </label>
+                  <label className="space-y-1 text-sm font-semibold text-emerald-900">
+                    Apple Product ID
+                    <input
+                      type="text"
+                      value={pack.appleProductId}
+                      onChange={(event) =>
+                        updatePricingPackageField(
+                          pack.packageKey,
+                          "appleProductId",
+                          event.target.value,
+                        )
+                      }
+                      className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                    />
+                  </label>
+                  <label className="space-y-1 text-sm font-semibold text-emerald-900">
+                    Google Product ID
+                    <input
+                      type="text"
+                      value={pack.googleProductId}
+                      onChange={(event) =>
+                        updatePricingPackageField(
+                          pack.packageKey,
+                          "googleProductId",
+                          event.target.value,
+                        )
+                      }
+                      className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                    />
+                  </label>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-900">
+                Seasonal Offers
+              </h3>
+              <p className="text-sm text-zinc-700">
+                Set date ranges and discount percentage by package. Use one offer per campaign.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={addSeasonalOffer}
+              className="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50"
+            >
+              Add Offer
+            </button>
+          </div>
+
+          {form.seasonalOffers.length === 0 ? (
+            <p className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+              No seasonal offers yet.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {form.seasonalOffers.map((offer) => (
+                <div
+                  key={offer.offerId}
+                  className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4"
+                >
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <label className="space-y-1 text-sm font-semibold text-emerald-900">
+                      Offer Name
+                      <input
+                        type="text"
+                        value={offer.name}
+                        onChange={(event) =>
+                          updateSeasonalOfferField(offer.offerId, "name", event.target.value)
+                        }
+                        className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                      />
+                    </label>
+                    <label className="space-y-1 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900">
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={offer.active}
+                          onChange={(event) =>
+                            updateSeasonalOfferField(offer.offerId, "active", event.target.checked)
+                          }
+                          className="h-4 w-4 accent-emerald-600"
+                        />
+                        Offer Active
+                      </span>
+                      <span className="block text-xs font-normal text-zinc-600">
+                        Active offers apply only when today is inside the date range.
+                      </span>
+                    </label>
+                    <label className="space-y-1 text-sm font-semibold text-emerald-900">
+                      From Date
+                      <input
+                        type="date"
+                        value={offer.startDate}
+                        onChange={(event) =>
+                          updateSeasonalOfferField(offer.offerId, "startDate", event.target.value)
+                        }
+                        className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                      />
+                    </label>
+                    <label className="space-y-1 text-sm font-semibold text-emerald-900">
+                      To Date
+                      <input
+                        type="date"
+                        value={offer.endDate}
+                        onChange={(event) =>
+                          updateSeasonalOfferField(offer.offerId, "endDate", event.target.value)
+                        }
+                        className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                    {PACKAGE_KEYS.map((packageKey) => (
+                      <label
+                        key={`${offer.offerId}-${packageKey}`}
+                        className="space-y-1 text-sm font-semibold text-emerald-900"
+                      >
+                        {packageKey.replace("_", " ").toUpperCase()} % Off
+                        <input
+                          type="number"
+                          min={0}
+                          max={90}
+                          value={offer.discountPercentByPackage[packageKey]}
+                          onChange={(event) =>
+                            updateSeasonalOfferDiscount(
+                              offer.offerId,
+                              packageKey,
+                              Number(event.target.value),
+                            )
+                          }
+                          className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                        />
+                      </label>
+                    ))}
+                    <label className="space-y-1 text-sm font-semibold text-emerald-900">
+                      All Packages %
+                      <input
+                        type="number"
+                        min={0}
+                        max={90}
+                        value={getUniformDiscountValue(offer) ?? ""}
+                        onChange={(event) => {
+                          const raw = event.target.value;
+                          if (raw === "") {
+                            return;
+                          }
+                          applyAllPackageDiscount(offer.offerId, Number(raw));
+                        }}
+                        className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => removeSeasonalOffer(offer.offerId)}
+                      className="cursor-pointer rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50"
+                    >
+                      Remove Offer
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              void saveConfig("pricing");
+            }}
+            disabled={isSaving}
+            className="cursor-pointer rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? "Saving..." : "Save Pricing and Offers"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void readConfig("pricing");
+            }}
+            disabled={isLoading}
+            className="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {panelNotices.pricing.error ? (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {panelNotices.pricing.error}
+          </p>
+        ) : null}
+        {panelNotices.pricing.success ? (
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {panelNotices.pricing.success}
           </p>
         ) : null}
       </section>
@@ -1185,7 +1771,9 @@ export function AdminMonetizationConfigPanel() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={saveConfig}
+            onClick={() => {
+              void saveConfig("runtimeSettings");
+            }}
             disabled={isSaving}
             className="cursor-pointer rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
           >

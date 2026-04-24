@@ -21,6 +21,10 @@ function noStore(response: NextResponse) {
   response.headers.set("Cache-Control", "no-store");
 }
 
+function getTodayDateOnly() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export async function GET(request: NextRequest) {
   const limited = await enforceRateLimit(request, {
     bucket: "api-monetization-account",
@@ -59,6 +63,10 @@ export async function GET(request: NextRequest) {
         credits,
       })),
     ].sort((left, right) => left.credits - right.credits);
+    const today = getTodayDateOnly();
+    const activeSeasonalOffers = runtimeConfig.seasonalOffers.filter(
+      (offer) => offer.active && offer.startDate <= today && offer.endDate >= today,
+    );
 
     const response = NextResponse.json({
       enabled: runtimeConfig.enabled,
@@ -81,6 +89,9 @@ export async function GET(request: NextRequest) {
       },
       balance,
       products,
+      pricingPackages: runtimeConfig.pricingPackages,
+      seasonalOffers: runtimeConfig.seasonalOffers,
+      activeSeasonalOffers,
     });
     withIdentity(response, identity.anonUserId);
     applyAnonymousIdentityCookie(response, identity);
@@ -93,4 +104,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

@@ -6,6 +6,8 @@ import { executeTurso } from "@/lib/turso";
 
 const GLOBAL_CONFIG_KEY = "global";
 const DEFAULT_MAX_FREE_DAILY_ACTIONS = 20;
+const DEFAULT_MAX_SEASONAL_OFFERS = 20;
+const PACKAGE_KEYS = ["pack_1", "pack_2", "pack_3"] as const;
 const CONFIG_CACHE_TTL_MS = 10_000;
 
 let schemaReady: Promise<void> | null = null;
@@ -15,6 +17,26 @@ let configCache: {
 } | null = null;
 
 export type MonetizationEnforcementMode = "off" | "observe" | "enforce";
+export type MonetizationPackageKey = (typeof PACKAGE_KEYS)[number];
+
+export type MonetizationPricingPackage = {
+  packageKey: MonetizationPackageKey;
+  label: string;
+  credits: number;
+  displayPriceUsd: number;
+  appleProductId: string;
+  googleProductId: string;
+  active: boolean;
+};
+
+export type MonetizationSeasonalOffer = {
+  offerId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  discountPercentByPackage: Record<MonetizationPackageKey, number>;
+  active: boolean;
+};
 
 export type MonetizationRuntimeConfig = {
   enabled: boolean;
@@ -22,6 +44,8 @@ export type MonetizationRuntimeConfig = {
   freeDailyFuseActions: number;
   freeDailyRerollActions: number;
   allowCompActions: boolean;
+  pricingPackages: MonetizationPricingPackage[];
+  seasonalOffers: MonetizationSeasonalOffer[];
   updatedAt: string;
   updatedBy: string;
 };
@@ -34,6 +58,8 @@ export type MonetizationRuntimeConfigPatch = Partial<
     | "freeDailyFuseActions"
     | "freeDailyRerollActions"
     | "allowCompActions"
+    | "pricingPackages"
+    | "seasonalOffers"
   >
 >;
 
@@ -60,6 +86,172 @@ function toPositiveInteger(value: unknown, fallback: number) {
   return Math.min(normalized, DEFAULT_MAX_FREE_DAILY_ACTIONS);
 }
 
+function toIntegerInRange(value: unknown, fallback: number, min: number, max: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  const normalized = Math.trunc(value);
+  if (normalized < min || normalized > max) {
+    return fallback;
+  }
+  return normalized;
+}
+
+function toNumberInRange(value: unknown, fallback: number, min: number, max: number, decimals = 2) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  if (value < min || value > max) {
+    return fallback;
+  }
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeLabel(value: unknown, fallback: string) {
+  const label = asString(value).trim();
+  if (!label) {
+    return fallback;
+  }
+  return label.slice(0, 80);
+}
+
+function normalizeProductId(value: unknown) {
+  return asString(value).trim().slice(0, 160);
+}
+
+function normalizePackageKey(value: unknown): MonetizationPackageKey | null {
+  if (value === "pack_1" || value === "pack_2" || value === "pack_3") {
+    return value;
+  }
+  return null;
+}
+
+function isDateOnly(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function toDateOnly(value: unknown) {
+  const raw = asString(value).trim();
+  return isDateOnly(raw) ? raw : "";
+}
+
+const DEFAULT_PRICING_PACKAGES: MonetizationPricingPackage[] = [
+  {
+    packageKey: "pack_1",
+    label: "Starter Pack",
+    credits: 20,
+    displayPriceUsd: 2.99,
+    appleProductId: "com.flavorfusion.credits.20",
+    googleProductId: "credits_20",
+    active: true,
+  },
+  {
+    packageKey: "pack_2",
+    label: "Chef Pack",
+    credits: 50,
+    displayPriceUsd: 6.99,
+    appleProductId: "com.flavorfusion.credits.50",
+    googleProductId: "credits_50",
+    active: true,
+  },
+  {
+    packageKey: "pack_3",
+    label: "Pro Pack",
+    credits: 120,
+    displayPriceUsd: 14.99,
+    appleProductId: "com.flavorfusion.credits.120",
+    googleProductId: "credits_120",
+    active: true,
+  },
+];
+
+function normalizePricingPackages(raw: unknown) {
+  if (!Array.isArray(raw)) {
+    return DEFAULT_PRICING_PACKAGES;
+  }
+
+  const byKey = new Map<MonetizationPackageKey, MonetizationPricingPackage>();
+  for (const base of DEFAULT_PRICING_PACKAGES) {
+    byKey.set(base.packageKey, base);
+  }
+
+  for (const entry of raw) {
+    if (!isObjectRecord(entry)) {
+      continue;
+    }
+    const packageKey = normalizePackageKey(entry.packageKey);
+    if (!packageKey) {
+      continue;
+    }
+    const fallback = byKey.get(packageKey) ?? DEFAULT_PRICING_PACKAGES[0];
+    byKey.set(packageKey, {
+      packageKey,
+      label: normalizeLabel(entry.label, fallback.label),
+      credits: toIntegerInRange(entry.credits, fallback.credits, 1, 100_000),
+      displayPriceUsd: toNumberInRange(entry.displayPriceUsd, fallback.displayPriceUsd, 0.49, 999.99),
+      appleProductId: normalizeProductId(entry.appleProductId) || fallback.appleProductId,
+      googleProductId: normalizeProductId(entry.googleProductId) || fallback.googleProductId,
+      active: entry.active !== false,
+    });
+  }
+
+  return PACKAGE_KEYS.map((key) => byKey.get(key) ?? DEFAULT_PRICING_PACKAGES[0]);
+}
+
+function normalizeOfferId(raw: unknown) {
+  const trimmed = asString(raw).trim();
+  return trimmed.slice(0, 120);
+}
+
+function normalizeSeasonalOffers(raw: unknown) {
+  if (!Array.isArray(raw)) {
+    return [] as MonetizationSeasonalOffer[];
+  }
+
+  const offers: MonetizationSeasonalOffer[] = [];
+  for (const entry of raw) {
+    if (!isObjectRecord(entry)) {
+      continue;
+    }
+    const name = normalizeLabel(entry.name, "");
+    const startDate = toDateOnly(entry.startDate);
+    const endDate = toDateOnly(entry.endDate);
+    if (!name || !startDate || !endDate) {
+      continue;
+    }
+
+    const rawDiscountMap = isObjectRecord(entry.discountPercentByPackage)
+      ? entry.discountPercentByPackage
+      : {};
+    const discountPercentByPackage: Record<MonetizationPackageKey, number> = {
+      pack_1: toIntegerInRange(rawDiscountMap.pack_1, 0, 0, 90),
+      pack_2: toIntegerInRange(rawDiscountMap.pack_2, 0, 0, 90),
+      pack_3: toIntegerInRange(rawDiscountMap.pack_3, 0, 0, 90),
+    };
+
+    const offerId = normalizeOfferId(entry.offerId) || `offer-${startDate}-${name.toLowerCase().replace(/\s+/g, "-")}`.slice(0, 120);
+    offers.push({
+      offerId,
+      name,
+      startDate,
+      endDate,
+      discountPercentByPackage,
+      active: entry.active !== false,
+    });
+
+    if (offers.length >= DEFAULT_MAX_SEASONAL_OFFERS) {
+      break;
+    }
+  }
+
+  return offers;
+}
+
 function normalizeConfig(raw: unknown, updatedAt: string, updatedBy: string): MonetizationRuntimeConfig {
   if (!isObjectRecord(raw)) {
     return {
@@ -68,6 +260,8 @@ function normalizeConfig(raw: unknown, updatedAt: string, updatedBy: string): Mo
       freeDailyFuseActions: 0,
       freeDailyRerollActions: 0,
       allowCompActions: true,
+      pricingPackages: DEFAULT_PRICING_PACKAGES,
+      seasonalOffers: [],
       updatedAt,
       updatedBy,
     };
@@ -86,13 +280,11 @@ function normalizeConfig(raw: unknown, updatedAt: string, updatedBy: string): Mo
     freeDailyFuseActions: toPositiveInteger(raw.freeDailyFuseActions, 0),
     freeDailyRerollActions: toPositiveInteger(raw.freeDailyRerollActions, 0),
     allowCompActions: raw.allowCompActions !== false,
+    pricingPackages: normalizePricingPackages(raw.pricingPackages),
+    seasonalOffers: normalizeSeasonalOffers(raw.seasonalOffers),
     updatedAt,
     updatedBy,
   };
-}
-
-function asString(value: unknown) {
-  return typeof value === "string" ? value : "";
 }
 
 async function ensureSchema() {
@@ -200,6 +392,61 @@ function applyPatch(
     );
   }
 
+  const seenPackageKeys = new Set<MonetizationPackageKey>();
+  if (next.pricingPackages.length !== PACKAGE_KEYS.length) {
+    throw new MonetizationConfigValidationError("pricingPackages must contain exactly 3 packages.");
+  }
+  for (const pack of next.pricingPackages) {
+    if (!normalizePackageKey(pack.packageKey)) {
+      throw new MonetizationConfigValidationError("Invalid pricing package key.");
+    }
+    if (seenPackageKeys.has(pack.packageKey)) {
+      throw new MonetizationConfigValidationError("pricingPackages must have unique package keys.");
+    }
+    seenPackageKeys.add(pack.packageKey);
+    if (!pack.label.trim()) {
+      throw new MonetizationConfigValidationError("Each pricing package needs a label.");
+    }
+    if (pack.credits < 1 || pack.credits > 100_000) {
+      throw new MonetizationConfigValidationError("Package credits must be between 1 and 100000.");
+    }
+    if (pack.displayPriceUsd < 0.49 || pack.displayPriceUsd > 999.99) {
+      throw new MonetizationConfigValidationError("Package displayPriceUsd must be between 0.49 and 999.99.");
+    }
+    if (!pack.appleProductId.trim()) {
+      throw new MonetizationConfigValidationError("Each package needs an Apple product id.");
+    }
+  }
+
+  if (next.seasonalOffers.length > DEFAULT_MAX_SEASONAL_OFFERS) {
+    throw new MonetizationConfigValidationError(`seasonalOffers cannot exceed ${DEFAULT_MAX_SEASONAL_OFFERS}.`);
+  }
+  const seenOfferIds = new Set<string>();
+  for (const offer of next.seasonalOffers) {
+    if (!offer.offerId.trim()) {
+      throw new MonetizationConfigValidationError("Each seasonal offer needs an offerId.");
+    }
+    if (seenOfferIds.has(offer.offerId)) {
+      throw new MonetizationConfigValidationError("seasonalOffers offerId must be unique.");
+    }
+    seenOfferIds.add(offer.offerId);
+    if (!offer.name.trim()) {
+      throw new MonetizationConfigValidationError("Each seasonal offer needs a name.");
+    }
+    if (!isDateOnly(offer.startDate) || !isDateOnly(offer.endDate)) {
+      throw new MonetizationConfigValidationError("Seasonal offer dates must use YYYY-MM-DD.");
+    }
+    if (offer.startDate > offer.endDate) {
+      throw new MonetizationConfigValidationError("Seasonal offer startDate must be <= endDate.");
+    }
+    for (const key of PACKAGE_KEYS) {
+      const discount = offer.discountPercentByPackage[key];
+      if (!Number.isFinite(discount) || Math.trunc(discount) !== discount || discount < 0 || discount > 90) {
+        throw new MonetizationConfigValidationError("Seasonal offer discount must be an integer between 0 and 90.");
+      }
+    }
+  }
+
   return next;
 }
 
@@ -218,6 +465,8 @@ export async function updateMonetizationRuntimeConfig(
     freeDailyFuseActions: next.freeDailyFuseActions,
     freeDailyRerollActions: next.freeDailyRerollActions,
     allowCompActions: next.allowCompActions,
+    pricingPackages: next.pricingPackages,
+    seasonalOffers: next.seasonalOffers,
   };
 
   await executeTurso({
