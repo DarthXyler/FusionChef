@@ -14,6 +14,21 @@ type RuntimeConfig = {
   updatedBy: string;
 };
 
+type ReconciliationPreviewItem = {
+  reservationId: string;
+  anonUserId: string;
+  actionKind: "fuse" | "reroll";
+  amount: number;
+  expiresAt: string;
+};
+
+type ReconciliationSummary = {
+  scanned: number;
+  released: number;
+  alreadyFinalized: number;
+  failed: number;
+};
+
 const TOKEN_STORAGE_KEY = "flavor-fusion-admin-token:v1";
 const ACTOR_STORAGE_KEY = "flavor-fusion-admin-actor:v1";
 
@@ -27,8 +42,8 @@ const DEFAULT_FORM: RuntimeConfig = {
   updatedBy: "",
 };
 
-function generateIdempotencyKey() {
-  return `cfg-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+function generateIdempotencyKey(scope: string) {
+  return `${scope}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
 function isRuntimeConfig(value: unknown): value is RuntimeConfig {
@@ -52,6 +67,38 @@ function isRuntimeConfig(value: unknown): value is RuntimeConfig {
   );
 }
 
+function isReconciliationPreviewItem(value: unknown): value is ReconciliationPreviewItem {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.reservationId === "string" &&
+    typeof candidate.anonUserId === "string" &&
+    (candidate.actionKind === "fuse" || candidate.actionKind === "reroll") &&
+    typeof candidate.amount === "number" &&
+    Number.isFinite(candidate.amount) &&
+    typeof candidate.expiresAt === "string"
+  );
+}
+
+function isReconciliationSummary(value: unknown): value is ReconciliationSummary {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.scanned === "number" &&
+    Number.isFinite(candidate.scanned) &&
+    typeof candidate.released === "number" &&
+    Number.isFinite(candidate.released) &&
+    typeof candidate.alreadyFinalized === "number" &&
+    Number.isFinite(candidate.alreadyFinalized) &&
+    typeof candidate.failed === "number" &&
+    Number.isFinite(candidate.failed)
+  );
+}
+
 function clampDailyLimit(value: number) {
   const normalized = Math.trunc(value);
   if (normalized < 0) {
@@ -59,6 +106,17 @@ function clampDailyLimit(value: number) {
   }
   if (normalized > 20) {
     return 20;
+  }
+  return normalized;
+}
+
+function clampReconciliationLimit(value: number) {
+  const normalized = Math.trunc(value);
+  if (normalized < 1) {
+    return 1;
+  }
+  if (normalized > 1000) {
+    return 1000;
   }
   return normalized;
 }
@@ -129,6 +187,15 @@ export function AdminMonetizationConfigPanel() {
   const [form, setForm] = useState<RuntimeConfig>(DEFAULT_FORM);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingReconciliationPreview, setIsLoadingReconciliationPreview] = useState(false);
+  const [isRunningReconciliation, setIsRunningReconciliation] = useState(false);
+  const [reconciliationMaxCandidates, setReconciliationMaxCandidates] = useState(200);
+  const [reconciliationPreview, setReconciliationPreview] = useState<ReconciliationPreviewItem[]>(
+    [],
+  );
+  const [reconciliationSummary, setReconciliationSummary] = useState<ReconciliationSummary | null>(
+    null,
+  );
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -211,7 +278,7 @@ export function AdminMonetizationConfigPanel() {
           "Content-Type": "application/json",
           "x-admin-token": token,
           "x-admin-actor": actor,
-          "idempotency-key": generateIdempotencyKey(),
+          "idempotency-key": generateIdempotencyKey("cfg"),
         },
         body: JSON.stringify({
           enabled: form.enabled,
@@ -242,6 +309,115 @@ export function AdminMonetizationConfigPanel() {
       setError(saveError instanceof Error ? saveError.message : "Could not save config.");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function loadReconciliationPreview(options?: { silent?: boolean }) {
+    const token = adminToken.trim();
+    if (!token) {
+      setError("Enter your admin token first.");
+      return;
+    }
+
+    const previewLimit = clampReconciliationLimit(reconciliationMaxCandidates);
+    setIsLoadingReconciliationPreview(true);
+    if (!options?.silent) {
+      setError("");
+      setSuccess("");
+    }
+
+    try {
+      const response = await fetch(
+        `/api/admin/monetization/reconciliation?previewLimit=${previewLimit}`,
+        {
+          method: "GET",
+          headers: {
+            "x-admin-token": token,
+          },
+          cache: "no-store",
+        },
+      );
+      const payload = (await response.json()) as {
+        preview?: unknown;
+        expiredCount?: unknown;
+        error?: unknown;
+      };
+      if (!response.ok) {
+        throw new Error(
+          typeof payload.error === "string" ? payload.error : "Could not load reconciliation preview.",
+        );
+      }
+
+      const previewRows = Array.isArray(payload.preview) ? payload.preview : [];
+      const validRows = previewRows.filter(isReconciliationPreviewItem);
+      setReconciliationPreview(validRows);
+      setReconciliationSummary(null);
+      if (!options?.silent) {
+        setSuccess(`Loaded preview: ${validRows.length} expired reservation(s).`);
+      }
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+      }
+    } catch (previewError) {
+      setError(previewError instanceof Error ? previewError.message : "Could not load preview.");
+    } finally {
+      setIsLoadingReconciliationPreview(false);
+    }
+  }
+
+  async function runReconciliationNow() {
+    const token = adminToken.trim();
+    const actor = adminActor.trim();
+    if (!token) {
+      setError("Enter your admin token first.");
+      return;
+    }
+    if (!actor) {
+      setError("Enter an actor name (who is making the change).");
+      return;
+    }
+
+    const maxCandidates = clampReconciliationLimit(reconciliationMaxCandidates);
+    setIsRunningReconciliation(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch(
+        `/api/admin/monetization/reconciliation?maxCandidates=${maxCandidates}`,
+        {
+          method: "POST",
+          headers: {
+            "x-admin-token": token,
+            "x-admin-actor": actor,
+            "idempotency-key": generateIdempotencyKey("recon"),
+          },
+        },
+      );
+      const payload = (await response.json()) as { summary?: unknown; error?: unknown };
+      if (!response.ok) {
+        throw new Error(
+          typeof payload.error === "string" ? payload.error : "Could not run reconciliation.",
+        );
+      }
+      if (!isReconciliationSummary(payload.summary)) {
+        throw new Error("Reconciliation response format was invalid.");
+      }
+
+      setReconciliationSummary(payload.summary);
+      setSuccess(
+        `Reconciliation complete. Released ${payload.summary.released} of ${payload.summary.scanned} scanned reservation(s).`,
+      );
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+        window.sessionStorage.setItem(ACTOR_STORAGE_KEY, actor);
+      }
+
+      await loadReconciliationPreview({ silent: true });
+    } catch (runError) {
+      setError(runError instanceof Error ? runError.message : "Could not run reconciliation.");
+    } finally {
+      setIsRunningReconciliation(false);
     }
   }
 
@@ -319,6 +495,97 @@ export function AdminMonetizationConfigPanel() {
               <p className="mt-1 text-sm text-zinc-600">{preset.description}</p>
             </button>
           ))}
+        </div>
+      </section>
+
+      <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-emerald-900">Credit Reconciliation</h2>
+        <p className="text-sm text-zinc-700">
+          Run this manually when users report stuck credits. It releases expired reservations
+          immediately, without waiting for scheduled cron.
+        </p>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <label className="space-y-2 text-sm font-semibold text-emerald-900">
+            Max Candidates
+            <input
+              type="number"
+              min={1}
+              max={1000}
+              value={reconciliationMaxCandidates}
+              onChange={(event) =>
+                setReconciliationMaxCandidates(
+                  clampReconciliationLimit(Number(event.target.value)),
+                )
+              }
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-base font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            />
+          </label>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              void loadReconciliationPreview();
+            }}
+            disabled={isLoadingReconciliationPreview}
+            className="rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isLoadingReconciliationPreview ? "Loading Preview..." : "Preview Expired Reservations"}
+          </button>
+          <button
+            type="button"
+            onClick={runReconciliationNow}
+            disabled={isRunningReconciliation}
+            className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isRunningReconciliation ? "Running..." : "Run Reconciliation Now"}
+          </button>
+        </div>
+
+        {reconciliationSummary ? (
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+            <p className="font-semibold text-zinc-900">Last Run Summary</p>
+            <p>Scanned: {reconciliationSummary.scanned}</p>
+            <p>Released: {reconciliationSummary.released}</p>
+            <p>Already Finalized: {reconciliationSummary.alreadyFinalized}</p>
+            <p>Failed: {reconciliationSummary.failed}</p>
+          </div>
+        ) : null}
+
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+          <p className="mb-2 text-sm font-semibold text-zinc-900">
+            Expired Reservation Preview ({reconciliationPreview.length})
+          </p>
+          {reconciliationPreview.length === 0 ? (
+            <p className="text-sm text-zinc-700">No expired reservations found in the current preview.</p>
+          ) : (
+            <div className="max-h-56 overflow-auto rounded-xl border border-zinc-200 bg-white">
+              <table className="w-full min-w-[560px] text-left text-sm">
+                <thead className="bg-zinc-50 text-zinc-700">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">Reservation</th>
+                    <th className="px-3 py-2 font-semibold">User</th>
+                    <th className="px-3 py-2 font-semibold">Action</th>
+                    <th className="px-3 py-2 font-semibold">Amount</th>
+                    <th className="px-3 py-2 font-semibold">Expired At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reconciliationPreview.map((item) => (
+                    <tr key={item.reservationId} className="border-t border-zinc-100 text-zinc-800">
+                      <td className="px-3 py-2 font-mono text-xs">{item.reservationId}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{item.anonUserId}</td>
+                      <td className="px-3 py-2">{item.actionKind}</td>
+                      <td className="px-3 py-2">{item.amount}</td>
+                      <td className="px-3 py-2">{toIsoLabel(item.expiresAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </section>
 
@@ -442,4 +709,3 @@ export function AdminMonetizationConfigPanel() {
     </div>
   );
 }
-
