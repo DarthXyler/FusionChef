@@ -3,6 +3,7 @@ import { AdminMonetizationConfigPanel } from "@/components/AdminMonetizationConf
 
 export const metadata: Metadata = {
   title: "Monetization Admin",
+  description: "Internal runtime monetization controls.",
   robots: {
     index: false,
     follow: false,
@@ -12,4 +13,3 @@ export const metadata: Metadata = {
 export default function AdminMonetizationPage() {
   return <AdminMonetizationConfigPanel />;
 }
-
