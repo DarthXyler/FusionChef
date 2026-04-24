@@ -83,6 +83,8 @@ type PanelNoticeState = {
   success: string;
 };
 
+type AdminTab = "access" | "presets" | "analytics" | "runtime" | "reconciliation";
+
 const TOKEN_STORAGE_KEY = "flavor-fusion-admin-token:v1";
 const ACTOR_STORAGE_KEY = "flavor-fusion-admin-actor:v1";
 
@@ -123,6 +125,14 @@ const DEFAULT_PANEL_NOTICES: Record<PanelKey, PanelNoticeState> = {
   reconciliation: { error: "", success: "" },
   runtimeSettings: { error: "", success: "" },
 };
+
+const ADMIN_TABS: Array<{ key: AdminTab; label: string }> = [
+  { key: "access", label: "Access" },
+  { key: "presets", label: "Presets" },
+  { key: "analytics", label: "Analytics" },
+  { key: "runtime", label: "Runtime" },
+  { key: "reconciliation", label: "Reconciliation" },
+];
 
 function generateIdempotencyKey(scope: string) {
   return `${scope}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
@@ -368,6 +378,7 @@ const PRESETS: Preset[] = [
 ];
 
 export function AdminMonetizationConfigPanel() {
+  const [activeTab, setActiveTab] = useState<AdminTab>("access");
   const [adminToken, setAdminToken] = useState("");
   const [adminActor, setAdminActor] = useState("kevin");
   const [form, setForm] = useState<RuntimeConfig>(DEFAULT_FORM);
@@ -759,6 +770,31 @@ export function AdminMonetizationConfigPanel() {
         </p>
       </section>
 
+      <section className="space-y-3 rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-600">Admin Console</p>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+          {ADMIN_TABS.map((tab) => {
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={[
+                  "cursor-pointer rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                  isActive
+                    ? "border-emerald-700 bg-emerald-600 text-white"
+                    : "border-zinc-300 bg-zinc-50 text-zinc-800 hover:border-emerald-400 hover:bg-emerald-50",
+                ].join(" ")}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {activeTab === "access" ? (
       <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-emerald-900">Admin Access</h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -806,7 +842,9 @@ export function AdminMonetizationConfigPanel() {
           </p>
         ) : null}
       </section>
+      ) : null}
 
+      {activeTab === "presets" ? (
       <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-emerald-900">Quick Presets</h2>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -845,7 +883,9 @@ export function AdminMonetizationConfigPanel() {
           </p>
         ) : null}
       </section>
+      ) : null}
 
+      {activeTab === "analytics" ? (
       <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -1030,108 +1070,9 @@ export function AdminMonetizationConfigPanel() {
           </p>
         ) : null}
       </section>
+      ) : null}
 
-      <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-emerald-900">Credit Reconciliation</h2>
-        <p className="text-sm text-zinc-700">
-          Run this manually when users report stuck credits. It releases expired reservations
-          immediately, without waiting for scheduled cron.
-        </p>
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <label className="space-y-2 text-sm font-semibold text-emerald-900">
-            Max Candidates
-            <input
-              type="number"
-              min={1}
-              max={1000}
-              value={reconciliationMaxCandidates}
-              onChange={(event) =>
-                setReconciliationMaxCandidates(
-                  clampReconciliationLimit(Number(event.target.value)),
-                )
-              }
-              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-base font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
-            />
-          </label>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              void loadReconciliationPreview();
-            }}
-            disabled={isLoadingReconciliationPreview}
-            className="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isLoadingReconciliationPreview ? "Loading Preview..." : "Preview Expired Reservations"}
-          </button>
-          <button
-            type="button"
-            onClick={runReconciliationNow}
-            disabled={isRunningReconciliation}
-            className="cursor-pointer rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isRunningReconciliation ? "Running..." : "Run Reconciliation Now"}
-          </button>
-        </div>
-
-        {reconciliationSummary ? (
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
-            <p className="font-semibold text-zinc-900">Last Run Summary</p>
-            <p>Scanned: {reconciliationSummary.scanned}</p>
-            <p>Released: {reconciliationSummary.released}</p>
-            <p>Already Finalized: {reconciliationSummary.alreadyFinalized}</p>
-            <p>Failed: {reconciliationSummary.failed}</p>
-          </div>
-        ) : null}
-
-        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
-          <p className="mb-2 text-sm font-semibold text-zinc-900">
-            Expired Reservation Preview ({reconciliationPreview.length})
-          </p>
-          {reconciliationPreview.length === 0 ? (
-            <p className="text-sm text-zinc-700">No expired reservations found in the current preview.</p>
-          ) : (
-            <div className="max-h-56 overflow-auto rounded-xl border border-zinc-200 bg-white">
-              <table className="w-full min-w-[560px] text-left text-sm">
-                <thead className="bg-zinc-50 text-zinc-700">
-                  <tr>
-                    <th className="px-3 py-2 font-semibold">Reservation</th>
-                    <th className="px-3 py-2 font-semibold">User</th>
-                    <th className="px-3 py-2 font-semibold">Action</th>
-                    <th className="px-3 py-2 font-semibold">Amount</th>
-                    <th className="px-3 py-2 font-semibold">Expired At</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reconciliationPreview.map((item) => (
-                    <tr key={item.reservationId} className="border-t border-zinc-100 text-zinc-800">
-                      <td className="px-3 py-2 font-mono text-xs">{item.reservationId}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{item.anonUserId}</td>
-                      <td className="px-3 py-2">{item.actionKind}</td>
-                      <td className="px-3 py-2">{item.amount}</td>
-                      <td className="px-3 py-2">{toIsoLabel(item.expiresAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-        {panelNotices.reconciliation.error ? (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {panelNotices.reconciliation.error}
-          </p>
-        ) : null}
-        {panelNotices.reconciliation.success ? (
-          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {panelNotices.reconciliation.success}
-          </p>
-        ) : null}
-      </section>
-
+      {activeTab === "runtime" ? (
       <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-emerald-900">Runtime Settings</h2>
         <p className="text-sm text-zinc-700">
@@ -1272,6 +1213,110 @@ export function AdminMonetizationConfigPanel() {
           </p>
         ) : null}
       </section>
+      ) : null}
+
+      {activeTab === "reconciliation" ? (
+      <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-emerald-900">Credit Reconciliation</h2>
+        <p className="text-sm text-zinc-700">
+          Run this manually when users report stuck credits. It releases expired reservations
+          immediately, without waiting for scheduled cron.
+        </p>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <label className="space-y-2 text-sm font-semibold text-emerald-900">
+            Max Candidates
+            <input
+              type="number"
+              min={1}
+              max={1000}
+              value={reconciliationMaxCandidates}
+              onChange={(event) =>
+                setReconciliationMaxCandidates(
+                  clampReconciliationLimit(Number(event.target.value)),
+                )
+              }
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-base font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            />
+          </label>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              void loadReconciliationPreview();
+            }}
+            disabled={isLoadingReconciliationPreview}
+            className="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isLoadingReconciliationPreview ? "Loading Preview..." : "Preview Expired Reservations"}
+          </button>
+          <button
+            type="button"
+            onClick={runReconciliationNow}
+            disabled={isRunningReconciliation}
+            className="cursor-pointer rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isRunningReconciliation ? "Running..." : "Run Reconciliation Now"}
+          </button>
+        </div>
+
+        {reconciliationSummary ? (
+          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+            <p className="font-semibold text-zinc-900">Last Run Summary</p>
+            <p>Scanned: {reconciliationSummary.scanned}</p>
+            <p>Released: {reconciliationSummary.released}</p>
+            <p>Already Finalized: {reconciliationSummary.alreadyFinalized}</p>
+            <p>Failed: {reconciliationSummary.failed}</p>
+          </div>
+        ) : null}
+
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+          <p className="mb-2 text-sm font-semibold text-zinc-900">
+            Expired Reservation Preview ({reconciliationPreview.length})
+          </p>
+          {reconciliationPreview.length === 0 ? (
+            <p className="text-sm text-zinc-700">No expired reservations found in the current preview.</p>
+          ) : (
+            <div className="max-h-56 overflow-auto rounded-xl border border-zinc-200 bg-white">
+              <table className="w-full min-w-[560px] text-left text-sm">
+                <thead className="bg-zinc-50 text-zinc-700">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">Reservation</th>
+                    <th className="px-3 py-2 font-semibold">User</th>
+                    <th className="px-3 py-2 font-semibold">Action</th>
+                    <th className="px-3 py-2 font-semibold">Amount</th>
+                    <th className="px-3 py-2 font-semibold">Expired At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reconciliationPreview.map((item) => (
+                    <tr key={item.reservationId} className="border-t border-zinc-100 text-zinc-800">
+                      <td className="px-3 py-2 font-mono text-xs">{item.reservationId}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{item.anonUserId}</td>
+                      <td className="px-3 py-2">{item.actionKind}</td>
+                      <td className="px-3 py-2">{item.amount}</td>
+                      <td className="px-3 py-2">{toIsoLabel(item.expiresAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        {panelNotices.reconciliation.error ? (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {panelNotices.reconciliation.error}
+          </p>
+        ) : null}
+        {panelNotices.reconciliation.success ? (
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {panelNotices.reconciliation.success}
+          </p>
+        ) : null}
+      </section>
+      ) : null}
     </div>
   );
 }
