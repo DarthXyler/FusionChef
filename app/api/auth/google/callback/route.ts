@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAdminEmail } from "@/lib/auth-config";
+import { getAdminWebSessionMaxAgeSeconds, isAdminEmail } from "@/lib/auth-config";
 import { exchangeGoogleAuthorizationCode } from "@/lib/auth-google";
 import {
   AUTH_OAUTH_STATE_COOKIE,
@@ -68,6 +68,7 @@ export async function GET(request: NextRequest) {
       email: user.email,
       name: user.name,
       role: user.role,
+      channel: statePayload.platform === "mobile" ? "mobile" : "web",
     });
 
     if (statePayload.platform === "mobile") {
@@ -86,7 +87,9 @@ export async function GET(request: NextRequest) {
     const response = NextResponse.redirect(`${request.nextUrl.origin}${webTarget}`, {
       status: 302,
     });
-    setAuthSessionCookie(response, token);
+    setAuthSessionCookie(response, token, {
+      maxAgeSeconds: getAdminWebSessionMaxAgeSeconds(),
+    });
     return withClearedOauthStateCookie(response);
   } catch (error) {
     const message = error instanceof Error ? error.message : "login_failed";

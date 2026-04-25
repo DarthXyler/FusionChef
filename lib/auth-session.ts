@@ -5,15 +5,22 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import type { ReadonlyRequestCookies } from "next/dist/server/web/spec-extension/adapters/request-cookies";
 import type { NextRequest, NextResponse } from "next/server";
-import { getSessionMaxAgeSeconds, getSessionSecret } from "@/lib/auth-config";
+import {
+  getAdminWebSessionMaxAgeSeconds,
+  getMobileSessionMaxAgeSeconds,
+  getSessionMaxAgeSeconds,
+  getSessionSecret,
+} from "@/lib/auth-config";
 
 export type AuthRole = "user" | "admin";
+export type AuthSessionChannel = "web" | "mobile";
 
 export type AuthSession = {
   userId: string;
   email: string;
   name: string;
   role: AuthRole;
+  channel: AuthSessionChannel;
   iat: number;
   exp: number;
 };
@@ -52,9 +59,15 @@ function parseTokenPayload(payload: unknown): AuthSession | null {
   const email = typeof candidate.email === "string" ? candidate.email.trim() : "";
   const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
   const role = candidate.role === "admin" ? "admin" : candidate.role === "user" ? "user" : null;
+  const channel =
+    candidate.channel === "mobile"
+      ? "mobile"
+      : candidate.channel === "web"
+        ? "web"
+        : null;
   const iat = typeof candidate.iat === "number" && Number.isFinite(candidate.iat) ? Math.trunc(candidate.iat) : 0;
   const exp = typeof candidate.exp === "number" && Number.isFinite(candidate.exp) ? Math.trunc(candidate.exp) : 0;
-  if (!userId || !email || !name || !role || iat <= 0 || exp <= 0) {
+  if (!userId || !email || !name || !role || !channel || iat <= 0 || exp <= 0) {
     return null;
   }
   return {
@@ -62,6 +75,7 @@ function parseTokenPayload(payload: unknown): AuthSession | null {
     email,
     name,
     role,
+    channel,
     iat,
     exp,
   };
@@ -84,11 +98,16 @@ export function createAuthSessionToken(claims: {
   email: string;
   name: string;
   role: AuthRole;
+  channel: AuthSessionChannel;
 }) {
   const secret = getSessionSecret();
   if (!secret) {
     throw new Error("AUTH_SESSION_SECRET is not configured.");
   }
+  const maxAgeSeconds =
+    claims.channel === "mobile"
+      ? getMobileSessionMaxAgeSeconds()
+      : getAdminWebSessionMaxAgeSeconds();
   const now = Math.floor(Date.now() / 1000);
   const headerBase64 = toBase64Url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const payloadBase64 = toBase64Url(
@@ -97,8 +116,9 @@ export function createAuthSessionToken(claims: {
       email: claims.email,
       name: claims.name,
       role: claims.role,
+      channel: claims.channel,
       iat: now,
-      exp: now + getSessionMaxAgeSeconds(),
+      exp: now + maxAgeSeconds,
     }),
   );
   const signature = signJwtToken(headerBase64, payloadBase64, secret);
@@ -135,7 +155,11 @@ export function verifyAuthSessionToken(token: string) {
   return session;
 }
 
-export function setAuthSessionCookie(response: NextResponse, token: string) {
+export function setAuthSessionCookie(
+  response: NextResponse,
+  token: string,
+  options?: { maxAgeSeconds?: number },
+) {
   response.cookies.set({
     name: AUTH_SESSION_COOKIE,
     value: token,
@@ -143,7 +167,7 @@ export function setAuthSessionCookie(response: NextResponse, token: string) {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: getSessionMaxAgeSeconds(),
+    maxAge: options?.maxAgeSeconds ?? getSessionMaxAgeSeconds(),
   });
 }
 
@@ -182,4 +206,3 @@ export function getAuthSessionFromRequest(request: NextRequest) {
   }
   return verifyAuthSessionToken(cookieToken);
 }
-

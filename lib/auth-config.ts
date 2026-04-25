@@ -3,12 +3,13 @@
  * Keeps provider/client/session values in one place.
  */
 
-const DEFAULT_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 5;
+const DEFAULT_ADMIN_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 5;
+const DEFAULT_MOBILE_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
-function parseSessionMaxAgeSeconds() {
-  const parsed = Number.parseInt(process.env.AUTH_SESSION_MAX_AGE_SECONDS ?? "", 10);
-  if (!Number.isFinite(parsed) || parsed < 60 * 60 || parsed > 60 * 60 * 24 * 30) {
-    return DEFAULT_SESSION_MAX_AGE_SECONDS;
+function parseSessionMaxAgeSeconds(rawValue: string | undefined, fallback: number) {
+  const parsed = Number.parseInt(rawValue ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed < 60 * 60 || parsed > 60 * 60 * 24 * 90) {
+    return fallback;
   }
   return parsed;
 }
@@ -29,7 +30,24 @@ export function getSessionSecret() {
 }
 
 export function getSessionMaxAgeSeconds() {
-  return parseSessionMaxAgeSeconds();
+  return parseSessionMaxAgeSeconds(
+    process.env.AUTH_SESSION_MAX_AGE_SECONDS,
+    DEFAULT_ADMIN_SESSION_MAX_AGE_SECONDS,
+  );
+}
+
+export function getAdminWebSessionMaxAgeSeconds() {
+  return parseSessionMaxAgeSeconds(
+    process.env.AUTH_SESSION_MAX_AGE_SECONDS_ADMIN,
+    DEFAULT_ADMIN_SESSION_MAX_AGE_SECONDS,
+  );
+}
+
+export function getMobileSessionMaxAgeSeconds() {
+  return parseSessionMaxAgeSeconds(
+    process.env.AUTH_SESSION_MAX_AGE_SECONDS_MOBILE,
+    DEFAULT_MOBILE_SESSION_MAX_AGE_SECONDS,
+  );
 }
 
 export function getGoogleOauthConfig() {
@@ -57,4 +75,3 @@ export function isGoogleOauthConfigured() {
   const config = getGoogleOauthConfig();
   return Boolean(config.clientId && config.clientSecret);
 }
-
