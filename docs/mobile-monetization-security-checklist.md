@@ -68,6 +68,8 @@ Goal: move from token-only admin access to user-friendly, strongly authenticated
 - [ ] Restrict admin APIs to authenticated admin users only (not just token)
 - [ ] Keep `MONETIZATION_ADMIN_TOKEN` as break-glass fallback for incidents
 - [ ] Add feature flag to temporarily disable token fallback if abuse detected
+- [ ] Add runtime switch `ADMIN_TOKEN_FALLBACK_ENABLED=true|false` (default true during transition)
+- [ ] After auth stability window, decide and execute token fallback removal (`MONETIZATION_ADMIN_TOKEN`)
 
 ### S4.3 - Passkey and Account Recovery UX
 
