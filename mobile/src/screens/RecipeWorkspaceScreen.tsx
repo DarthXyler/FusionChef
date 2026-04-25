@@ -34,6 +34,7 @@ import {
   getConfiguredAppleProductIds,
   purchaseAppleCredits,
 } from "../services/monetization";
+import { loginWithGoogleForMobile } from "../services/auth";
 import { styles } from "../styles/appStyles";
 import type { FuseRequest, GeneratedRecipeRecord } from "../types/recipe";
 import { buildShoppingItemKey, toTitleCase } from "../utils/recipeUi";
@@ -105,6 +106,52 @@ async function selectAppleCreditPack(options: CreditPackOption[]) {
         onPress: () => resolve(option),
       })),
     ]);
+  });
+}
+
+async function promptLoginForCredits() {
+  if (Platform.OS === "ios") {
+    return new Promise<boolean>((resolve) => {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ["Cancel", "Continue with Google"],
+          cancelButtonIndex: 0,
+        },
+        async (buttonIndex) => {
+          if (buttonIndex !== 1) {
+            resolve(false);
+            return;
+          }
+          try {
+            const loggedIn = await loginWithGoogleForMobile();
+            resolve(loggedIn);
+          } catch {
+            resolve(false);
+          }
+        },
+      );
+    });
+  }
+
+  return new Promise<boolean>((resolve) => {
+    Alert.alert(
+      "Login required",
+      "Please login to purchase credits and continue fusing.",
+      [
+        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+        {
+          text: "Continue with Google",
+          onPress: async () => {
+            try {
+              const loggedIn = await loginWithGoogleForMobile();
+              resolve(loggedIn);
+            } catch {
+              resolve(false);
+            }
+          },
+        },
+      ],
+    );
   });
 }
 
@@ -202,6 +249,15 @@ export function RecipeWorkspaceScreen({
     isPurchasingCreditsRef.current = true;
     setIsPurchasingCredits(true);
     try {
+      const account = await fetchMonetizationAccountSnapshot();
+      if (!account.authenticated) {
+        const loggedIn = await promptLoginForCredits();
+        if (!loggedIn) {
+          Alert.alert("Login required", "Please login first to purchase credits.");
+          return false;
+        }
+      }
+
       const options = await getAppleCreditPackOptions();
       if (options.length === 0) {
         Alert.alert("Credits unavailable", "No credit packs are configured yet.");

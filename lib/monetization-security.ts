@@ -5,6 +5,7 @@
 import { randomUUID, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getClientIp } from "@/lib/api-security";
+import { getAuthSessionFromRequest } from "@/lib/auth-session";
 
 const ADMIN_TOKEN_HEADER = "x-admin-token";
 const ADMIN_ACTOR_HEADER = "x-admin-actor";
@@ -44,14 +45,32 @@ export function requireMonetizationAdmin(
   request: NextRequest,
   options?: { requireActor?: boolean },
 ) {
+  const authSession = getAuthSessionFromRequest(request);
+  if (authSession) {
+    if (authSession.role !== "admin") {
+      return {
+        ok: false as const,
+        response: NextResponse.json({ error: "Not authorized." }, { status: 403 }),
+      };
+    }
+
+    const actorFromHeader = normalizeActor(request.headers.get(ADMIN_ACTOR_HEADER));
+    const actor = actorFromHeader || authSession.name || authSession.email || "admin";
+    return {
+      ok: true as const,
+      context: {
+        requestId: randomUUID(),
+        actor: actor.slice(0, 120),
+        ip: getClientIp(request),
+      } satisfies MonetizationAdminContext,
+    };
+  }
+
   const expectedToken = process.env.MONETIZATION_ADMIN_TOKEN;
   if (!expectedToken) {
     return {
       ok: false as const,
-      response: NextResponse.json(
-        { error: "MONETIZATION_ADMIN_TOKEN is not configured." },
-        { status: 500 },
-      ),
+      response: NextResponse.json({ error: "Not authorized." }, { status: 401 }),
     };
   }
 

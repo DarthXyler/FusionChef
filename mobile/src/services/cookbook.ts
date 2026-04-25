@@ -7,6 +7,7 @@ import type {
   RecipeFusion,
 } from "../types/recipe";
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
+import { getMobileAuthToken } from "./auth";
 
 const COOKBOOK_SUMMARY_CACHE_VERSION = "v1";
 const COOKBOOK_DETAIL_CACHE_VERSION = "v1";
@@ -108,12 +109,17 @@ function isCookbookDetailCachePayload(value: unknown): value is CookbookDetailCa
 async function buildCookbookHeaders(extraHeaders?: Record<string, string>) {
   const mobileAnonId = await getMobileAnonymousId();
   const mobileDeviceKey = await getMobileDeviceKey();
-  return {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "x-flavor-fusion-anon-id": mobileAnonId,
     "x-flavor-fusion-device-key": mobileDeviceKey,
     ...extraHeaders,
   };
+  const authToken = await getMobileAuthToken();
+  if (authToken) {
+    headers.authorization = `Bearer ${authToken}`;
+  }
+  return headers;
 }
 
 async function syncAnonymousIdFromResponse(response: Response) {

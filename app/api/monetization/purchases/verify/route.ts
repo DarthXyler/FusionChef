@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
+import { getAuthSessionFromRequest } from "@/lib/auth-session";
 import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import {
   beginIdempotentRequest,
@@ -107,6 +108,14 @@ export async function POST(request: NextRequest) {
 
     if (isRequestBodyTooLarge(request, MAX_VERIFY_BODY_BYTES)) {
       return NextResponse.json({ error: "Request is too large." }, { status: 413 });
+    }
+
+    const authSession = getAuthSessionFromRequest(request);
+    if (!authSession) {
+      return NextResponse.json(
+        { error: "Login is required before purchasing credits.", reason: "login_required" },
+        { status: 401 },
+      );
     }
 
     const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);

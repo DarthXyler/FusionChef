@@ -6,6 +6,7 @@ import type {
   RecipeFusion,
   SpiceLevel,
 } from "../types/recipe";
+import { getMobileAuthToken } from "./auth";
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
 
 type FuseActionKind = "fuse" | "reroll";
@@ -96,14 +97,19 @@ export async function fetchLiveRecipeRecord(
 ): Promise<GeneratedRecipeRecord> {
   const mobileAnonId = await getMobileAnonymousId();
   const mobileDeviceKey = await getMobileDeviceKey();
+  const authToken = await getMobileAuthToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-flavor-fusion-anon-id": mobileAnonId,
+    "x-flavor-fusion-device-key": mobileDeviceKey,
+    "x-flavor-fusion-action": action,
+  };
+  if (authToken) {
+    headers.authorization = `Bearer ${authToken}`;
+  }
   const response = await fetch(`${getApiBaseUrl()}/api/fuse`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-flavor-fusion-anon-id": mobileAnonId,
-      "x-flavor-fusion-device-key": mobileDeviceKey,
-      "x-flavor-fusion-action": action,
-    },
+    headers,
     body: JSON.stringify(input),
   });
   const canonicalAnonId = response.headers.get("x-flavor-fusion-anon-id")?.trim();

@@ -523,10 +523,16 @@ const PRESETS: Preset[] = [
   },
 ];
 
-export function AdminMonetizationConfigPanel() {
+type AdminMonetizationConfigPanelProps = {
+  defaultActor?: string;
+};
+
+export function AdminMonetizationConfigPanel({
+  defaultActor = "admin",
+}: AdminMonetizationConfigPanelProps) {
   const [activeTab, setActiveTab] = useState<AdminTab>("access");
   const [adminToken, setAdminToken] = useState("");
-  const [adminActor, setAdminActor] = useState("kevin");
+  const [adminActor, setAdminActor] = useState(defaultActor || "admin");
   const [form, setForm] = useState<RuntimeConfig>(DEFAULT_FORM);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -560,6 +566,21 @@ export function AdminMonetizationConfigPanel() {
     }));
   }
 
+  async function logoutAdminSession() {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+    } finally {
+      if (typeof window !== "undefined") {
+        window.location.href = "/admin/monetization";
+      }
+    }
+  }
+
   function setPanelError(panelKey: PanelKey, message: string) {
     setPanelNotices((current) => ({
       ...current,
@@ -589,24 +610,29 @@ export function AdminMonetizationConfigPanel() {
     }
   }, []);
 
+  function buildAdminHeaders(options?: { includeActor?: boolean }) {
+    const headers: Record<string, string> = {};
+    const token = adminToken.trim();
+    const actor = adminActor.trim();
+    if (token) {
+      headers["x-admin-token"] = token;
+    }
+    if (options?.includeActor && actor) {
+      headers["x-admin-actor"] = actor;
+    }
+    return headers;
+  }
+
   async function readConfig(
     origin: "adminAccess" | "runtimeSettings" | "pricing" = "adminAccess",
   ) {
-    const token = adminToken.trim();
-    if (!token) {
-      setPanelError(origin, "Enter your admin token first.");
-      return;
-    }
-
     setIsLoading(true);
     clearPanelNotice(origin);
 
     try {
       const response = await fetch("/api/admin/monetization/config", {
         method: "GET",
-        headers: {
-          "x-admin-token": token,
-        },
+        headers: buildAdminHeaders(),
         cache: "no-store",
       });
       const payload = (await response.json()) as { config?: unknown; error?: unknown };
@@ -621,7 +647,8 @@ export function AdminMonetizationConfigPanel() {
 
       setForm(payload.config);
       setPanelSuccess(origin, "Loaded current runtime config.");
-      if (typeof window !== "undefined") {
+      const token = adminToken.trim();
+      if (token && typeof window !== "undefined") {
         window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
       }
       await loadObserveReport({ silent: true });
@@ -633,17 +660,6 @@ export function AdminMonetizationConfigPanel() {
   }
 
   async function saveConfig(origin: "runtimeSettings" | "pricing" = "runtimeSettings") {
-    const token = adminToken.trim();
-    const actor = adminActor.trim();
-    if (!token) {
-      setPanelError(origin, "Enter your admin token first.");
-      return;
-    }
-    if (!actor) {
-      setPanelError(origin, "Enter an actor name (who is making the change).");
-      return;
-    }
-
     setIsSaving(true);
     clearPanelNotice(origin);
 
@@ -652,8 +668,7 @@ export function AdminMonetizationConfigPanel() {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-token": token,
-          "x-admin-actor": actor,
+          ...buildAdminHeaders({ includeActor: true }),
           "idempotency-key": generateIdempotencyKey("cfg"),
         },
         body: JSON.stringify({
@@ -679,9 +694,15 @@ export function AdminMonetizationConfigPanel() {
 
       setForm(payload.config);
       setPanelSuccess(origin, "Monetization runtime config saved.");
+      const token = adminToken.trim();
+      const actor = adminActor.trim();
       if (typeof window !== "undefined") {
-        window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
-        window.sessionStorage.setItem(ACTOR_STORAGE_KEY, actor);
+        if (token) {
+          window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+        }
+        if (actor) {
+          window.sessionStorage.setItem(ACTOR_STORAGE_KEY, actor);
+        }
       }
       await loadObserveReport({ silent: true });
     } catch (saveError) {
@@ -695,14 +716,6 @@ export function AdminMonetizationConfigPanel() {
   }
 
   async function loadObserveReport(options?: { silent?: boolean }) {
-    const token = adminToken.trim();
-    if (!token) {
-      if (!options?.silent) {
-        setPanelError("observeAnalytics", "Enter your admin token first.");
-      }
-      return;
-    }
-
     setIsLoadingObserveReport(true);
     if (!options?.silent) {
       clearPanelNotice("observeAnalytics");
@@ -713,9 +726,7 @@ export function AdminMonetizationConfigPanel() {
         "/api/admin/monetization/observe-report?trendDays=7&topUsersLimit=10",
         {
           method: "GET",
-          headers: {
-            "x-admin-token": token,
-          },
+          headers: buildAdminHeaders(),
           cache: "no-store",
         },
       );
@@ -759,7 +770,8 @@ export function AdminMonetizationConfigPanel() {
       setObserveTimezone(typeof payload.timezone === "string" ? payload.timezone : "UTC");
       setObserveTodayDayKey(typeof payload.todayDayKey === "string" ? payload.todayDayKey : "");
 
-      if (typeof window !== "undefined") {
+      const token = adminToken.trim();
+      if (token && typeof window !== "undefined") {
         window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
       }
       if (!options?.silent) {
@@ -780,14 +792,6 @@ export function AdminMonetizationConfigPanel() {
   }
 
   async function loadReconciliationPreview(options?: { silent?: boolean }) {
-    const token = adminToken.trim();
-    if (!token) {
-      if (!options?.silent) {
-        setPanelError("reconciliation", "Enter your admin token first.");
-      }
-      return;
-    }
-
     const previewLimit = clampReconciliationLimit(reconciliationMaxCandidates);
     setIsLoadingReconciliationPreview(true);
     if (!options?.silent) {
@@ -799,9 +803,7 @@ export function AdminMonetizationConfigPanel() {
         `/api/admin/monetization/reconciliation?previewLimit=${previewLimit}`,
         {
           method: "GET",
-          headers: {
-            "x-admin-token": token,
-          },
+          headers: buildAdminHeaders(),
           cache: "no-store",
         },
       );
@@ -823,7 +825,8 @@ export function AdminMonetizationConfigPanel() {
       if (!options?.silent) {
         setPanelSuccess("reconciliation", `Loaded preview: ${validRows.length} expired reservation(s).`);
       }
-      if (typeof window !== "undefined") {
+      const token = adminToken.trim();
+      if (token && typeof window !== "undefined") {
         window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
       }
     } catch (previewError) {
@@ -839,17 +842,6 @@ export function AdminMonetizationConfigPanel() {
   }
 
   async function runReconciliationNow() {
-    const token = adminToken.trim();
-    const actor = adminActor.trim();
-    if (!token) {
-      setPanelError("reconciliation", "Enter your admin token first.");
-      return;
-    }
-    if (!actor) {
-      setPanelError("reconciliation", "Enter an actor name (who is making the change).");
-      return;
-    }
-
     const maxCandidates = clampReconciliationLimit(reconciliationMaxCandidates);
     setIsRunningReconciliation(true);
     clearPanelNotice("reconciliation");
@@ -860,8 +852,7 @@ export function AdminMonetizationConfigPanel() {
         {
           method: "POST",
           headers: {
-            "x-admin-token": token,
-            "x-admin-actor": actor,
+            ...buildAdminHeaders({ includeActor: true }),
             "idempotency-key": generateIdempotencyKey("recon"),
           },
         },
@@ -881,9 +872,15 @@ export function AdminMonetizationConfigPanel() {
         "reconciliation",
         `Reconciliation complete. Released ${payload.summary.released} of ${payload.summary.scanned} scanned reservation(s).`,
       );
+      const token = adminToken.trim();
+      const actor = adminActor.trim();
       if (typeof window !== "undefined") {
-        window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
-        window.sessionStorage.setItem(ACTOR_STORAGE_KEY, actor);
+        if (token) {
+          window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+        }
+        if (actor) {
+          window.sessionStorage.setItem(ACTOR_STORAGE_KEY, actor);
+        }
       }
 
       await loadReconciliationPreview({ silent: true });
@@ -1118,6 +1115,15 @@ export function AdminMonetizationConfigPanel() {
             className="cursor-pointer rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isLoading ? "Loading..." : "Load Current Config"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void logoutAdminSession();
+            }}
+            className="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50"
+          >
+            Logout
           </button>
         </div>
         {panelNotices.adminAccess.error ? (

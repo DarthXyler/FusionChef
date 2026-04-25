@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getAnonymousIdentity } from "@/lib/anon-user";
+import { getAuthSessionFromRequest } from "@/lib/auth-session";
 import { mergeCookbookAnonymousUsers } from "@/lib/cookbook-db";
 import { executeTurso } from "@/lib/turso";
 
@@ -48,6 +49,18 @@ async function ensureIdentitySchema() {
       sql: `CREATE INDEX IF NOT EXISTS idx_mobile_identity_aliases_canonical
             ON mobile_identity_aliases (canonical_anon_user_id)`,
     });
+    await executeTurso({
+      sql: `CREATE TABLE IF NOT EXISTS auth_identity_links (
+              auth_user_id TEXT PRIMARY KEY,
+              canonical_anon_user_id TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            )`,
+    });
+    await executeTurso({
+      sql: `CREATE INDEX IF NOT EXISTS idx_auth_identity_links_canonical
+            ON auth_identity_links (canonical_anon_user_id)`,
+    });
   })();
 
   return identitySchemaReady;
@@ -71,6 +84,24 @@ async function readCanonicalIdForDevice(deviceKey: string) {
   return isValidUuid(normalized) ? normalized : null;
 }
 
+async function readCanonicalIdForAuthUser(authUserId: string) {
+  const result = await executeTurso({
+    sql: `SELECT canonical_anon_user_id
+          FROM auth_identity_links
+          WHERE auth_user_id = ?
+          LIMIT 1`,
+    args: [authUserId],
+  });
+
+  const value = result.rows[0]?.canonical_anon_user_id;
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return isValidUuid(normalized) ? normalized : null;
+}
+
 async function upsertCanonicalIdForDevice(deviceKey: string, canonicalAnonUserId: string) {
   await executeTurso({
     sql: `INSERT INTO mobile_identity_links (
@@ -82,6 +113,20 @@ async function upsertCanonicalIdForDevice(deviceKey: string, canonicalAnonUserId
             canonical_anon_user_id = excluded.canonical_anon_user_id,
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
     args: [deviceKey, canonicalAnonUserId],
+  });
+}
+
+async function upsertCanonicalIdForAuthUser(authUserId: string, canonicalAnonUserId: string) {
+  await executeTurso({
+    sql: `INSERT INTO auth_identity_links (
+            auth_user_id,
+            canonical_anon_user_id,
+            updated_at
+          ) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+          ON CONFLICT(auth_user_id) DO UPDATE SET
+            canonical_anon_user_id = excluded.canonical_anon_user_id,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+    args: [authUserId, canonicalAnonUserId],
   });
 }
 
@@ -195,20 +240,28 @@ async function pickCanonicalAnonId(candidateIds: string[], preferredId: string |
 export async function resolveCookbookIdentity(request: NextRequest): Promise<CookbookIdentity> {
   const baseIdentity = getAnonymousIdentity(request);
   const rawDeviceKey = request.headers.get(MOBILE_DEVICE_KEY_HEADER)?.trim();
-  if (!isValidUuid(rawDeviceKey)) {
+  const deviceKey = isValidUuid(rawDeviceKey) ? rawDeviceKey : null;
+  const authSession = getAuthSessionFromRequest(request);
+  const authUserId = authSession?.userId?.trim() ?? "";
+  if (!deviceKey && !authUserId) {
     return baseIdentity;
   }
 
   try {
     await ensureIdentitySchema();
-    const linkedCanonical = await readCanonicalIdForDevice(rawDeviceKey);
+    const linkedCanonical = deviceKey ? await readCanonicalIdForDevice(deviceKey) : null;
+    const authCanonical = authUserId ? await readCanonicalIdForAuthUser(authUserId) : null;
     const aliasCanonical = await resolveAliasCanonicalId(baseIdentity.anonUserId);
     const candidateIds = uniqueValidIds([
       linkedCanonical,
+      authCanonical,
       aliasCanonical,
       baseIdentity.anonUserId,
     ]);
-    const canonicalAnonUserId = await pickCanonicalAnonId(candidateIds, linkedCanonical);
+    const canonicalAnonUserId = await pickCanonicalAnonId(
+      candidateIds,
+      authCanonical ?? linkedCanonical,
+    );
 
     for (const candidateId of candidateIds) {
       if (candidateId === canonicalAnonUserId) {
@@ -219,7 +272,12 @@ export async function resolveCookbookIdentity(request: NextRequest): Promise<Coo
     }
 
     await upsertAliasForAnonId(canonicalAnonUserId, canonicalAnonUserId);
-    await upsertCanonicalIdForDevice(rawDeviceKey, canonicalAnonUserId);
+    if (deviceKey) {
+      await upsertCanonicalIdForDevice(deviceKey, canonicalAnonUserId);
+    }
+    if (authUserId) {
+      await upsertCanonicalIdForAuthUser(authUserId, canonicalAnonUserId);
+    }
     return {
       anonUserId: canonicalAnonUserId,
       shouldSetCookie: baseIdentity.shouldSetCookie,

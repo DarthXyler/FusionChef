@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
+import { getAuthSessionFromRequest } from "@/lib/auth-session";
 import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
 import { getMonetizationCreditCatalog } from "@/lib/monetization-credit-packs";
@@ -36,6 +37,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const authSession = getAuthSessionFromRequest(request);
     const identity = await resolveCookbookIdentity(request);
     const [runtimeConfig, balance, todayUsage] = await Promise.all([
       getMonetizationRuntimeConfig(),
@@ -69,6 +71,15 @@ export async function GET(request: NextRequest) {
     );
 
     const response = NextResponse.json({
+      authenticated: Boolean(authSession),
+      login: authSession
+        ? {
+            role: authSession.role,
+            email: authSession.email,
+            name: authSession.name,
+            expiresAt: new Date(authSession.exp * 1000).toISOString(),
+          }
+        : null,
       enabled: runtimeConfig.enabled,
       enforcementMode: runtimeConfig.enforcementMode,
       actionCosts: {

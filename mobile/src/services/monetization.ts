@@ -11,6 +11,7 @@ import {
 } from "expo-in-app-purchases";
 import { getApiBaseUrl } from "../config/api";
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
+import { getMobileAuthToken } from "./auth";
 
 type PurchaseProvider = "apple_app_store" | "google_play";
 
@@ -22,6 +23,8 @@ type VerifyPurchasePayload = {
 };
 
 type MonetizationAccountPayload = {
+  authenticated?: unknown;
+  login?: unknown;
   enabled?: unknown;
   enforcementMode?: unknown;
   actionCosts?: unknown;
@@ -44,6 +47,7 @@ export type MonetizationProduct = {
 };
 
 export type MonetizationAccountSnapshot = {
+  authenticated: boolean;
   enabled: boolean;
   enforcementMode: "off" | "observe" | "enforce";
   balance: CreditBalance;
@@ -103,10 +107,15 @@ async function withIdentityHeaders() {
     getMobileAnonymousId(),
     getMobileDeviceKey(),
   ]);
-  return {
+  const headers: Record<string, string> = {
     "x-flavor-fusion-anon-id": mobileAnonId,
     "x-flavor-fusion-device-key": mobileDeviceKey,
   };
+  const authToken = await getMobileAuthToken();
+  if (authToken) {
+    headers.authorization = `Bearer ${authToken}`;
+  }
+  return headers;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -166,6 +175,7 @@ export async function fetchMonetizationAccountSnapshot() {
       : "off";
 
   return {
+    authenticated: payload.authenticated === true,
     enabled: payload.enabled === true,
     enforcementMode,
     balance: parseBalance(payload.balance) ?? {
