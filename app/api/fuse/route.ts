@@ -419,21 +419,36 @@ async function finalizeReservedFuseCredit(params: {
   target: "commit" | "release";
 }) {
   if (params.target === "commit") {
-    const commitResult = await commitReservedCredits({
-      anonUserId: params.anonUserId,
-      reservationId: params.reservationId,
-      actor: "api_fuse_enforcement",
-      reason: "Fuse API request completed successfully.",
-      idempotencyScope: "api-fuse-credit-commit",
-      idempotencyKey: params.requestId,
-      metadata: {
-        requestId: params.requestId,
-        actionKind: params.actionKind,
-      },
-    });
+    try {
+      const commitResult = await commitReservedCredits({
+        anonUserId: params.anonUserId,
+        reservationId: params.reservationId,
+        actor: "api_fuse_enforcement",
+        reason: "Fuse API request completed successfully.",
+        idempotencyScope: "api-fuse-credit-commit",
+        idempotencyKey: params.requestId,
+        metadata: {
+          requestId: params.requestId,
+          actionKind: params.actionKind,
+        },
+      });
 
-    if (!commitResult.ok) {
-      throw new Error("CREDIT_RESERVATION_COMMIT_FAILED");
+      if (!commitResult.ok && commitResult.reason !== "already_finalized") {
+        throw new Error("CREDIT_RESERVATION_COMMIT_FAILED");
+      }
+    } catch (error) {
+      // Do not fail a completed recipe generation due to post-generation
+      // credit settlement hiccups; reconciliation can recover pending reservations.
+      logFuseTiming({
+        requestId: params.requestId,
+        event: "credit_commit_deferred",
+        actionKind: params.actionKind,
+        reservationId: params.reservationId,
+        reason:
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "commit_exception",
+      });
     }
     return;
   }
@@ -732,6 +747,7 @@ export async function POST(request: NextRequest) {
           actionKind: monetizationActionKind,
           target: "commit",
         });
+        // Commit can be deferred for reconciliation; do not hold the id in memory.
         reservedCreditReservationId = null;
       }
       const totalDurationMs = Date.now() - requestStartedAt;
@@ -797,6 +813,7 @@ export async function POST(request: NextRequest) {
         actionKind: monetizationActionKind,
         target: "commit",
       });
+      // Commit can be deferred for reconciliation; do not hold the id in memory.
       reservedCreditReservationId = null;
     }
     const totalDurationMs = Date.now() - requestStartedAt;
@@ -892,6 +909,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (error instanceof Error && error.message.toLowerCase().includes("turso query timed out")) {
+      logFuseTiming({
+        requestId,
+        event: "request_failed",
+        actionKind: monetizationActionKind,
+        totalDurationMs: Date.now() - requestStartedAt,
+        stageTimings,
+        reason: "database_timeout",
+      });
+      return respond(
+        { error: "Service is busy right now. Please retry in a moment." },
+        503,
+      );
+    }
+
     logFuseTiming({
       requestId,
       event: "request_failed",
@@ -899,6 +931,8 @@ export async function POST(request: NextRequest) {
       totalDurationMs: Date.now() - requestStartedAt,
       stageTimings,
       reason: "unexpected_server_error",
+      errorName: error instanceof Error ? error.name : "unknown_error",
+      errorMessage: error instanceof Error ? error.message : "unknown_error",
     });
     return respond(
       { error: "Unexpected server error." },
