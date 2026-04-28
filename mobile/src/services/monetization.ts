@@ -1,17 +1,31 @@
 import { Platform } from "react-native";
-import {
-  connectAsync,
-  finishTransactionAsync,
-  getProductsAsync,
-  IAPResponseCode,
-  purchaseItemAsync,
-  setPurchaseListener,
-  type IAPItemDetails,
-  type InAppPurchase,
-} from "expo-in-app-purchases";
 import { getApiBaseUrl } from "../config/api";
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
 import { getMobileAuthToken } from "./auth";
+
+type IapResponse = {
+  responseCode: number;
+  results?: Array<{
+    productId: string;
+    orderId?: string | null;
+    [key: string]: unknown;
+  }>;
+};
+
+type ExpoIapModule = {
+  connectAsync: () => Promise<void>;
+  finishTransactionAsync: (purchase: unknown, consumeItem?: boolean) => Promise<void>;
+  getProductsAsync: (productIds: string[]) => Promise<IapResponse>;
+  purchaseItemAsync: (productId: string) => Promise<void>;
+  setPurchaseListener: (listener: (result: IapResponse) => void) => void;
+  IAPResponseCode: {
+    OK: number;
+    USER_CANCELED: number;
+    DEFERRED: number;
+  };
+};
+
+let cachedExpoIapModule: ExpoIapModule | null | undefined;
 
 type PurchaseProvider = "apple_app_store" | "google_play";
 
@@ -51,6 +65,10 @@ export type MonetizationAccountSnapshot = {
   enabled: boolean;
   enforcementMode: "off" | "observe" | "enforce";
   balance: CreditBalance;
+  freeRemaining: {
+    fuse: number;
+    reroll: number;
+  };
   products: MonetizationProduct[];
 };
 
@@ -58,6 +76,21 @@ type ApplePurchaseVerificationResult = {
   grantedCredits: number;
   balance: CreditBalance | null;
 };
+
+async function getExpoIapModule() {
+  if (cachedExpoIapModule !== undefined) {
+    return cachedExpoIapModule;
+  }
+
+  try {
+    const iapModule = (await import("expo-in-app-purchases")) as unknown as ExpoIapModule;
+    cachedExpoIapModule = iapModule;
+    return iapModule;
+  } catch {
+    cachedExpoIapModule = null;
+    return null;
+  }
+}
 
 function asInteger(value: unknown, fallback = 0) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -182,6 +215,10 @@ export async function fetchMonetizationAccountSnapshot() {
       availableCredits: 0,
       pendingCredits: 0,
     },
+    freeRemaining: {
+      fuse: asInteger(isObjectRecord(payload.freeRemaining) ? payload.freeRemaining.fuse : 0, 0),
+      reroll: asInteger(isObjectRecord(payload.freeRemaining) ? payload.freeRemaining.reroll : 0, 0),
+    },
     products: parseProducts(payload.products),
   } satisfies MonetizationAccountSnapshot;
 }
@@ -223,21 +260,31 @@ async function verifyApplePurchase(params: {
 }
 
 async function ensureIapConnected() {
+  const iap = await getExpoIapModule();
+  if (!iap) {
+    throw new Error(
+      "In-app purchases are unavailable in this app build. Install the latest iOS development build.",
+    );
+  }
+
   try {
-    await connectAsync();
+    await iap.connectAsync();
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (!message.toLowerCase().includes("already connected")) {
       throw error;
     }
   }
+
+  return iap;
 }
 
 async function waitForApplePurchase(
+  iap: ExpoIapModule,
   productId: string,
   timeoutMs = 40_000,
-): Promise<InAppPurchase> {
-  return new Promise<InAppPurchase>((resolve, reject) => {
+): Promise<{ productId: string; orderId?: string | null; [key: string]: unknown }> {
+  return new Promise((resolve, reject) => {
     let settled = false;
 
     const settle = (fn: () => void) => {
@@ -245,7 +292,7 @@ async function waitForApplePurchase(
         return;
       }
       settled = true;
-      setPurchaseListener(() => {});
+      iap.setPurchaseListener(() => {});
       fn();
     };
 
@@ -253,11 +300,11 @@ async function waitForApplePurchase(
       settle(() => reject(new Error("Timed out waiting for App Store confirmation.")));
     }, timeoutMs);
 
-    setPurchaseListener((result) => {
+    iap.setPurchaseListener((result) => {
       if (settled) {
         return;
       }
-      if (result.responseCode === IAPResponseCode.OK) {
+      if (result.responseCode === iap.IAPResponseCode.OK) {
         const purchase = result.results?.find((entry) => entry.productId === productId);
         if (!purchase) {
           return;
@@ -266,12 +313,12 @@ async function waitForApplePurchase(
         settle(() => resolve(purchase));
         return;
       }
-      if (result.responseCode === IAPResponseCode.USER_CANCELED) {
+      if (result.responseCode === iap.IAPResponseCode.USER_CANCELED) {
         clearTimeout(timeoutId);
         settle(() => reject(new Error("Purchase canceled.")));
         return;
       }
-      if (result.responseCode === IAPResponseCode.DEFERRED) {
+      if (result.responseCode === iap.IAPResponseCode.DEFERRED) {
         clearTimeout(timeoutId);
         settle(() => reject(new Error("Purchase is pending approval. Try again in a moment.")));
         return;
@@ -287,10 +334,10 @@ export async function purchaseAppleCredits(productId: string) {
     throw new Error("In-app purchases are currently enabled for iOS only.");
   }
 
-  await ensureIapConnected();
+  const iap = await ensureIapConnected();
 
-  const productQuery = await getProductsAsync([productId]);
-  if (productQuery.responseCode !== IAPResponseCode.OK) {
+  const productQuery = await iap.getProductsAsync([productId]);
+  if (productQuery.responseCode !== iap.IAPResponseCode.OK) {
     throw new Error("Could not load credit pack details from App Store.");
   }
   const matchedProduct = productQuery.results?.find((entry) => entry.productId === productId);
@@ -298,8 +345,8 @@ export async function purchaseAppleCredits(productId: string) {
     throw new Error("Requested credit pack is not available in App Store.");
   }
 
-  const purchasePromise = waitForApplePurchase(productId);
-  await purchaseItemAsync(productId);
+  const purchasePromise = waitForApplePurchase(iap, productId);
+  await iap.purchaseItemAsync(productId);
   const purchase = await purchasePromise;
   const transactionId = purchase.orderId?.trim();
   if (!transactionId) {
@@ -310,10 +357,10 @@ export async function purchaseAppleCredits(productId: string) {
     productId,
     appleTransactionId: transactionId,
   });
-  await finishTransactionAsync(purchase, true);
+  await iap.finishTransactionAsync(purchase, true);
 
   return {
-    product: matchedProduct as IAPItemDetails,
+    product: matchedProduct,
     verification,
   };
 }

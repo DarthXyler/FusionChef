@@ -74,6 +74,13 @@ function isInsufficientCreditsError(error: unknown): error is FuseRequestError {
   );
 }
 
+function getFreeRemainingForAction(
+  actionKind: "fuse" | "reroll",
+  freeRemaining: { fuse: number; reroll: number },
+) {
+  return actionKind === "reroll" ? freeRemaining.reroll : freeRemaining.fuse;
+}
+
 async function selectAppleCreditPack(options: CreditPackOption[]) {
   if (options.length === 0) {
     return null;
@@ -240,6 +247,25 @@ export function RecipeWorkspaceScreen({
     }
 
     return configuredFallback;
+  }, []);
+
+  const hasCreditsOrFreeAction = useCallback(async (actionKind: "fuse" | "reroll") => {
+    try {
+      const account = await fetchMonetizationAccountSnapshot();
+      if (!account.enabled || account.enforcementMode !== "enforce") {
+        return true;
+      }
+
+      const freeRemaining = getFreeRemainingForAction(actionKind, account.freeRemaining);
+      if (freeRemaining > 0) {
+        return true;
+      }
+
+      return account.balance.availableCredits >= 1;
+    } catch {
+      // If snapshot check fails, rely on server-side enforcement.
+      return true;
+    }
   }, []);
 
   const handleCreditRecoveryPurchase = useCallback(async () => {
@@ -433,6 +459,19 @@ export function RecipeWorkspaceScreen({
 
     async function generateFromHome() {
       try {
+        const allowedBySnapshot = await hasCreditsOrFreeAction("fuse");
+        if (!allowedBySnapshot) {
+          const purchasedCredits = await handleCreditRecoveryPurchase();
+          if (!purchasedCredits || cancelled) {
+            Alert.alert(
+              "Need credits",
+              "You need credits to continue fusing recipes. We sent you back so you can edit or try later.",
+            );
+            handleBackToEdit();
+            return;
+          }
+        }
+
         const nextRecord = await fetchLiveRecipeRecord(
           pendingRequest.input,
           "fuse",
@@ -502,7 +541,12 @@ export function RecipeWorkspaceScreen({
     return () => {
       cancelled = true;
     };
-  }, [handleBackToEdit, handleCreditRecoveryPurchase, route.params?.pendingRequest]);
+  }, [
+    handleBackToEdit,
+    handleCreditRecoveryPurchase,
+    hasCreditsOrFreeAction,
+    route.params?.pendingRequest,
+  ]);
 
   useEffect(() => {
     // Image loading pipeline:
@@ -698,6 +742,15 @@ export function RecipeWorkspaceScreen({
 
     setIsLoadingLiveRecipe(true);
     try {
+      const allowedBySnapshot = await hasCreditsOrFreeAction("reroll");
+      if (!allowedBySnapshot) {
+        const purchasedCredits = await handleCreditRecoveryPurchase();
+        if (!purchasedCredits) {
+          Alert.alert("Need credits", "Add credits to continue rerolling recipes.");
+          return;
+        }
+      }
+
       const nextRecord = await fetchLiveRecipeRecord(activeRecord.sourceInput, "reroll");
       setLiveRecipeRecord(nextRecord);
     } catch (error) {
