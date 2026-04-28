@@ -94,6 +94,7 @@ async function readErrorMessage(response: Response) {
 export async function fetchLiveRecipeRecord(
   input: FuseRequest,
   action: FuseActionKind = "fuse",
+  requestId?: string,
 ): Promise<GeneratedRecipeRecord> {
   const mobileAnonId = await getMobileAnonymousId();
   const mobileDeviceKey = await getMobileDeviceKey();
@@ -104,6 +105,9 @@ export async function fetchLiveRecipeRecord(
     "x-flavor-fusion-device-key": mobileDeviceKey,
     "x-flavor-fusion-action": action,
   };
+  if (typeof requestId === "string" && requestId.trim().length > 0) {
+    headers["x-flavor-fusion-request-id"] = requestId.trim();
+  }
   if (authToken) {
     headers.authorization = `Bearer ${authToken}`;
   }

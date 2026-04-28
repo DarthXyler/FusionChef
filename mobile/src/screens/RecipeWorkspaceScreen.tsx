@@ -189,6 +189,7 @@ export function RecipeWorkspaceScreen({
   const [isSavingCookbook, setIsSavingCookbook] = useState(false);
   const [isPurchasingCredits, setIsPurchasingCredits] = useState(false);
   const isPurchasingCreditsRef = useRef(false);
+  const startedPendingRequestIdsRef = useRef<Set<string>>(new Set());
   const loaderSpin = useRef(new Animated.Value(0)).current;
   const loaderPulse = useRef(new Animated.Value(1)).current;
   const loaderGlowOpacity = useRef(new Animated.Value(0.35)).current;
@@ -417,6 +418,10 @@ export function RecipeWorkspaceScreen({
     if (!pendingRequest) {
       return;
     }
+    if (startedPendingRequestIdsRef.current.has(pendingRequest.requestId)) {
+      return;
+    }
+    startedPendingRequestIdsRef.current.add(pendingRequest.requestId);
 
     let cancelled = false;
     setPendingSourceInput(pendingRequest.input);
@@ -428,7 +433,11 @@ export function RecipeWorkspaceScreen({
 
     async function generateFromHome() {
       try {
-        const nextRecord = await fetchLiveRecipeRecord(pendingRequest!.input, "fuse");
+        const nextRecord = await fetchLiveRecipeRecord(
+          pendingRequest.input,
+          "fuse",
+          pendingRequest.requestId,
+        );
         if (cancelled) {
           return;
         }
@@ -444,7 +453,11 @@ export function RecipeWorkspaceScreen({
           const purchasedCredits = await handleCreditRecoveryPurchase();
           if (purchasedCredits && !cancelled) {
             try {
-              const retriedRecord = await fetchLiveRecipeRecord(pendingRequest!.input, "fuse");
+              const retriedRecord = await fetchLiveRecipeRecord(
+                pendingRequest.input,
+                "fuse",
+                pendingRequest.requestId,
+              );
               if (!cancelled) {
                 setLiveRecipeRecord(retriedRecord);
                 setPendingSourceInput(retriedRecord.sourceInput);
@@ -456,6 +469,7 @@ export function RecipeWorkspaceScreen({
                   ? retryError.message
                   : "Could not generate a recipe right now.";
               Alert.alert("Generation failed", retryMessage);
+              handleBackToEdit();
               return;
             }
           }
@@ -473,6 +487,8 @@ export function RecipeWorkspaceScreen({
             ? error.message
             : "Could not generate a recipe right now.";
         Alert.alert("Generation failed", message);
+        handleBackToEdit();
+        return;
       } finally {
         if (!cancelled) {
           setIsLoadingLiveRecipe(false);

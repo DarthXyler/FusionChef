@@ -72,6 +72,8 @@ const EGG_PATTERN = /\begg(s)?\b/i;
 const COCONUT_DAIRY_PATTERN = /\bcoconut\s+(milk|cream|yogurt|curd)\b/i;
 const IMPROBABLE_DESSERT_OR_BEVERAGE_PATTERN =
   /\b(beef|steak|pork|rib|ribs|chicken|lamb|mutton|bacon|ham|sausage|duck|turkey|salami|prosciutto|salmon|tuna|fish|shrimp|prawn|crab|lobster|anchovy|sardine|meat|broth|stock|bone-in|bones?)\b/i;
+const UUID_V4_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const BASE_SYSTEM_PROMPT = [
   "You are a fusion chef assistant.",
@@ -308,6 +310,14 @@ async function fetchWithTimeout(
 
 function logFuseTiming(event: Record<string, unknown>) {
   console.info("[api/fuse]", JSON.stringify(event));
+}
+
+function resolveFuseRequestId(request: Request) {
+  const providedRequestId = request.headers.get("x-flavor-fusion-request-id")?.trim() ?? "";
+  if (UUID_V4_PATTERN.test(providedRequestId)) {
+    return providedRequestId;
+  }
+  return crypto.randomUUID();
 }
 
 function withCookbookIdentityHeader(response: NextResponse, anonUserId: string) {
@@ -611,7 +621,7 @@ async function finalizeRecipe(
 }
 
 export async function POST(request: NextRequest) {
-  const requestId = crypto.randomUUID();
+  const requestId = resolveFuseRequestId(request);
   const requestStartedAt = Date.now();
   const stageTimings: FuseStageTiming[] = [];
   const monetizationActionKind = getMonetizationActionKind(request);

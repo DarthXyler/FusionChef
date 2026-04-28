@@ -65,6 +65,14 @@ const SPICE_LEVEL_STYLES: Record<
   5: { backgroundColor: "#fef2f2", borderColor: "#ef4444", textColor: "#991b1b" },
 };
 
+function generateRequestId() {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
+    const randomNibble = Math.floor(Math.random() * 16);
+    const value = character === "x" ? randomNibble : (randomNibble & 0x3) | 0x8;
+    return value.toString(16);
+  });
+}
+
 type ImageManipulatorModule = {
   manipulateAsync: (
     uri: string,
@@ -464,7 +472,7 @@ export function HomeScreen({
     navigation.navigate("RecipeWorkspace", {
       pendingRequest: {
         input: pendingInput,
-        requestId: new Date().toISOString(),
+        requestId: generateRequestId(),
       },
     });
     setIsGenerating(false);

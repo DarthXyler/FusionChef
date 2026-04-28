@@ -306,6 +306,38 @@ async function fetchReservation(anonUserId: string, reservationId: string) {
   return row ? rowToReservation(row) : null;
 }
 
+async function fetchReservationByIdempotency(params: {
+  anonUserId: string;
+  idempotencyScope: string;
+  idempotencyKey: string;
+}) {
+  const result = await executeTurso({
+    sql: `SELECT
+            reservation_id,
+            anon_user_id,
+            action_kind,
+            amount,
+            status,
+            reason,
+            metadata_json,
+            expires_at,
+            idempotency_scope,
+            idempotency_key,
+            created_at,
+            updated_at
+          FROM credit_reservations
+          WHERE anon_user_id = ?
+            AND idempotency_scope = ?
+            AND idempotency_key = ?
+          ORDER BY created_at DESC
+          LIMIT 1`,
+    args: [params.anonUserId, params.idempotencyScope, params.idempotencyKey],
+  });
+
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  return row ? rowToReservation(row) : null;
+}
+
 export async function getCreditBalance(anonUserId: string) {
   await ensureSchema();
   await ensureBalanceRow(anonUserId);
@@ -509,114 +541,158 @@ export async function reserveCredits(params: {
   await ensureSchema();
   await ensureBalanceRow(params.anonUserId);
 
+  const idempotencyScope = params.idempotencyScope?.trim() ?? "";
+  const idempotencyKey = params.idempotencyKey?.trim() ?? "";
+
+  const resolveExistingIdempotentReservation = async () => {
+    if (!idempotencyScope || !idempotencyKey) {
+      return null;
+    }
+
+    const existingReservation = await fetchReservationByIdempotency({
+      anonUserId: params.anonUserId,
+      idempotencyScope,
+      idempotencyKey,
+    });
+    if (!existingReservation) {
+      return null;
+    }
+
+    if (existingReservation.status === "reserved") {
+      const existingBalance = await fetchBalance(params.anonUserId);
+      return {
+        ok: true as const,
+        reservation: existingReservation,
+        balance: existingBalance,
+      };
+    }
+
+    // If this idempotency key already finalized once, treat as non-reservable.
+    return { ok: false as const, reason: "insufficient_credits" as const };
+  };
+
+  const existingIdempotentReservation = await resolveExistingIdempotentReservation();
+  if (existingIdempotentReservation) {
+    return existingIdempotentReservation;
+  }
+
   const nowIso = new Date().toISOString();
   const reservationId = params.reservationId?.trim() || randomUUID();
   const entryId = randomUUID();
-  const result = await executeTurso({
-    sql: `WITH updated_balance AS (
-            UPDATE credit_balances
-            SET
-              available_credits = available_credits - ?,
-              pending_credits = pending_credits + ?,
-              updated_at = ?
-            WHERE anon_user_id = ?
-              AND available_credits >= ?
-            RETURNING available_credits, pending_credits
-          ),
-          inserted_reservation AS (
-            INSERT INTO credit_reservations (
-              reservation_id,
+  let result;
+  try {
+    result = await executeTurso({
+      sql: `WITH updated_balance AS (
+              UPDATE credit_balances
+              SET
+                available_credits = available_credits - ?,
+                pending_credits = pending_credits + ?,
+                updated_at = ?
+              WHERE anon_user_id = ?
+                AND available_credits >= ?
+              RETURNING available_credits, pending_credits
+            ),
+            inserted_reservation AS (
+              INSERT INTO credit_reservations (
+                reservation_id,
+                anon_user_id,
+                action_kind,
+                amount,
+                status,
+                reason,
+                metadata_json,
+                expires_at,
+                idempotency_scope,
+                idempotency_key,
+                created_at,
+                updated_at
+              )
+              SELECT
+                ?,
+                ?,
+                ?,
+                ?,
+                'reserved',
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?
+              FROM updated_balance
+              RETURNING reservation_id
+            )
+            INSERT INTO credit_ledger_entries (
+              entry_id,
               anon_user_id,
-              action_kind,
+              event_type,
               amount,
-              status,
-              reason,
-              metadata_json,
-              expires_at,
+              balance_available_after,
+              balance_pending_after,
+              reservation_id,
               idempotency_scope,
               idempotency_key,
-              created_at,
-              updated_at
+              actor,
+              metadata_json,
+              created_at
             )
             SELECT
               ?,
               ?,
+              'reserve',
               ?,
-              ?,
-              'reserved',
-              ?,
-              ?,
+              updated_balance.available_credits,
+              updated_balance.pending_credits,
+              inserted_reservation.reservation_id,
               ?,
               ?,
               ?,
               ?,
               ?
             FROM updated_balance
-            RETURNING reservation_id
-          )
-          INSERT INTO credit_ledger_entries (
-            entry_id,
-            anon_user_id,
-            event_type,
-            amount,
-            balance_available_after,
-            balance_pending_after,
-            reservation_id,
-            idempotency_scope,
-            idempotency_key,
-            actor,
-            metadata_json,
-            created_at
-          )
-          SELECT
-            ?,
-            ?,
-            'reserve',
-            ?,
-            updated_balance.available_credits,
-            updated_balance.pending_credits,
-            inserted_reservation.reservation_id,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?
-          FROM updated_balance
-          JOIN inserted_reservation ON 1 = 1
-          RETURNING
-            reservation_id,
-            balance_available_after,
-            balance_pending_after`,
-    args: [
-      params.amount,
-      params.amount,
-      nowIso,
-      params.anonUserId,
-      params.amount,
-      reservationId,
-      params.anonUserId,
-      params.actionKind,
-      params.amount,
-      params.reason ?? "",
-      toMetadataJson(params.metadata),
-      params.expiresAt ?? null,
-      params.idempotencyScope ?? null,
-      params.idempotencyKey ?? null,
-      nowIso,
-      nowIso,
-      entryId,
-      params.anonUserId,
-      params.amount,
-      params.idempotencyScope ?? null,
-      params.idempotencyKey ?? null,
-      params.actor,
-      toMetadataJson({
-        reason: params.reason ?? "",
-        ...(params.metadata ?? {}),
-      }),
-      nowIso,
-    ],
-  });
+            JOIN inserted_reservation ON 1 = 1
+            RETURNING
+              reservation_id,
+              balance_available_after,
+              balance_pending_after`,
+      args: [
+        params.amount,
+        params.amount,
+        nowIso,
+        params.anonUserId,
+        params.amount,
+        reservationId,
+        params.anonUserId,
+        params.actionKind,
+        params.amount,
+        params.reason ?? "",
+        toMetadataJson(params.metadata),
+        params.expiresAt ?? null,
+        params.idempotencyScope ?? null,
+        params.idempotencyKey ?? null,
+        nowIso,
+        nowIso,
+        entryId,
+        params.anonUserId,
+        params.amount,
+        params.idempotencyScope ?? null,
+        params.idempotencyKey ?? null,
+        params.actor,
+        toMetadataJson({
+          reason: params.reason ?? "",
+          ...(params.metadata ?? {}),
+        }),
+        nowIso,
+      ],
+    });
+  } catch (error) {
+    const existingReservationAfterConflict = await resolveExistingIdempotentReservation();
+    if (existingReservationAfterConflict) {
+      return existingReservationAfterConflict;
+    }
+    throw error;
+  }
 
   const row = result.rows[0] as Record<string, unknown> | undefined;
   if (!row) {
