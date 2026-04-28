@@ -362,10 +362,25 @@ async function preflightFuseMonetization(params: {
     } satisfies MonetizationPreflightResult;
   }
 
-  const todayUsage = await getTodayDailyMonetizationUsage(params.anonUserId);
   const freeActionLimit = getFreeActionLimitForKind(params.actionKind, runtimeConfig);
-  const usedToday = getUsedTodayForKind(params.actionKind, todayUsage);
-  const freeActionsRemaining = Math.max(0, freeActionLimit - usedToday);
+  let usedToday = 0;
+  let freeActionsRemaining = 0;
+  try {
+    const todayUsage = await getTodayDailyMonetizationUsage(params.anonUserId);
+    usedToday = getUsedTodayForKind(params.actionKind, todayUsage);
+    freeActionsRemaining = Math.max(0, freeActionLimit - usedToday);
+  } catch (error) {
+    logFuseTiming({
+      requestId: params.requestId,
+      event: "monetization_usage_read_failed",
+      actionKind: params.actionKind,
+      reason:
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "usage_read_failed",
+    });
+    freeActionsRemaining = 0;
+  }
 
   if (freeActionsRemaining > 0) {
     return {
@@ -380,20 +395,48 @@ async function preflightFuseMonetization(params: {
     } satisfies MonetizationPreflightResult;
   }
 
-  const reserveResult = await reserveCredits({
-    anonUserId: params.anonUserId,
-    amount: CREDIT_COST_PER_ACTION,
-    actionKind: params.actionKind,
-    actor: "api_fuse_enforcement",
-    reason: "Credit spend for Fuse API action.",
-    expiresAt: new Date(Date.now() + CREDIT_RESERVATION_TTL_MS).toISOString(),
-    idempotencyScope: "api-fuse-credit-reserve",
-    idempotencyKey: params.requestId,
-    metadata: {
-      requestId: params.requestId,
+  let reserveResult: Awaited<ReturnType<typeof reserveCredits>>;
+  try {
+    reserveResult = await reserveCredits({
+      anonUserId: params.anonUserId,
+      amount: CREDIT_COST_PER_ACTION,
       actionKind: params.actionKind,
-    },
-  });
+      actor: "api_fuse_enforcement",
+      reason: "Credit spend for Fuse API action.",
+      expiresAt: new Date(Date.now() + CREDIT_RESERVATION_TTL_MS).toISOString(),
+      idempotencyScope: "api-fuse-credit-reserve",
+      idempotencyKey: params.requestId,
+      metadata: {
+        requestId: params.requestId,
+        actionKind: params.actionKind,
+      },
+    });
+  } catch (error) {
+    logFuseTiming({
+      requestId: params.requestId,
+      event: "credit_reserve_failed",
+      actionKind: params.actionKind,
+      reason:
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "reserve_failed",
+    });
+    const balance = await getCreditBalance(params.anonUserId).catch(() => null);
+    const availableCredits = balance?.availableCredits ?? 0;
+    if (availableCredits < CREDIT_COST_PER_ACTION) {
+      return {
+        blocked: true,
+        runtimeEnabled: runtimeConfig.enabled,
+        enforcementMode: runtimeConfig.enforcementMode,
+        freeActionLimit,
+        usedToday,
+        freeActionsRemaining: 0,
+        reservationId: null,
+        balance,
+      } satisfies MonetizationPreflightResult;
+    }
+    throw error;
+  }
 
   if (!reserveResult.ok) {
     const balance = await getCreditBalance(params.anonUserId);
