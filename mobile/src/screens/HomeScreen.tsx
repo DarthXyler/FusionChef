@@ -27,6 +27,12 @@ import {
 import { useResponsiveFlags } from "../hooks/useResponsiveFlags";
 import type { HomeStackParamList } from "../navigation/types";
 import { sampleGeneratedRecipeRecord } from "../data/sampleGeneratedRecipe";
+import { loginWithGoogleForMobile } from "../services/auth";
+import {
+  fetchMonetizationAccountSnapshot,
+  getConfiguredAppleProductIds,
+  purchaseAppleCredits,
+} from "../services/monetization";
 import { fetchOcrExtractedText } from "../services/ocr";
 import type { ImportedRecipePhoto } from "../types/importedRecipePhoto";
 import type { DietaryStyle, FuseRequest, MealType, SpiceLevel } from "../types/recipe";
@@ -70,6 +76,54 @@ function generateRequestId() {
     const randomNibble = Math.floor(Math.random() * 16);
     const value = character === "x" ? randomNibble : (randomNibble & 0x3) | 0x8;
     return value.toString(16);
+  });
+}
+
+type CreditPackOption = {
+  productId: string;
+  credits: number;
+};
+
+function inferCreditsFromProductId(productId: string) {
+  const match = productId.match(/(\d+)(?!.*\d)/);
+  if (!match) {
+    return 0;
+  }
+  const parsed = Number.parseInt(match[1] ?? "", 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function selectAppleCreditPack(options: CreditPackOption[]) {
+  if (options.length === 0) {
+    return null;
+  }
+
+  if (Platform.OS === "ios") {
+    return new Promise<CreditPackOption | null>((resolve) => {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ["Cancel", ...options.map((option) => `${option.credits} credits`)],
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 0) {
+            resolve(null);
+            return;
+          }
+          resolve(options[buttonIndex - 1] ?? null);
+        },
+      );
+    });
+  }
+
+  return new Promise<CreditPackOption | null>((resolve) => {
+    Alert.alert("Choose credits", "Select a credit pack.", [
+      { text: "Cancel", style: "cancel", onPress: () => resolve(null) },
+      ...options.map((option) => ({
+        text: `${option.credits} credits`,
+        onPress: () => resolve(option),
+      })),
+    ]);
   });
 }
 
@@ -159,7 +213,7 @@ export function HomeScreen({
 }: NativeStackScreenProps<HomeStackParamList, "Home">) {
   const insets = useSafeAreaInsets();
   const { isCompactScreen, isVeryCompactScreen } = useResponsiveFlags();
-  const [baseRecipe, setBaseRecipe] = useState(sampleGeneratedRecipeRecord.sourceInput.baseRecipe);
+  const [baseRecipe, setBaseRecipe] = useState("");
   const [mealType, setMealType] = useState<MealType>(sampleGeneratedRecipeRecord.sourceInput.mealType);
   const [fusionCuisine, setFusionCuisine] = useState<string>(DEFAULT_MOBILE_FUSION_CUISINE);
   const [dietaryStyle, setDietaryStyle] = useState<DietaryStyle>(
@@ -174,11 +228,15 @@ export function HomeScreen({
   const [isExtractingText, setIsExtractingText] = useState(false);
   const [mockExtractedText, setMockExtractedText] = useState("");
   const [isExtractionModalOpen, setIsExtractionModalOpen] = useState(false);
+  const [isCreditGateOpen, setIsCreditGateOpen] = useState(false);
+  const [isCreditGateBusy, setIsCreditGateBusy] = useState(false);
+  const [creditGateMessage, setCreditGateMessage] = useState("");
+  const [pendingCreditGateInput, setPendingCreditGateInput] = useState<FuseRequest | null>(null);
   const shouldShowSpiceLevel = mealType !== "dessert" && mealType !== "beverage";
 
   function resetHomeForm() {
     // Full reset used when user taps Home tab again.
-    setBaseRecipe(sampleGeneratedRecipeRecord.sourceInput.baseRecipe);
+    setBaseRecipe("");
     setMealType(sampleGeneratedRecipeRecord.sourceInput.mealType);
     setFusionCuisine(DEFAULT_MOBILE_FUSION_CUISINE);
     setDietaryStyle(sampleGeneratedRecipeRecord.sourceInput.dietaryStyle);
@@ -189,6 +247,10 @@ export function HomeScreen({
     setIsImportingPhoto(false);
     setIsExtractingText(false);
     setIsGenerating(false);
+    setIsCreditGateOpen(false);
+    setIsCreditGateBusy(false);
+    setCreditGateMessage("");
+    setPendingCreditGateInput(null);
   }
 
   useEffect(() => {
@@ -451,7 +513,115 @@ export function HomeScreen({
     setIsExtractionModalOpen(false);
   }
 
-  function handleGenerateRecipe() {
+  function shouldRequireCreditsForFuse(params: {
+    enabled: boolean;
+    enforcementMode: "off" | "observe" | "enforce";
+    freeRemainingFuse: number;
+    availableCredits: number;
+  }) {
+    if (!params.enabled || params.enforcementMode !== "enforce") {
+      return false;
+    }
+    if (params.freeRemainingFuse > 0) {
+      return false;
+    }
+    return params.availableCredits < 1;
+  }
+
+  async function getAppleCreditPackOptions() {
+    const configuredFallback = getConfiguredAppleProductIds().map((productId) => ({
+      productId,
+      credits: inferCreditsFromProductId(productId),
+    }));
+
+    try {
+      const account = await fetchMonetizationAccountSnapshot();
+      const applePacks = account.products
+        .filter((product) => product.provider === "apple_app_store")
+        .map((product) => ({ productId: product.productId, credits: product.credits }))
+        .sort((left, right) => left.credits - right.credits);
+      if (applePacks.length > 0) {
+        return applePacks;
+      }
+    } catch {
+      // Fallback remains available.
+    }
+
+    return configuredFallback;
+  }
+
+  function startFuseNavigation(input: FuseRequest) {
+    Keyboard.dismiss();
+    navigation.navigate("RecipeWorkspace", {
+      pendingRequest: {
+        input,
+        requestId: generateRequestId(),
+      },
+    });
+  }
+
+  async function handleCreditGateContinue() {
+    if (!pendingCreditGateInput || isCreditGateBusy) {
+      return;
+    }
+
+    setIsCreditGateBusy(true);
+    setCreditGateMessage("");
+    try {
+      let account = await fetchMonetizationAccountSnapshot();
+      if (!account.authenticated) {
+        const loggedIn = await loginWithGoogleForMobile();
+        if (!loggedIn) {
+          setCreditGateMessage("Login is required to continue with paid credits.");
+          return;
+        }
+        account = await fetchMonetizationAccountSnapshot();
+      }
+
+      if (
+        !shouldRequireCreditsForFuse({
+          enabled: account.enabled,
+          enforcementMode: account.enforcementMode,
+          freeRemainingFuse: account.freeRemaining.fuse,
+          availableCredits: account.balance.availableCredits,
+        })
+      ) {
+        setIsCreditGateOpen(false);
+        startFuseNavigation(pendingCreditGateInput);
+        return;
+      }
+
+      const options = await getAppleCreditPackOptions();
+      if (options.length === 0) {
+        setCreditGateMessage("No credit packs are configured yet.");
+        return;
+      }
+
+      const selectedPack = await selectAppleCreditPack(options);
+      if (!selectedPack) {
+        return;
+      }
+
+      const purchase = await purchaseAppleCredits(selectedPack.productId);
+      if (purchase.verification.grantedCredits < 1) {
+        setCreditGateMessage("Purchase verified, but credits were not added yet. Try again.");
+        return;
+      }
+
+      setIsCreditGateOpen(false);
+      startFuseNavigation(pendingCreditGateInput);
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Could not complete credit setup right now.";
+      setCreditGateMessage(message);
+    } finally {
+      setIsCreditGateBusy(false);
+    }
+  }
+
+  async function handleGenerateRecipe() {
     const trimmedRecipe = baseRecipe.trim();
     if (!trimmedRecipe) {
       Alert.alert("Recipe required", "Enter a base recipe or dish idea before generating.");
@@ -468,14 +638,28 @@ export function HomeScreen({
 
     Keyboard.dismiss();
     setIsGenerating(true);
-    // Workspace immediately shows loading UI and performs /api/fuse asynchronously.
-    navigation.navigate("RecipeWorkspace", {
-      pendingRequest: {
-        input: pendingInput,
-        requestId: generateRequestId(),
-      },
-    });
-    setIsGenerating(false);
+    try {
+      const account = await fetchMonetizationAccountSnapshot();
+      const needsCredits = shouldRequireCreditsForFuse({
+        enabled: account.enabled,
+        enforcementMode: account.enforcementMode,
+        freeRemainingFuse: account.freeRemaining.fuse,
+        availableCredits: account.balance.availableCredits,
+      });
+
+      if (needsCredits) {
+        setPendingCreditGateInput(pendingInput);
+        setCreditGateMessage("");
+        setIsCreditGateOpen(true);
+        return;
+      }
+    } catch {
+      // If account snapshot fails, server-side enforcement still protects us.
+    } finally {
+      setIsGenerating(false);
+    }
+
+    startFuseNavigation(pendingInput);
   }
 
   function handleUseSampleRecipe() {
@@ -725,11 +909,78 @@ export function HomeScreen({
               <PrimaryButton
                 disabled={isGenerating}
                 label={isGenerating ? "Fusing Recipe..." : "Fuse Recipe"}
-                onPress={handleGenerateRecipe}
+                onPress={() => void handleGenerateRecipe()}
               />
             </View>
           </View>
         </ScrollView>
+
+        <Modal
+          animationType="slide"
+          presentationStyle="fullScreen"
+          visible={isCreditGateOpen}
+          onRequestClose={() => {
+            if (!isCreditGateBusy) {
+              setIsCreditGateOpen(false);
+            }
+          }}
+        >
+          <SafeAreaView style={styles.modalSafeArea}>
+            <View
+              style={[
+                styles.modalSheet,
+                { paddingTop: Math.max(insets.top + 12, 28), paddingBottom: 24 },
+              ]}
+            >
+              <View
+                style={[
+                  styles.modalHeader,
+                  isCompactScreen && styles.modalHeaderCompact,
+                ]}
+              >
+                <View style={styles.modalHeaderTextBlock}>
+                  <Text style={styles.modalTitle}>Continue Your Fusion</Text>
+                  <Text style={styles.modalSubtitle}>
+                    You have used today&apos;s free fusions. Login and add credits to keep creating.
+                  </Text>
+                </View>
+                <Pressable
+                  accessibilityLabel="Close credit setup"
+                  onPress={() => !isCreditGateBusy && setIsCreditGateOpen(false)}
+                  style={({ pressed }) => [
+                    styles.modalCloseButton,
+                    pressed && styles.menuButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.modalCloseLabel}>Close</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.modalPreviewCard}>
+                <Text style={styles.modalSectionLabel}>What you get</Text>
+                <View style={styles.homeBulletList}>
+                  <Text style={styles.homeBullet}>✓ Keep all saved cookbook data</Text>
+                  <Text style={styles.homeBullet}>✓ Buy only what you need in credits</Text>
+                  <Text style={styles.homeBullet}>✓ Continue fusing without losing your draft</Text>
+                </View>
+              </View>
+
+              {creditGateMessage ? (
+                <View style={styles.emptyImportState}>
+                  <Text style={styles.emptyImportCopy}>{creditGateMessage}</Text>
+                </View>
+              ) : null}
+
+              <View style={styles.modalActions}>
+                <PrimaryButton
+                  disabled={isCreditGateBusy || !pendingCreditGateInput}
+                  label={isCreditGateBusy ? "Preparing..." : "Continue with Google"}
+                  onPress={() => void handleCreditGateContinue()}
+                />
+              </View>
+            </View>
+          </SafeAreaView>
+        </Modal>
 
         <Modal
           animationType="slide"
