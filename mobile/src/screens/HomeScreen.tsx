@@ -234,6 +234,13 @@ export function HomeScreen({
   const [pendingCreditGateInput, setPendingCreditGateInput] = useState<FuseRequest | null>(null);
   const shouldShowSpiceLevel = mealType !== "dessert" && mealType !== "beverage";
 
+  useEffect(() => {
+    // Warm up credit/account snapshot so Fuse tap can use cached state instantly.
+    void fetchMonetizationAccountSnapshot({ preferCache: true }).catch(() => {
+      // Ignore prefetch failures; runtime flow has fallback checks.
+    });
+  }, []);
+
   function resetHomeForm() {
     // Full reset used when user taps Home tab again.
     setBaseRecipe("");
@@ -535,7 +542,7 @@ export function HomeScreen({
     }));
 
     try {
-      const account = await fetchMonetizationAccountSnapshot();
+      const account = await fetchMonetizationAccountSnapshot({ preferCache: true });
       const applePacks = account.products
         .filter((product) => product.provider === "apple_app_store")
         .map((product) => ({ productId: product.productId, credits: product.credits }))
@@ -575,7 +582,7 @@ export function HomeScreen({
           setCreditGateMessage("Login is required to continue with paid credits.");
           return;
         }
-        account = await fetchMonetizationAccountSnapshot();
+        account = await fetchMonetizationAccountSnapshot({ forceRefresh: true });
       }
 
       if (
@@ -639,7 +646,7 @@ export function HomeScreen({
     Keyboard.dismiss();
     setIsGenerating(true);
     try {
-      const account = await fetchMonetizationAccountSnapshot();
+      const account = await fetchMonetizationAccountSnapshot({ preferCache: true });
       const needsCredits = shouldRequireCreditsForFuse({
         enabled: account.enabled,
         enforcementMode: account.enforcementMode,

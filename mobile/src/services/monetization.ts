@@ -72,6 +72,14 @@ export type MonetizationAccountSnapshot = {
   products: MonetizationProduct[];
 };
 
+const ACCOUNT_SNAPSHOT_CACHE_TTL_MS = 20_000;
+let cachedAccountSnapshot:
+  | {
+      value: MonetizationAccountSnapshot;
+      fetchedAtMs: number;
+    }
+  | null = null;
+
 type ApplePurchaseVerificationResult = {
   grantedCredits: number;
   balance: CreditBalance | null;
@@ -178,7 +186,26 @@ function parseProducts(value: unknown): MonetizationProduct[] {
     .filter((entry): entry is MonetizationProduct => entry !== null);
 }
 
-export async function fetchMonetizationAccountSnapshot() {
+export function invalidateMonetizationAccountSnapshotCache() {
+  cachedAccountSnapshot = null;
+}
+
+export async function fetchMonetizationAccountSnapshot(options?: {
+  preferCache?: boolean;
+  forceRefresh?: boolean;
+}) {
+  const preferCache = options?.preferCache === true;
+  const forceRefresh = options?.forceRefresh === true;
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    preferCache &&
+    cachedAccountSnapshot &&
+    now - cachedAccountSnapshot.fetchedAtMs <= ACCOUNT_SNAPSHOT_CACHE_TTL_MS
+  ) {
+    return cachedAccountSnapshot.value;
+  }
+
   const identityHeaders = await withIdentityHeaders();
   const response = await fetch(`${getApiBaseUrl()}/api/monetization/account`, {
     method: "GET",
@@ -207,7 +234,7 @@ export async function fetchMonetizationAccountSnapshot() {
       ? payload.enforcementMode
       : "off";
 
-  return {
+  const snapshot = {
     authenticated: payload.authenticated === true,
     enabled: payload.enabled === true,
     enforcementMode,
@@ -221,6 +248,12 @@ export async function fetchMonetizationAccountSnapshot() {
     },
     products: parseProducts(payload.products),
   } satisfies MonetizationAccountSnapshot;
+
+  cachedAccountSnapshot = {
+    value: snapshot,
+    fetchedAtMs: now,
+  };
+  return snapshot;
 }
 
 async function verifyApplePurchase(params: {
@@ -357,6 +390,7 @@ export async function purchaseAppleCredits(productId: string) {
     productId,
     appleTransactionId: transactionId,
   });
+  invalidateMonetizationAccountSnapshotCache();
   await iap.finishTransactionAsync(purchase, true);
 
   return {
