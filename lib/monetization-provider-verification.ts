@@ -134,6 +134,43 @@ function logApplePrivateKeyDiagnostics(privateKeyRaw: string, privateKey: string
   );
 }
 
+function summarizeAppleVerificationPayload(payload: unknown) {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    return { payloadType: typeof payload };
+  }
+
+  const candidate = payload as Record<string, unknown>;
+  const summary: Record<string, unknown> = {};
+  for (const key of ["errorCode", "errorMessage", "status", "reason"]) {
+    const value = candidate[key];
+    if (typeof value === "string" || typeof value === "number") {
+      summary[key] = value;
+    }
+  }
+  return summary;
+}
+
+function logAppleVerificationFailure(params: {
+  transactionId: string;
+  productionStatus: number;
+  sandboxStatus?: number;
+  selectedEnvironment: "production" | "sandbox";
+  selectedPayload: unknown;
+}) {
+  console.warn(
+    "[monetization/apple-iap-verify]",
+    JSON.stringify({
+      event: "transaction_lookup_failed",
+      transactionIdLength: params.transactionId.length,
+      transactionIdPrefix: params.transactionId.slice(0, 4),
+      productionStatus: params.productionStatus,
+      sandboxStatus: params.sandboxStatus ?? null,
+      selectedEnvironment: params.selectedEnvironment,
+      appleResponse: summarizeAppleVerificationPayload(params.selectedPayload),
+    }),
+  );
+}
+
 function buildAppleJwt() {
   const issuerId = assertNonEmpty(process.env.APPLE_IAP_ISSUER_ID, "APPLE_IAP_ISSUER_ID");
   const keyId = assertNonEmpty(process.env.APPLE_IAP_KEY_ID, "APPLE_IAP_KEY_ID");
@@ -231,11 +268,20 @@ export async function verifyApplePurchase(
   const shouldFallbackToSandbox =
     !production.response.ok &&
     (production.response.status === 404 || production.response.status === 400);
-  const selected = shouldFallbackToSandbox
+  const sandbox = shouldFallbackToSandbox
     ? await fetchJson(sandboxUrl, { method: "GET", headers })
-    : production;
+    : null;
+  const selected = sandbox ?? production;
+  const selectedEnvironment = sandbox ? "sandbox" : "production";
 
   if (!selected.response.ok) {
+    logAppleVerificationFailure({
+      transactionId,
+      productionStatus: production.response.status,
+      sandboxStatus: sandbox?.response.status,
+      selectedEnvironment,
+      selectedPayload: selected.payload,
+    });
     throw new ProviderVerificationError("Apple verification failed.", 502);
   }
 
