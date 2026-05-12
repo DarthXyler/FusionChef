@@ -272,7 +272,9 @@ export async function verifyApplePurchase(
   const production = await fetchJson(productionUrl, { method: "GET", headers });
   const shouldFallbackToSandbox =
     !production.response.ok &&
-    (production.response.status === 404 || production.response.status === 400);
+    (production.response.status === 404 ||
+      production.response.status === 401 ||
+      production.response.status === 400);
   const sandbox = shouldFallbackToSandbox
     ? await fetchJson(sandboxUrl, { method: "GET", headers })
     : null;
