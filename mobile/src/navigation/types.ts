@@ -32,7 +32,11 @@ export type RootTabParamList = {
   Explore: NavigatorScreenParams<HomeStackParamList> | undefined;
   Cookbook: NavigatorScreenParams<CookbookStackParamList> | undefined;
   Create: NavigatorScreenParams<HomeStackParamList> | undefined;
-  Profile: undefined;
+  Profile:
+    | {
+        openCreditSheetToken?: string;
+      }
+    | undefined;
 };
 
 export type CookbookStackParamList = {

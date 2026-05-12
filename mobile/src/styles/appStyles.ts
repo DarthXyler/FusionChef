@@ -832,11 +832,6 @@ export const styles = StyleSheet.create({
     fontWeight: "900",
     lineHeight: 32,
   },
-  profileUsageStatusValue: {
-    fontSize: 20,
-    lineHeight: 25,
-    textAlign: "center",
-  },
   profileUsageLabel: {
     color: "#047857",
     fontSize: 12,
@@ -1157,12 +1152,6 @@ export const styles = StyleSheet.create({
     gap: 12,
     justifyContent: "space-between",
     marginBottom: 12,
-  },
-  dashboardMenuButton: {
-    alignItems: "center",
-    height: 36,
-    justifyContent: "center",
-    width: 32,
   },
   dashboardGreetingBlock: {
     gap: 5,

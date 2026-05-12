@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Image, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BrandHeader } from "../components/BrandHeader";
+import { CreditPill } from "../components/CreditPill";
 import { useMobileCookbook } from "../context/mobileCookbook";
 import type { HomeStackParamList, RootTabParamList } from "../navigation/types";
 import { getMobileAuthSession } from "../services/auth";
@@ -136,6 +137,13 @@ export function DashboardHomeScreen({
     });
   }
 
+  function openBuyCredits() {
+    const parentNavigation = navigation.getParent<NavigationProp<RootTabParamList>>();
+    parentNavigation?.navigate("Profile", {
+      openCreditSheetToken: String(Date.now()),
+    });
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.screen}>
@@ -150,18 +158,8 @@ export function DashboardHomeScreen({
           }
         >
           <View style={styles.dashboardTopBar}>
-            <Pressable
-              accessibilityLabel="Open menu"
-              accessibilityRole="button"
-              style={({ pressed }) => [styles.dashboardMenuButton, pressed && styles.profileRowPressed]}
-            >
-              <MaterialIcons color="#111827" name="menu" size={24} />
-            </Pressable>
             <BrandHeader compact />
-            <View style={styles.profileCreditsPill}>
-              <MaterialCommunityIcons color="#047857" name="database" size={16} />
-              <Text style={styles.profileCreditsText}>{availableCredits}</Text>
-            </View>
+            <CreditPill credits={availableCredits} onPress={openBuyCredits} />
           </View>
 
           <View style={styles.dashboardGreetingBlock}>
@@ -239,10 +237,10 @@ export function DashboardHomeScreen({
                         style={styles.dashboardRecipeImage}
                       />
                     ) : (
-                      <View style={styles.dashboardRecipeFallback}>
-                        <MaterialCommunityIcons
+                <View style={styles.dashboardRecipeFallback}>
+                        <MaterialIcons
                           color="#047857"
-                          name={getRecipeFallbackIcon(index)}
+                          name={getRecipeFallbackIcon(index) === "noodles" ? "ramen-dining" : "rice-bowl"}
                           size={44}
                         />
                       </View>

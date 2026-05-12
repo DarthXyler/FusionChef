@@ -1,5 +1,6 @@
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import * as ImagePicker from "expo-image-picker";
 import Constants from "expo-constants";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,7 +18,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BrandHeader } from "../components/BrandHeader";
+import { CreditPill } from "../components/CreditPill";
 import { useMobileCookbook } from "../context/mobileCookbook";
+import type { RootTabParamList } from "../navigation/types";
 import {
   clearMobileAuthToken,
   getMobileAuthSession,
@@ -143,7 +146,7 @@ function ProfileAvatar({
   );
 }
 
-export function ProfileScreen() {
+export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, "Profile">) {
   const { summaries } = useMobileCookbook();
   const [session, setSession] = useState<MobileAuthSession | null>(null);
   const [profileOverrides, setProfileOverrides] = useState<MobileProfileOverrides>({
@@ -168,17 +171,7 @@ export function ProfileScreen() {
   const isSignedIn = session !== null;
   const availableCredits = accountSnapshot?.balance.availableCredits ?? 0;
   const freeFuseRemaining = accountSnapshot?.freeRemaining.fuse ?? 0;
-  const pendingCredits = accountSnapshot?.balance.pendingCredits ?? 0;
-  const statusTitle = !isSignedIn
-    ? "Sign in"
-    : availableCredits <= 0 && freeFuseRemaining <= 0
-      ? "Low"
-      : "Active";
-  const statusLabel = !isSignedIn
-    ? "To sync"
-    : pendingCredits > 0
-      ? `${pendingCredits} pending`
-      : "All set";
+  const freeRerollRemaining = accountSnapshot?.freeRemaining.reroll ?? 0;
   const appVersion =
     Constants.expoConfig?.version || Constants.manifest2?.extra?.expoClient?.version || "2.0.0";
 
@@ -348,6 +341,12 @@ export function ProfileScreen() {
       setIsLoadingCreditPacks(false);
     }
   }, [getAppleCreditPackOptions, isSignedIn, loadProfile]);
+
+  useEffect(() => {
+    if (route.params?.openCreditSheetToken) {
+      void handleOpenCreditSheet();
+    }
+  }, [handleOpenCreditSheet, route.params?.openCreditSheetToken]);
 
   const handlePurchaseSelectedPack = useCallback(async () => {
     if (isPurchasingCredits) {
@@ -554,18 +553,7 @@ export function ProfileScreen() {
         <ScrollView contentContainerStyle={styles.profileContent}>
           <View style={styles.profileTopBar}>
             <BrandHeader compact />
-            <Pressable
-              accessibilityLabel="Buy credits"
-              accessibilityRole="button"
-              onPress={handleOpenCreditSheet}
-              style={({ pressed }) => [
-                styles.profileCreditsPill,
-                pressed && styles.profileRowPressed,
-              ]}
-            >
-              <MaterialCommunityIcons color="#047857" name="database" size={16} />
-              <Text style={styles.profileCreditsText}>{availableCredits}</Text>
-            </Pressable>
+            <CreditPill credits={availableCredits} onPress={handleOpenCreditSheet} />
           </View>
 
           <View style={styles.profileHeroCard}>
@@ -645,14 +633,11 @@ export function ProfileScreen() {
             </View>
             <View style={[styles.profileUsageCard, styles.profileUsageCardBlue]}>
               <View style={[styles.profileUsageIcon, styles.profileUsageIconBlue]}>
-                <MaterialIcons color="#1d4ed8" name="verified-user" size={22} />
+                <MaterialIcons color="#1d4ed8" name="refresh" size={22} />
               </View>
-              <Text style={[styles.profileUsageValue, styles.profileUsageStatusValue]}>
-                {statusTitle}
-              </Text>
-              <Text style={[styles.profileUsageLabel, styles.profileUsageLabelBlue]}>Status</Text>
+              <Text style={styles.profileUsageValue}>{freeRerollRemaining}</Text>
               <Text style={[styles.profileUsageLabel, styles.profileUsageLabelBlue]}>
-                {statusLabel}
+                Free rerolls
               </Text>
             </View>
           </View>
