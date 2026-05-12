@@ -98,6 +98,7 @@ let cachedAccountSnapshot:
       fetchedAtMs: number;
     }
   | null = null;
+const accountSnapshotListeners = new Set<(snapshot: MonetizationAccountSnapshot) => void>();
 
 type ApplePurchaseVerificationResult = {
   grantedCredits: number;
@@ -256,6 +257,21 @@ export function invalidateMonetizationAccountSnapshotCache() {
   cachedAccountSnapshot = null;
 }
 
+export function subscribeToMonetizationAccountSnapshot(
+  listener: (snapshot: MonetizationAccountSnapshot) => void,
+) {
+  accountSnapshotListeners.add(listener);
+  return () => {
+    accountSnapshotListeners.delete(listener);
+  };
+}
+
+function notifyAccountSnapshotListeners(snapshot: MonetizationAccountSnapshot) {
+  accountSnapshotListeners.forEach((listener) => {
+    listener(snapshot);
+  });
+}
+
 export async function fetchMonetizationAccountSnapshot(options?: {
   preferCache?: boolean;
   forceRefresh?: boolean;
@@ -320,6 +336,7 @@ export async function fetchMonetizationAccountSnapshot(options?: {
     value: snapshot,
     fetchedAtMs: now,
   };
+  notifyAccountSnapshotListeners(snapshot);
   return snapshot;
 }
 
@@ -348,12 +365,6 @@ async function verifyApplePurchase(params: {
 
   const payload = (await response.json()) as VerifyPurchasePayload;
   if (!response.ok) {
-    console.warn("[monetization] Apple purchase verification failed", {
-      status: response.status,
-      productId: params.productId,
-      requestId: typeof payload.requestId === "string" ? payload.requestId : null,
-      error: typeof payload.error === "string" ? payload.error : null,
-    });
     throw new Error(
       extractErrorMessage(payload as Record<string, unknown>, "Purchase verification failed."),
     );
@@ -492,10 +503,8 @@ export async function purchaseAppleCredits(
     throw new Error("In-app purchases are currently enabled for iOS only.");
   }
 
-  options?.onStatus?.("Connecting to App Store...");
   const iap = await ensureIapConnected();
 
-  options?.onStatus?.("Loading credit pack...");
   const productQuery = await iap.getProductsAsync([productId]);
   if (productQuery.responseCode !== iap.IAPResponseCode.OK) {
     throw new Error("Could not load credit pack details from App Store.");
@@ -505,24 +514,7 @@ export async function purchaseAppleCredits(
     throw new Error("Requested credit pack is not available in App Store.");
   }
 
-  options?.onStatus?.("Opening App Store purchase sheet...");
-  const recoveredBeforeLaunch = await findRecoverableApplePurchase(iap, productId);
-  if (recoveredBeforeLaunch) {
-    options?.onStatus?.("Recovering previous App Store purchase...");
-    const verification = await verifyApplePurchase({
-      productId,
-      appleTransactionId: recoveredBeforeLaunch.orderId?.trim() ?? "",
-    });
-    invalidateMonetizationAccountSnapshotCache();
-    options?.onStatus?.("Finishing purchase...");
-    await iap.finishTransactionAsync(recoveredBeforeLaunch, true);
-
-    return {
-      product: matchedProduct,
-      verification,
-    };
-  }
-
+  options?.onStatus?.("Opening App Store...");
   const purchasePromise = waitForApplePurchase(iap, productId);
   let rejectLaunchError: (error: unknown) => void = () => {};
   const launchErrorPromise = new Promise<never>((_, reject) => {
@@ -542,7 +534,7 @@ export async function purchaseAppleCredits(
     }
     purchase = recoveredPurchase;
   }
-  options?.onStatus?.("Verifying purchase...");
+  options?.onStatus?.("Adding credits...");
   const transactionId = purchase.orderId?.trim();
   if (!transactionId) {
     throw new Error("Purchase completed but no transaction id was returned.");
@@ -553,7 +545,6 @@ export async function purchaseAppleCredits(
     appleTransactionId: transactionId,
   });
   invalidateMonetizationAccountSnapshotCache();
-  options?.onStatus?.("Finishing purchase...");
   await iap.finishTransactionAsync(purchase, true);
 
   return {

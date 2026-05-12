@@ -29,6 +29,7 @@ import {
   getAvailableAppleProductIds,
   getConfiguredAppleProductIds,
   purchaseAppleCredits,
+  subscribeToMonetizationAccountSnapshot,
   type MonetizationAccountSnapshot,
 } from "../services/monetization";
 import {
@@ -172,7 +173,7 @@ export function ProfileScreen() {
     ? "Sign in"
     : availableCredits <= 0 && freeFuseRemaining <= 0
       ? "Low"
-      : "Ready";
+      : "Active";
   const statusLabel = !isSignedIn
     ? "To sync"
     : pendingCredits > 0
@@ -208,6 +209,14 @@ export function ProfileScreen() {
   useEffect(() => {
     void loadProfile();
   }, [loadProfile]);
+
+  useEffect(
+    () =>
+      subscribeToMonetizationAccountSnapshot((snapshot) => {
+        setAccountSnapshot(snapshot);
+      }),
+    [],
+  );
 
   const openLink = useCallback(async (url: string, label: string) => {
     try {
@@ -355,7 +364,7 @@ export function ProfileScreen() {
     }
 
     setIsPurchasingCredits(true);
-    setCreditPurchaseMessage("");
+    setCreditPurchaseMessage("Opening App Store...");
     try {
       const purchase = await purchaseAppleCredits(selectedPack.productId, {
         onStatus: setCreditPurchaseMessage,
@@ -545,10 +554,18 @@ export function ProfileScreen() {
         <ScrollView contentContainerStyle={styles.profileContent}>
           <View style={styles.profileTopBar}>
             <BrandHeader compact />
-            <View style={styles.profileCreditsPill}>
+            <Pressable
+              accessibilityLabel="Buy credits"
+              accessibilityRole="button"
+              onPress={handleOpenCreditSheet}
+              style={({ pressed }) => [
+                styles.profileCreditsPill,
+                pressed && styles.profileRowPressed,
+              ]}
+            >
               <MaterialCommunityIcons color="#047857" name="database" size={16} />
               <Text style={styles.profileCreditsText}>{availableCredits}</Text>
-            </View>
+            </Pressable>
           </View>
 
           <View style={styles.profileHeroCard}>
@@ -602,13 +619,21 @@ export function ProfileScreen() {
             {isLoading ? <ActivityIndicator color="#10b981" size="small" /> : null}
           </View>
           <View style={styles.profileUsageGrid}>
-            <View style={styles.profileUsageCard}>
+            <Pressable
+              accessibilityLabel="Buy credits"
+              accessibilityRole="button"
+              onPress={handleOpenCreditSheet}
+              style={({ pressed }) => [
+                styles.profileUsageCard,
+                pressed && styles.profileRowPressed,
+              ]}
+            >
               <View style={styles.profileUsageIcon}>
                 <MaterialCommunityIcons color="#047857" name="database" size={22} />
               </View>
               <Text style={styles.profileUsageValue}>{availableCredits}</Text>
               <Text style={styles.profileUsageLabel}>Credits</Text>
-            </View>
+            </Pressable>
             <View style={[styles.profileUsageCard, styles.profileUsageCardWarm]}>
               <View style={[styles.profileUsageIcon, styles.profileUsageIconWarm]}>
                 <MaterialIcons color="#c2410c" name="auto-awesome" size={22} />

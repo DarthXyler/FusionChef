@@ -2,8 +2,8 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useFocusEffect, type NavigationProp } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { useCallback, useMemo, useState } from "react";
-import { Image, Pressable, ScrollView, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Image, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BrandHeader } from "../components/BrandHeader";
 import { useMobileCookbook } from "../context/mobileCookbook";
@@ -14,7 +14,10 @@ import {
   readDashboardFusionHistory,
   type DashboardFusionSummary,
 } from "../services/dashboardHistory";
-import { fetchMonetizationAccountSnapshot } from "../services/monetization";
+import {
+  fetchMonetizationAccountSnapshot,
+  subscribeToMonetizationAccountSnapshot,
+} from "../services/monetization";
 import { readMobileProfileOverrides } from "../services/profile";
 import { styles } from "../styles/appStyles";
 
@@ -49,47 +52,67 @@ export function DashboardHomeScreen({
   const [displayName, setDisplayName] = useState("Chef");
   const [availableCredits, setAvailableCredits] = useState(0);
   const [recentFusions, setRecentFusions] = useState<DashboardFusionSummary[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const loadDashboard = useCallback(
+    async (options?: { forceRefreshCredits?: boolean }) => {
+      const [session, overrides, history] = await Promise.all([
+        getMobileAuthSession(),
+        readMobileProfileOverrides(),
+        readDashboardFusionHistory(),
+      ]);
+      const nextName = overrides.displayName || session?.name || session?.email || "Chef";
+      setDisplayName(getFirstName(nextName));
+      setRecentFusions(history);
+
+      if (!hasLoaded) {
+        void loadSummaries().catch(() => {});
+      }
+
+      try {
+        const snapshot = await fetchMonetizationAccountSnapshot(
+          options?.forceRefreshCredits ? { forceRefresh: true } : { preferCache: true },
+        );
+        setAvailableCredits(snapshot.balance.availableCredits);
+      } catch {
+        setAvailableCredits(0);
+      }
+    },
+    [hasLoaded, loadSummaries],
+  );
+
+  useEffect(
+    () =>
+      subscribeToMonetizationAccountSnapshot((snapshot) => {
+        setAvailableCredits(snapshot.balance.availableCredits);
+      }),
+    [],
+  );
 
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
 
-      async function loadDashboard() {
-        const [session, overrides, history] = await Promise.all([
-          getMobileAuthSession(),
-          readMobileProfileOverrides(),
-          readDashboardFusionHistory(),
-        ]);
-        if (cancelled) {
-          return;
+      void loadDashboard().catch(() => {
+        if (!cancelled) {
+          setAvailableCredits(0);
         }
-        const nextName = overrides.displayName || session?.name || session?.email || "Chef";
-        setDisplayName(getFirstName(nextName));
-        setRecentFusions(history);
-
-        if (!hasLoaded) {
-          void loadSummaries().catch(() => {});
-        }
-
-        try {
-          const snapshot = await fetchMonetizationAccountSnapshot({ preferCache: true });
-          if (!cancelled) {
-            setAvailableCredits(snapshot.balance.availableCredits);
-          }
-        } catch {
-          if (!cancelled) {
-            setAvailableCredits(0);
-          }
-        }
-      }
-
-      void loadDashboard();
+      });
 
       return () => {
         cancelled = true;
       };
-    }, [hasLoaded, loadSummaries]),
+    }, [loadDashboard]),
   );
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([loadDashboard({ forceRefreshCredits: true }), loadSummaries()]);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [loadDashboard, loadSummaries]);
 
   const dashboardRecipes = useMemo(() => {
     const cookbookItems = summaries.slice(0, 4).map(cookbookSummaryToDashboardFusion);
@@ -116,7 +139,16 @@ export function DashboardHomeScreen({
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.dashboardContent}>
+        <ScrollView
+          contentContainerStyle={styles.dashboardContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              tintColor="#10b981"
+              onRefresh={handleRefresh}
+            />
+          }
+        >
           <View style={styles.dashboardTopBar}>
             <Pressable
               accessibilityLabel="Open menu"
