@@ -18,7 +18,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { captureRef } from "react-native-view-shot";
-import { BrandHeader } from "../components/BrandHeader";
+import { AppCreditHeader } from "../components/AppCreditHeader";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { SectionHeader } from "../components/SectionHeader";
 import { useMobileCookbook } from "../context/mobileCookbook";
@@ -41,7 +41,7 @@ export function CookbookDetailScreen({
 }: NativeStackScreenProps<CookbookStackParamList, "CookbookDetail">) {
   const { isCompactScreen, isVeryCompactScreen } = useResponsiveFlags();
   const recipeCardRef = useRef<View>(null);
-  const { getRecord, loadRecord, refreshRecord, deleteRecord } = useMobileCookbook();
+  const { getRecord, loadRecord, refreshRecord, updateRecipeFlags, deleteRecord } = useMobileCookbook();
   const [captureCardSize, setCaptureCardSize] = useState({ width: 0, height: 0 });
   const [isSharingImage, setIsSharingImage] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
@@ -53,6 +53,7 @@ export function CookbookDetailScreen({
   const [isLoading, setIsLoading] = useState(record === null);
   const [loadError, setLoadError] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isUpdatingFlags, setIsUpdatingFlags] = useState(false);
   const [isShowingCachedRecord, setIsShowingCachedRecord] = useState(record !== null);
   const [detailSyncError, setDetailSyncError] = useState("");
 
@@ -297,6 +298,32 @@ export function CookbookDetailScreen({
     ]);
   }
 
+  async function handleToggleFlag(flag: "favorite" | "toTry") {
+    if (!record || isUpdatingFlags) {
+      return;
+    }
+    const nextFlags =
+      flag === "favorite"
+        ? { isFavorite: record.isFavorite !== true }
+        : { isToTry: record.isToTry !== true };
+
+    setRecord({ ...record, ...nextFlags });
+    setIsUpdatingFlags(true);
+    try {
+      const updatedRecord = await updateRecipeFlags(record.recipe.id, nextFlags);
+      setRecord(updatedRecord);
+    } catch (error) {
+      setRecord(record);
+      const message =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Could not update recipe.";
+      Alert.alert("Update failed", message);
+    } finally {
+      setIsUpdatingFlags(false);
+    }
+  }
+
   if (isLoading || !record || !recipe) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -304,11 +331,8 @@ export function CookbookDetailScreen({
           <ScrollView
             contentContainerStyle={[styles.content, isVeryCompactScreen && styles.contentCompact]}
           >
+            <AppCreditHeader />
             <View style={styles.homeHeroCard}>
-              <View style={styles.fieldLabelRow}>
-                <BrandHeader compact />
-                <View style={styles.menuButtonSpacer} />
-              </View>
               <Text style={styles.kicker}>Cookbook</Text>
               <Text
                 style={[
@@ -362,9 +386,10 @@ export function CookbookDetailScreen({
           contentContainerStyle={[styles.content, isVeryCompactScreen && styles.contentCompact]}
           onScrollBeginDrag={() => setIsActionsMenuOpen(false)}
         >
+          <AppCreditHeader />
           <View style={styles.homeHeroCard}>
             <View style={styles.fieldLabelRow}>
-              <BrandHeader compact />
+              <Text style={styles.kicker}>Cookbook</Text>
               <View style={styles.menuAnchor}>
                 <Pressable
                   accessibilityLabel="Open actions menu"
@@ -394,7 +419,6 @@ export function CookbookDetailScreen({
                 ) : null}
               </View>
             </View>
-            <Text style={styles.kicker}>Cookbook</Text>
             <Text
               style={[
                 styles.title,
@@ -436,6 +460,48 @@ export function CookbookDetailScreen({
               isCompactScreen && styles.resultActionsRowCompact,
             ]}
           >
+            <Pressable
+              onPress={() => handleToggleFlag("favorite")}
+              disabled={isUpdatingFlags}
+              style={({ pressed }) => [
+                styles.resultActionSecondary,
+                record.isFavorite && styles.resultActionPrimary,
+                isCompactScreen && styles.resultActionCompact,
+                pressed && styles.resultActionPressed,
+              ]}
+            >
+              <View style={styles.resultActionContent}>
+                <Text
+                  style={[
+                    record.isFavorite ? styles.resultActionPrimaryText : styles.resultActionSecondaryText,
+                    isCompactScreen && styles.resultActionTextCompact,
+                  ]}
+                >
+                  {record.isFavorite ? "Favorited" : "Favorite"}
+                </Text>
+              </View>
+            </Pressable>
+            <Pressable
+              onPress={() => handleToggleFlag("toTry")}
+              disabled={isUpdatingFlags}
+              style={({ pressed }) => [
+                styles.resultActionSecondary,
+                record.isToTry && styles.resultActionPrimary,
+                isCompactScreen && styles.resultActionCompact,
+                pressed && styles.resultActionPressed,
+              ]}
+            >
+              <View style={styles.resultActionContent}>
+                <Text
+                  style={[
+                    record.isToTry ? styles.resultActionPrimaryText : styles.resultActionSecondaryText,
+                    isCompactScreen && styles.resultActionTextCompact,
+                  ]}
+                >
+                  {record.isToTry ? "To Try" : "Mark To Try"}
+                </Text>
+              </View>
+            </Pressable>
             <Pressable
               onPress={handleDeleteRecipe}
               disabled={isDeleting}

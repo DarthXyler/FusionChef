@@ -66,7 +66,9 @@ function isCookbookRecipeSummary(value: unknown): value is CookbookRecipeSummary
     isNonEmptyString(candidate.title) &&
     isNonEmptyString(candidate.baseCuisine) &&
     isNonEmptyString(candidate.fusionCuisine) &&
-    isNonEmptyString(candidate.savedAt)
+    isNonEmptyString(candidate.savedAt) &&
+    (typeof candidate.isFavorite === "undefined" || typeof candidate.isFavorite === "boolean") &&
+    (typeof candidate.isToTry === "undefined" || typeof candidate.isToTry === "boolean")
   );
 }
 
@@ -80,7 +82,9 @@ function isCookbookRecipeRecord(value: unknown): value is CookbookRecipeRecord {
     isRecipeFusion(candidate.recipe) &&
     typeof candidate.sourceInput === "object" &&
     candidate.sourceInput !== null &&
-    isNonEmptyString(candidate.savedAt)
+    isNonEmptyString(candidate.savedAt) &&
+    (typeof candidate.isFavorite === "undefined" || typeof candidate.isFavorite === "boolean") &&
+    (typeof candidate.isToTry === "undefined" || typeof candidate.isToTry === "boolean")
   );
 }
 
@@ -204,6 +208,8 @@ export function buildCookbookSummary(record: CookbookRecipeRecord): CookbookReci
     fusionCuisine: record.recipe.fusionCuisine,
     savedAt: record.savedAt,
     imageUrl: record.recipe.imageUrl,
+    isFavorite: record.isFavorite === true,
+    isToTry: record.isToTry === true,
   };
 }
 
@@ -358,4 +364,29 @@ export async function deleteCookbookRecipe(recipeId: string): Promise<void> {
     removeCookbookDetailCache(recipeId),
     removeCookbookSummaryCache(recipeId),
   ]);
+}
+
+export async function updateCookbookRecipeFlags(
+  recipeId: string,
+  flags: { isFavorite?: boolean; isToTry?: boolean },
+): Promise<CookbookRecipeRecord> {
+  const response = await fetch(`${getApiBaseUrl()}/api/cookbook/${encodeURIComponent(recipeId)}`, {
+    method: "PATCH",
+    headers: await buildCookbookHeaders(),
+    body: JSON.stringify(flags),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, "Could not update recipe."));
+  }
+  await syncAnonymousIdFromResponse(response);
+
+  const payload = (await response.json()) as { record?: unknown };
+  if (!isCookbookRecipeRecord(payload.record)) {
+    throw new Error("The updated recipe response was not in the expected format.");
+  }
+
+  await writeCookbookDetailCache(payload.record);
+  await upsertCookbookSummaryCache(buildCookbookSummary(payload.record));
+  return payload.record;
 }

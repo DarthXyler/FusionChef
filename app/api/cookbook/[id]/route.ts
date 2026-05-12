@@ -10,6 +10,7 @@ import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
 import {
   deleteCookbookRecordAndReturnImageUrl,
   getCookbookRecord,
+  updateCookbookRecipeFlags,
 } from "@/lib/cookbook-db";
 import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import { deleteR2ImageByPublicUrl, getR2ObjectKeyFromPublicUrl } from "@/lib/r2-storage";
@@ -145,6 +146,52 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     return response;
   } catch {
     return NextResponse.json({ error: "Could not delete recipe." }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: NextRequest, context: RouteContext) {
+  try {
+    const limited = await enforceRateLimit(request, {
+      bucket: "api-cookbook-update",
+      limit: 120,
+      windowMs: 60_000,
+    });
+    if (limited) {
+      return limited;
+    }
+
+    const recipeId = await getRecipeId(context);
+    if (!recipeId) {
+      return NextResponse.json({ error: "Recipe id is required." }, { status: 400 });
+    }
+
+    const body = (await request.json()) as Record<string, unknown>;
+    const flags: { isFavorite?: boolean; isToTry?: boolean } = {};
+    if (typeof body.isFavorite === "boolean") {
+      flags.isFavorite = body.isFavorite;
+    }
+    if (typeof body.isToTry === "boolean") {
+      flags.isToTry = body.isToTry;
+    }
+    if (typeof flags.isFavorite !== "boolean" && typeof flags.isToTry !== "boolean") {
+      return NextResponse.json({ error: "No supported cookbook fields were provided." }, { status: 400 });
+    }
+
+    const identity = await resolveCookbookIdentity(request);
+    const record = await updateCookbookRecipeFlags(identity.anonUserId, recipeId, flags);
+    if (!record) {
+      const response = NextResponse.json({ error: "Recipe not found." }, { status: 404 });
+      withCookbookIdentityHeader(response, identity.anonUserId);
+      applyAnonymousIdentityCookie(response, identity);
+      return response;
+    }
+
+    const response = NextResponse.json({ record });
+    withCookbookIdentityHeader(response, identity.anonUserId);
+    applyAnonymousIdentityCookie(response, identity);
+    return response;
+  } catch {
+    return NextResponse.json({ error: "Could not update recipe." }, { status: 500 });
   }
 }
 

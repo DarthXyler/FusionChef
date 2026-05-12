@@ -873,8 +873,8 @@ export function HomeScreen({
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
         >
+          <AppCreditHeader />
           <View style={styles.homeHeroCard}>
-            <AppCreditHeader />
             <Text style={styles.kicker}>AI Recipe Studio</Text>
             <Text
               style={[

@@ -9,6 +9,7 @@ import {
   readCachedCookbookRecipe,
   readCachedCookbookSummaries,
   saveCookbookRecipe,
+  updateCookbookRecipeFlags,
 } from "../services/cookbook";
 import type { CookbookRecipeRecord, CookbookRecipeSummary, GeneratedRecipeRecord } from "../types/recipe";
 import type { MobileCookbookContextValue } from "../navigation/types";
@@ -228,6 +229,48 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
     setSummarySyncError("");
   }, []);
 
+  const updateRecipeFlags = useCallback(
+    async (recipeId: string, flags: { isFavorite?: boolean; isToTry?: boolean }) => {
+      const currentRecord = cookbookRecordCache[recipeId];
+      if (currentRecord) {
+        upsertCookbookRecordState({
+          ...currentRecord,
+          isFavorite: flags.isFavorite ?? currentRecord.isFavorite,
+          isToTry: flags.isToTry ?? currentRecord.isToTry,
+        });
+      } else {
+        setCookbookSummaries((current) => {
+          const next = current.map((summary) =>
+            summary.recipeId === recipeId
+              ? {
+                  ...summary,
+                  isFavorite: flags.isFavorite ?? summary.isFavorite,
+                  isToTry: flags.isToTry ?? summary.isToTry,
+                }
+              : summary,
+          );
+          void cacheCookbookSummaries(next);
+          return next;
+        });
+      }
+
+      try {
+        const updated = await updateCookbookRecipeFlags(recipeId, flags);
+        upsertCookbookRecordState(updated);
+        setSummarySyncError("");
+        return updated;
+      } catch (error) {
+        if (currentRecord) {
+          upsertCookbookRecordState(currentRecord);
+        } else {
+          await refreshSummaries().catch(() => {});
+        }
+        throw error;
+      }
+    },
+    [cookbookRecordCache, refreshSummaries, upsertCookbookRecordState],
+  );
+
   const value = useMemo<MobileCookbookContextValue>(
     () => ({
       summaries: cookbookSummaries,
@@ -245,6 +288,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       getRecord: (recipeId: string) => cookbookRecordCache[recipeId],
       loadRecord,
       refreshRecord,
+      updateRecipeFlags,
       deleteRecord,
     }),
     [
@@ -264,6 +308,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       refreshSummaries,
       saveRecord,
       summarySyncError,
+      updateRecipeFlags,
     ],
   );
 

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test:monetization:turso": "node scripts/regression-monetization-turso.mjs",
     "image:ab-test": "node scripts/fuse-image-ab-test.mjs"
   },
   "dependencies": {

@@ -30,6 +30,7 @@ import { styles } from "../styles/appStyles";
  * - pull-to-refresh + infinite load
  */
 type CookbookSortOption = "newest" | "oldest" | "title";
+type CookbookFilterOption = "all" | "favorites" | "toTry";
 
 export function CookbookListScreen({
   navigation,
@@ -47,11 +48,13 @@ export function CookbookListScreen({
     loadSummaries,
     refreshSummaries,
     loadMoreSummaries,
+    updateRecipeFlags,
     deleteRecord,
   } = useMobileCookbook();
   const [deletingRecipeId, setDeletingRecipeId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<CookbookSortOption>("newest");
+  const [filterBy, setFilterBy] = useState<CookbookFilterOption>("all");
 
   useEffect(() => {
     // First mount load; subsequent tab returns use context cache/state.
@@ -74,10 +77,16 @@ export function CookbookListScreen({
   const filteredSummaries = useMemo(() => {
     // Keep filtering/sorting client-side for already fetched pages.
     const normalizedQuery = searchQuery.trim().toLowerCase();
+    const categoryFiltered =
+      filterBy === "favorites"
+        ? summaries.filter((summary) => summary.isFavorite)
+        : filterBy === "toTry"
+          ? summaries.filter((summary) => summary.isToTry)
+          : summaries;
     const baseList =
       normalizedQuery.length === 0
-        ? summaries
-        : summaries.filter((summary) => {
+        ? categoryFiltered
+        : categoryFiltered.filter((summary) => {
             const searchableText = [
               summary.title,
               summary.baseCuisine,
@@ -102,7 +111,7 @@ export function CookbookListScreen({
 
     next.sort((left, right) => Date.parse(right.savedAt) - Date.parse(left.savedAt));
     return next;
-  }, [searchQuery, sortBy, summaries]);
+  }, [filterBy, searchQuery, sortBy, summaries]);
 
   function handleOpenSortOptions() {
     const setSelection = (value: CookbookSortOption) => setSortBy(value);
@@ -167,6 +176,26 @@ export function CookbookListScreen({
     ]);
   }
 
+  async function handleToggleSummaryFlag(
+    summary: CookbookRecipeSummary,
+    flag: "favorite" | "toTry",
+  ) {
+    try {
+      await updateRecipeFlags(
+        summary.recipeId,
+        flag === "favorite"
+          ? { isFavorite: summary.isFavorite !== true }
+          : { isToTry: summary.isToTry !== true },
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Could not update recipe.";
+      Alert.alert("Update failed", message);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.screen}>
@@ -202,8 +231,8 @@ export function CookbookListScreen({
           contentContainerStyle={[styles.content, isVeryCompactScreen && styles.contentCompact]}
           ListHeaderComponent={
             <>
+              <AppCreditHeader />
               <View style={styles.homeHeroCard}>
-                <AppCreditHeader />
                 <Text style={styles.kicker}>Cookbook</Text>
                 <Text
                   style={[
@@ -222,6 +251,37 @@ export function CookbookListScreen({
 
               <View style={styles.cookbookSectionHeader}>
                 <Text style={styles.sectionTitle}>Recipes</Text>
+              </View>
+
+              <View style={styles.cookbookFilterRow}>
+                {[
+                  ["all", "All", summaries.length],
+                  ["favorites", "Favorites", summaries.filter((summary) => summary.isFavorite).length],
+                  ["toTry", "To Try", summaries.filter((summary) => summary.isToTry).length],
+                ].map(([value, label, count]) => {
+                  const active = filterBy === value;
+                  return (
+                    <Pressable
+                      accessibilityRole="button"
+                      key={String(value)}
+                      onPress={() => setFilterBy(value as CookbookFilterOption)}
+                      style={({ pressed }) => [
+                        styles.cookbookFilterChip,
+                        active && styles.cookbookFilterChipActive,
+                        pressed && styles.menuButtonPressed,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.cookbookFilterChipText,
+                          active && styles.cookbookFilterChipTextActive,
+                        ]}
+                      >
+                        {label} {count}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
 
               <View style={styles.cookbookControlsRow}>
@@ -321,6 +381,24 @@ export function CookbookListScreen({
                       <Text style={styles.cookbookCardMeta}>
                         {summary.baseCuisine} + {summary.fusionCuisine}
                       </Text>
+                      <View style={styles.cookbookFlagRow}>
+                        {summary.isFavorite ? (
+                          <View style={styles.cookbookFlagPill}>
+                            <MaterialIcons color="#ef4444" name="favorite" size={13} />
+                            <Text style={styles.cookbookFlagPillText}>Favorite</Text>
+                          </View>
+                        ) : null}
+                        {summary.isToTry ? (
+                          <View style={styles.cookbookFlagPill}>
+                            <MaterialCommunityIcons
+                              color="#b45309"
+                              name="silverware-fork-knife"
+                              size={13}
+                            />
+                            <Text style={styles.cookbookFlagPillText}>To Try</Text>
+                          </View>
+                        ) : null}
+                      </View>
                     </View>
                   </View>
                 </Pressable>
@@ -336,6 +414,36 @@ export function CookbookListScreen({
                       day: "numeric",
                     })}
                   </Text>
+                  <Pressable
+                    accessibilityLabel={`${summary.isFavorite ? "Remove favorite" : "Favorite"} ${summary.title}`}
+                    onPress={() => handleToggleSummaryFlag(summary, "favorite")}
+                    style={({ pressed }) => [
+                      styles.cookbookFlagButton,
+                      summary.isFavorite && styles.cookbookFlagButtonActive,
+                      pressed && styles.cookbookDeleteButtonPressed,
+                    ]}
+                  >
+                    <MaterialIcons
+                      color={summary.isFavorite ? "#ffffff" : "#ef4444"}
+                      name={summary.isFavorite ? "favorite" : "favorite-border"}
+                      size={17}
+                    />
+                  </Pressable>
+                  <Pressable
+                    accessibilityLabel={`${summary.isToTry ? "Remove to try" : "Mark to try"} ${summary.title}`}
+                    onPress={() => handleToggleSummaryFlag(summary, "toTry")}
+                    style={({ pressed }) => [
+                      styles.cookbookFlagButton,
+                      summary.isToTry && styles.cookbookFlagButtonActiveWarm,
+                      pressed && styles.cookbookDeleteButtonPressed,
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      color={summary.isToTry ? "#ffffff" : "#b45309"}
+                      name="silverware-fork-knife"
+                      size={16}
+                    />
+                  </Pressable>
                   <Pressable
                     accessibilityLabel={`Delete ${summary.title}`}
                     disabled={deletingRecipeId === summary.recipeId}

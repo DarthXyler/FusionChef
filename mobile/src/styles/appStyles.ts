@@ -14,7 +14,7 @@ export const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 10,
   },
   menuAnchor: {
     position: "relative",
@@ -76,7 +76,7 @@ export const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingBottom: 24,
-    paddingTop: 16,
+    paddingTop: 10,
   },
   contentCompact: {
     paddingHorizontal: 16,
@@ -155,6 +155,35 @@ export const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
     marginBottom: 12,
+  },
+  cookbookFilterRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
+  cookbookFilterChip: {
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderColor: "#d1fae5",
+    borderRadius: 14,
+    borderWidth: 1,
+    flex: 1,
+    minHeight: 40,
+    justifyContent: "center",
+    paddingHorizontal: 8,
+  },
+  cookbookFilterChipActive: {
+    backgroundColor: "#047857",
+    borderColor: "#047857",
+  },
+  cookbookFilterChipText: {
+    color: "#047857",
+    fontSize: 12,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  cookbookFilterChipTextActive: {
+    color: "#ffffff",
   },
   cookbookSearchWrap: {
     alignItems: "center",
@@ -554,7 +583,7 @@ export const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingVertical: 2,
-    width: 40,
+    width: 42,
   },
   cookbookCardActionsCompact: {
     width: 34,
@@ -578,6 +607,28 @@ export const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
   },
+  cookbookFlagRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    minHeight: 22,
+  },
+  cookbookFlagPill: {
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderColor: "#d1fae5",
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  cookbookFlagPillText: {
+    color: "#047857",
+    fontSize: 11,
+    fontWeight: "900",
+  },
   cookbookDeleteButton: {
     alignItems: "center",
     backgroundColor: "#fff1f2",
@@ -590,6 +641,24 @@ export const styles = StyleSheet.create({
   },
   cookbookDeleteButtonPressed: {
     opacity: 0.82,
+  },
+  cookbookFlagButton: {
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderColor: "#d1fae5",
+    borderRadius: 12,
+    borderWidth: 1,
+    height: 32,
+    justifyContent: "center",
+    width: 32,
+  },
+  cookbookFlagButtonActive: {
+    backgroundColor: "#ef4444",
+    borderColor: "#ef4444",
+  },
+  cookbookFlagButtonActiveWarm: {
+    backgroundColor: "#b45309",
+    borderColor: "#b45309",
   },
   cookbookListFooter: {
     alignItems: "center",
@@ -652,13 +721,13 @@ export const styles = StyleSheet.create({
   profileContent: {
     paddingBottom: 24,
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: 10,
   },
   profileTopBar: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 16,
+    marginBottom: 12,
   },
   profileCreditsPill: {
     alignItems: "center",

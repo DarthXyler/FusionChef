@@ -60,5 +60,9 @@ export type MobileCookbookContextValue = {
   getRecord: (recipeId: string) => CookbookRecipeRecord | undefined;
   loadRecord: (recipeId: string) => Promise<CookbookRecipeRecord>;
   refreshRecord: (recipeId: string) => Promise<CookbookRecipeRecord>;
+  updateRecipeFlags: (
+    recipeId: string,
+    flags: { isFavorite?: boolean; isToTry?: boolean },
+  ) => Promise<CookbookRecipeRecord>;
   deleteRecord: (recipeId: string) => Promise<void>;
 };

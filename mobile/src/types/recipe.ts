@@ -64,6 +64,8 @@ export type CookbookRecipeRecord = {
   recipe: RecipeFusion;
   sourceInput: FuseRequest;
   savedAt: string;
+  isFavorite?: boolean;
+  isToTry?: boolean;
 };
 
 export type CookbookRecipeSummary = {
@@ -73,4 +75,6 @@ export type CookbookRecipeSummary = {
   fusionCuisine: string;
   savedAt: string;
   imageUrl?: string;
+  isFavorite?: boolean;
+  isToTry?: boolean;
 };

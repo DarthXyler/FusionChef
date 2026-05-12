@@ -78,6 +78,8 @@ export type CookbookRecipeRecord = {
   recipe: RecipeFusion;
   sourceInput: FuseRequest;
   savedAt: string;
+  isFavorite?: boolean;
+  isToTry?: boolean;
 };
 
 // Lightweight cookbook list item used for cookbook overview screens.
@@ -88,4 +90,6 @@ export type CookbookRecipeSummary = {
   fusionCuisine: string;
   savedAt: string;
   imageUrl?: string;
+  isFavorite?: boolean;
+  isToTry?: boolean;
 };
