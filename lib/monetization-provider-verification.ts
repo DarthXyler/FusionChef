@@ -2,7 +2,7 @@
  * Server-side purchase verification adapters.
  * Supports Apple App Store and Google Play product purchase verification.
  */
-import { createSign } from "crypto";
+import { createPrivateKey, createSign } from "crypto";
 import type { PurchaseProvider } from "@/lib/monetization-credit-packs";
 
 type PurchaseVerificationState = "purchased" | "revoked" | "pending" | "canceled";
@@ -98,6 +98,42 @@ async function fetchJson(url: string, init: RequestInit) {
   }
 }
 
+function getApplePrivateKeyDiagnostics(privateKeyRaw: string, privateKey: string) {
+  let parseableAsPrivateKey = false;
+  let parseError = "";
+
+  try {
+    createPrivateKey(privateKey);
+    parseableAsPrivateKey = true;
+  } catch (error) {
+    parseError = error instanceof Error ? error.message : String(error);
+  }
+
+  return {
+    rawLength: privateKeyRaw.length,
+    normalizedLength: privateKey.length,
+    hasEscapedNewlines: privateKeyRaw.includes("\\n"),
+    hasLiteralNewlines: privateKeyRaw.includes("\n"),
+    startsWithBeginPrivateKey: privateKey.startsWith("-----BEGIN PRIVATE KEY-----"),
+    endsWithEndPrivateKey: privateKey.endsWith("-----END PRIVATE KEY-----"),
+    wrappedInDoubleQuotes: privateKeyRaw.startsWith('"') && privateKeyRaw.endsWith('"'),
+    wrappedInSingleQuotes: privateKeyRaw.startsWith("'") && privateKeyRaw.endsWith("'"),
+    parseableAsPrivateKey,
+    parseError: parseError.slice(0, 160),
+  };
+}
+
+function logApplePrivateKeyDiagnostics(privateKeyRaw: string, privateKey: string, error: unknown) {
+  console.warn(
+    "[monetization/apple-iap-key]",
+    JSON.stringify({
+      event: "private_key_sign_failed",
+      diagnostics: getApplePrivateKeyDiagnostics(privateKeyRaw, privateKey),
+      signError: error instanceof Error ? error.message.slice(0, 160) : String(error).slice(0, 160),
+    }),
+  );
+}
+
 function buildAppleJwt() {
   const issuerId = assertNonEmpty(process.env.APPLE_IAP_ISSUER_ID, "APPLE_IAP_ISSUER_ID");
   const keyId = assertNonEmpty(process.env.APPLE_IAP_KEY_ID, "APPLE_IAP_KEY_ID");
@@ -122,7 +158,8 @@ function buildAppleJwt() {
   let signature: Buffer;
   try {
     signature = signer.sign(privateKey);
-  } catch {
+  } catch (error) {
+    logApplePrivateKeyDiagnostics(privateKeyRaw, privateKey, error);
     throw new ProviderVerificationError(
       "Apple verification credentials could not sign the request.",
       500,
