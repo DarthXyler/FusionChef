@@ -2,11 +2,10 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useFocusEffect, type NavigationProp } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Image, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { BrandHeader } from "../components/BrandHeader";
-import { CreditPill } from "../components/CreditPill";
+import { AppCreditHeader } from "../components/AppCreditHeader";
 import { useMobileCookbook } from "../context/mobileCookbook";
 import type { HomeStackParamList, RootTabParamList } from "../navigation/types";
 import { getMobileAuthSession } from "../services/auth";
@@ -15,10 +14,7 @@ import {
   readDashboardFusionHistory,
   type DashboardFusionSummary,
 } from "../services/dashboardHistory";
-import {
-  fetchMonetizationAccountSnapshot,
-  subscribeToMonetizationAccountSnapshot,
-} from "../services/monetization";
+import { fetchMonetizationAccountSnapshot } from "../services/monetization";
 import { readMobileProfileOverrides } from "../services/profile";
 import { styles } from "../styles/appStyles";
 
@@ -51,7 +47,6 @@ export function DashboardHomeScreen({
 }: NativeStackScreenProps<HomeStackParamList, "DashboardHome">) {
   const { summaries, loadSummaries, hasLoaded } = useMobileCookbook();
   const [displayName, setDisplayName] = useState("Chef");
-  const [availableCredits, setAvailableCredits] = useState(0);
   const [recentFusions, setRecentFusions] = useState<DashboardFusionSummary[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -71,38 +66,17 @@ export function DashboardHomeScreen({
       }
 
       try {
-        const snapshot = await fetchMonetizationAccountSnapshot(
+        await fetchMonetizationAccountSnapshot(
           options?.forceRefreshCredits ? { forceRefresh: true } : { preferCache: true },
         );
-        setAvailableCredits(snapshot.balance.availableCredits);
-      } catch {
-        setAvailableCredits(0);
-      }
+      } catch {}
     },
     [hasLoaded, loadSummaries],
   );
 
-  useEffect(
-    () =>
-      subscribeToMonetizationAccountSnapshot((snapshot) => {
-        setAvailableCredits(snapshot.balance.availableCredits);
-      }),
-    [],
-  );
-
   useFocusEffect(
     useCallback(() => {
-      let cancelled = false;
-
-      void loadDashboard().catch(() => {
-        if (!cancelled) {
-          setAvailableCredits(0);
-        }
-      });
-
-      return () => {
-        cancelled = true;
-      };
+      void loadDashboard().catch(() => {});
     }, [loadDashboard]),
   );
 
@@ -137,13 +111,6 @@ export function DashboardHomeScreen({
     });
   }
 
-  function openBuyCredits() {
-    const parentNavigation = navigation.getParent<NavigationProp<RootTabParamList>>();
-    parentNavigation?.navigate("Profile", {
-      openCreditSheetToken: String(Date.now()),
-    });
-  }
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.screen}>
@@ -157,10 +124,7 @@ export function DashboardHomeScreen({
             />
           }
         >
-          <View style={styles.dashboardTopBar}>
-            <BrandHeader compact />
-            <CreditPill credits={availableCredits} onPress={openBuyCredits} />
-          </View>
+          <AppCreditHeader />
 
           <View style={styles.dashboardGreetingBlock}>
             <Text style={styles.dashboardGreeting}>

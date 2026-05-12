@@ -19,7 +19,7 @@ import {
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { BrandHeader } from "../components/BrandHeader";
+import { AppCreditHeader } from "../components/AppCreditHeader";
 import { PrimaryButton } from "../components/PrimaryButton";
 import {
   CUISINE_OPTIONS,
@@ -874,7 +874,7 @@ export function HomeScreen({
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.homeHeroCard}>
-            <BrandHeader />
+            <AppCreditHeader />
             <Text style={styles.kicker}>AI Recipe Studio</Text>
             <Text
               style={[
