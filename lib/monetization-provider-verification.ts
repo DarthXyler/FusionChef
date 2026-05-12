@@ -175,6 +175,10 @@ function buildAppleJwt() {
   const issuerId = assertNonEmpty(process.env.APPLE_IAP_ISSUER_ID, "APPLE_IAP_ISSUER_ID");
   const keyId = assertNonEmpty(process.env.APPLE_IAP_KEY_ID, "APPLE_IAP_KEY_ID");
   const privateKeyRaw = assertNonEmpty(process.env.APPLE_IAP_PRIVATE_KEY, "APPLE_IAP_PRIVATE_KEY");
+  const bundleId = assertNonEmpty(
+    process.env.APPLE_BUNDLE_ID ?? "com.flavorfusionchef.mobile",
+    "APPLE_BUNDLE_ID",
+  );
   const privateKey = privateKeyRaw.replace(/\\n/g, "\n");
 
   const issuedAt = Math.floor(Date.now() / 1000);
@@ -185,6 +189,7 @@ function buildAppleJwt() {
     iat: issuedAt,
     exp: expiresAt,
     aud: "appstoreconnect-v1",
+    bid: bundleId,
   };
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
