@@ -199,7 +199,7 @@ function buildAppleJwt() {
   signer.end();
   let signature: Buffer;
   try {
-    signature = signer.sign(privateKey);
+    signature = signer.sign({ key: privateKey, dsaEncoding: "ieee-p1363" });
   } catch (error) {
     logApplePrivateKeyDiagnostics(privateKeyRaw, privateKey, error);
     throw new ProviderVerificationError(
