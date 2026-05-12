@@ -21,6 +21,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { captureRef } from "react-native-view-shot";
+import { BrandHeader } from "../components/BrandHeader";
 import { SectionHeader } from "../components/SectionHeader";
 import { useMobileCookbook } from "../context/mobileCookbook";
 import { sampleGeneratedRecipeRecord } from "../data/sampleGeneratedRecipe";
@@ -29,8 +30,10 @@ import type { HomeStackParamList } from "../navigation/types";
 import { DIETARY_OPTIONS } from "../config/recipeOptions";
 import { fetchLiveRecipeRecord, FuseRequestError } from "../services/fuse";
 import { fetchRecipeImagePreview } from "../services/fuseImage";
+import { upsertDashboardFusionHistory } from "../services/dashboardHistory";
 import {
   fetchMonetizationAccountSnapshot,
+  getAvailableAppleProductIds,
   getConfiguredAppleProductIds,
   purchaseAppleCredits,
 } from "../services/monetization";
@@ -64,6 +67,10 @@ function delay(ms: number) {
   return new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function buildCreditGateToken() {
+  return `credit-gate-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
 function isInsufficientCreditsError(error: unknown): error is FuseRequestError {
@@ -233,6 +240,7 @@ export function RecipeWorkspaceScreen({
       credits: inferCreditsFromProductId(productId),
     }));
 
+    let baseOptions = configuredFallback;
     try {
       const account = await fetchMonetizationAccountSnapshot();
       const applePacks = account.products
@@ -240,13 +248,21 @@ export function RecipeWorkspaceScreen({
         .map((product) => ({ productId: product.productId, credits: product.credits }))
         .sort((left, right) => left.credits - right.credits);
       if (applePacks.length > 0) {
-        return applePacks;
+        baseOptions = applePacks;
       }
     } catch {
       // Fall back to configured product ids when account endpoint is unavailable.
     }
 
-    return configuredFallback;
+    const availableProductIds = await getAvailableAppleProductIds(
+      baseOptions.map((option) => option.productId),
+    );
+    if (availableProductIds.length === 0) {
+      return [];
+    }
+
+    const availableSet = new Set(availableProductIds);
+    return baseOptions.filter((option) => availableSet.has(option.productId));
   }, []);
 
   const hasCreditsOrFreeAction = useCallback(async (actionKind: "fuse" | "reroll") => {
@@ -287,7 +303,7 @@ export function RecipeWorkspaceScreen({
 
       const options = await getAppleCreditPackOptions();
       if (options.length === 0) {
-        Alert.alert("Credits unavailable", "No credit packs are configured yet.");
+        Alert.alert("Credits unavailable", "No credit packs are available from App Store yet.");
         return false;
       }
 
@@ -327,8 +343,22 @@ export function RecipeWorkspaceScreen({
       return;
     }
 
-    navigation.navigate("Home");
+    navigation.navigate("CreateFusion");
   }, [navigation]);
+
+  const redirectToHomeCreditGate = useCallback(
+    (
+      input: FuseRequest,
+      reason?: "insufficient_credits_402",
+    ) => {
+      navigation.navigate("CreateFusion", {
+        creditGateInput: input,
+        creditGateToken: buildCreditGateToken(),
+        creditGateReason: reason,
+      });
+    },
+    [navigation],
+  );
 
   useEffect(() => {
     // Reset shopping checklist when recipe changes.
@@ -444,6 +474,7 @@ export function RecipeWorkspaceScreen({
     if (!pendingRequest) {
       return;
     }
+    const pendingRequestPayload = pendingRequest;
     if (startedPendingRequestIdsRef.current.has(pendingRequest.requestId)) {
       return;
     }
@@ -461,21 +492,16 @@ export function RecipeWorkspaceScreen({
       try {
         const allowedBySnapshot = await hasCreditsOrFreeAction("fuse");
         if (!allowedBySnapshot) {
-          const purchasedCredits = await handleCreditRecoveryPurchase();
-          if (!purchasedCredits || cancelled) {
-            Alert.alert(
-              "Need credits",
-              "You need credits to continue fusing recipes. We sent you back so you can edit or try later.",
-            );
-            handleBackToEdit();
-            return;
+          if (!cancelled) {
+            redirectToHomeCreditGate(pendingRequestPayload.input);
           }
+          return;
         }
 
         const nextRecord = await fetchLiveRecipeRecord(
-          pendingRequest.input,
+          pendingRequestPayload.input,
           "fuse",
-          pendingRequest.requestId,
+          pendingRequestPayload.requestId,
         );
         if (cancelled) {
           return;
@@ -483,41 +509,19 @@ export function RecipeWorkspaceScreen({
 
         setLiveRecipeRecord(nextRecord);
         setPendingSourceInput(nextRecord.sourceInput);
+        void upsertDashboardFusionHistory(nextRecord);
       } catch (error) {
         if (cancelled) {
           return;
         }
 
         if (isInsufficientCreditsError(error)) {
-          const purchasedCredits = await handleCreditRecoveryPurchase();
-          if (purchasedCredits && !cancelled) {
-            try {
-              const retriedRecord = await fetchLiveRecipeRecord(
-                pendingRequest.input,
-                "fuse",
-                pendingRequest.requestId,
-              );
-              if (!cancelled) {
-                setLiveRecipeRecord(retriedRecord);
-                setPendingSourceInput(retriedRecord.sourceInput);
-              }
-              return;
-            } catch (retryError) {
-              const retryMessage =
-                retryError instanceof Error && retryError.message.trim().length > 0
-                  ? retryError.message
-                  : "Could not generate a recipe right now.";
-              Alert.alert("Generation failed", retryMessage);
-              handleBackToEdit();
-              return;
-            }
+          if (!cancelled) {
+            redirectToHomeCreditGate(
+              pendingRequestPayload.input,
+              "insufficient_credits_402",
+            );
           }
-
-          Alert.alert(
-            "Need credits",
-            "You need credits to continue fusing recipes. We sent you back so you can edit or try later.",
-          );
-          handleBackToEdit();
           return;
         }
 
@@ -543,8 +547,8 @@ export function RecipeWorkspaceScreen({
     };
   }, [
     handleBackToEdit,
-    handleCreditRecoveryPurchase,
     hasCreditsOrFreeAction,
+    redirectToHomeCreditGate,
     route.params?.pendingRequest,
   ]);
 
@@ -586,6 +590,13 @@ export function RecipeWorkspaceScreen({
             });
             if (!cancelled) {
               setPreviewImageUrl(imageUrl);
+              void upsertDashboardFusionHistory({
+                ...activeRecord,
+                recipe: {
+                  ...activeRecipe,
+                  imageUrl,
+                },
+              });
               setLiveRecipeRecord((current) =>
                 current && current.recipe.id === activeRecipe.id
                   ? {
@@ -753,6 +764,7 @@ export function RecipeWorkspaceScreen({
 
       const nextRecord = await fetchLiveRecipeRecord(activeRecord.sourceInput, "reroll");
       setLiveRecipeRecord(nextRecord);
+      void upsertDashboardFusionHistory(nextRecord);
     } catch (error) {
       if (isInsufficientCreditsError(error)) {
         const purchasedCredits = await handleCreditRecoveryPurchase();
@@ -760,6 +772,7 @@ export function RecipeWorkspaceScreen({
           try {
             const retriedRecord = await fetchLiveRecipeRecord(activeRecord.sourceInput, "reroll");
             setLiveRecipeRecord(retriedRecord);
+            void upsertDashboardFusionHistory(retriedRecord);
             return;
           } catch (retryError) {
             const retryMessage =
@@ -872,7 +885,7 @@ export function RecipeWorkspaceScreen({
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.screen}>
         <View style={styles.topBar}>
-          <Text style={styles.brand}>Flavor Fusion Chef</Text>
+          <BrandHeader compact />
           {isInitialFusePending && !usingLiveRecipe ? (
             <View style={styles.menuButtonSpacer} />
           ) : (

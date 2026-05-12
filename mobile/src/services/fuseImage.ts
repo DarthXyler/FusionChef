@@ -1,5 +1,6 @@
 import { getApiBaseUrl } from "../config/api";
 import type { MealType } from "../types/recipe";
+import { getMobileAnonymousId, getMobileDeviceKey } from "./mobileIdentity";
 
 type FuseImageRequest = {
   title: string;
@@ -22,10 +23,16 @@ async function readErrorMessage(response: Response) {
 export async function fetchRecipeImagePreview(
   input: FuseImageRequest,
 ): Promise<string> {
+  const [mobileAnonId, mobileDeviceKey] = await Promise.all([
+    getMobileAnonymousId(),
+    getMobileDeviceKey(),
+  ]);
   const response = await fetch(`${getApiBaseUrl()}/api/fuse-image`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "x-flavor-fusion-anon-id": mobileAnonId,
+      "x-flavor-fusion-device-key": mobileDeviceKey,
     },
     body: JSON.stringify(input),
   });

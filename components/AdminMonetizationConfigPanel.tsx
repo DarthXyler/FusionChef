@@ -110,6 +110,7 @@ type AdminTab = "access" | "presets" | "pricing" | "analytics" | "runtime" | "re
 
 const TOKEN_STORAGE_KEY = "flavor-fusion-admin-token:v1";
 const ACTOR_STORAGE_KEY = "flavor-fusion-admin-actor:v1";
+const ACTIVE_TAB_STORAGE_KEY = "flavor-fusion-admin-active-tab:v1";
 const PACKAGE_KEYS: PackageKey[] = ["pack_1", "pack_2", "pack_3"];
 
 const DEFAULT_PRICING_PACKAGES: PricingPackageConfig[] = [
@@ -191,6 +192,17 @@ const ADMIN_TABS: Array<{ key: AdminTab; label: string }> = [
   { key: "runtime", label: "Policy" },
   { key: "reconciliation", label: "Reconciliation" },
 ];
+
+function isAdminTab(value: unknown): value is AdminTab {
+  return (
+    value === "access" ||
+    value === "presets" ||
+    value === "pricing" ||
+    value === "analytics" ||
+    value === "runtime" ||
+    value === "reconciliation"
+  );
+}
 
 function generateIdempotencyKey(scope: string) {
   return `${scope}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
@@ -465,9 +477,19 @@ function isObserveTopUserRow(value: unknown): value is ObserveTopUserRow {
 }
 
 function isPresetActive(preset: Preset, current: RuntimeConfig) {
+  if (preset.label === "Off") {
+    return !current.enabled || current.enforcementMode === "off";
+  }
+
   return (
     current.enabled === preset.config.enabled &&
-    current.enforcementMode === preset.config.enforcementMode &&
+    current.enforcementMode === preset.config.enforcementMode
+  );
+}
+
+function isPresetExactMatch(preset: Preset, current: RuntimeConfig) {
+  return (
+    isPresetActive(preset, current) &&
     current.freeDailyFuseActions === preset.config.freeDailyFuseActions &&
     current.freeDailyRerollActions === preset.config.freeDailyRerollActions &&
     current.allowCompActions === preset.config.allowCompActions
@@ -558,6 +580,7 @@ export function AdminMonetizationConfigPanel({
   const [observeTopUsers, setObserveTopUsers] = useState<ObserveTopUserRow[]>([]);
   const [panelNotices, setPanelNotices] =
     useState<Record<PanelKey, PanelNoticeState>>(DEFAULT_PANEL_NOTICES);
+  const [hasHydratedClientState, setHasHydratedClientState] = useState(false);
 
   function clearPanelNotice(panelKey: PanelKey) {
     setPanelNotices((current) => ({
@@ -602,13 +625,25 @@ export function AdminMonetizationConfigPanel({
 
     const storedToken = window.sessionStorage.getItem(TOKEN_STORAGE_KEY);
     const storedActor = window.sessionStorage.getItem(ACTOR_STORAGE_KEY);
+    const storedActiveTab = window.localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
     if (storedToken) {
       setAdminToken(storedToken);
     }
     if (storedActor) {
       setAdminActor(storedActor);
     }
+    if (isAdminTab(storedActiveTab)) {
+      setActiveTab(storedActiveTab);
+    }
+    setHasHydratedClientState(true);
   }, []);
+
+  function changeActiveTab(nextTab: AdminTab) {
+    setActiveTab(nextTab);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, nextTab);
+    }
+  }
 
   function buildAdminHeaders(options?: { includeActor?: boolean }) {
     const headers: Record<string, string> = {};
@@ -658,6 +693,17 @@ export function AdminMonetizationConfigPanel({
       setIsLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!hasHydratedClientState) {
+      return;
+    }
+
+    void readConfig("adminAccess");
+    // Intentionally run once after browser storage is restored. The admin cookie is
+    // enough for authenticated users, while token fallback users get restored first.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasHydratedClientState]);
 
   async function saveConfig(origin: "runtimeSettings" | "pricing" = "runtimeSettings") {
     setIsSaving(true);
@@ -1065,7 +1111,7 @@ export function AdminMonetizationConfigPanel({
               <button
                 key={tab.key}
                 type="button"
-                onClick={() => setActiveTab(tab.key)}
+                onClick={() => changeActiveTab(tab.key)}
                 className={[
                   "cursor-pointer rounded-xl border px-3 py-2 text-sm font-semibold transition",
                   isActive
@@ -1145,6 +1191,7 @@ export function AdminMonetizationConfigPanel({
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           {PRESETS.map((preset) => {
             const active = isPresetActive(preset, form);
+            const exactMatch = isPresetExactMatch(preset, form);
             return (
               <button
                 key={preset.label}
@@ -1157,12 +1204,24 @@ export function AdminMonetizationConfigPanel({
                     : "border-zinc-300 bg-zinc-50 hover:border-emerald-400 hover:bg-emerald-50",
                 ].join(" ")}
               >
-                <p className={active ? "font-semibold text-white" : "font-semibold text-zinc-900"}>
-                  {preset.label}
-                </p>
+                <span className="flex items-start justify-between gap-3">
+                  <span className={active ? "font-semibold text-white" : "font-semibold text-zinc-900"}>
+                    {preset.label}
+                  </span>
+                  {active ? (
+                    <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-emerald-700">
+                      Active
+                    </span>
+                  ) : null}
+                </span>
                 <p className={active ? "mt-1 text-sm text-emerald-50" : "mt-1 text-sm text-zinc-600"}>
                   {preset.description}
                 </p>
+                {active ? (
+                  <p className="mt-3 text-xs font-semibold text-emerald-50">
+                    {exactMatch ? "Preset values match exactly." : "Active with custom policy values."}
+                  </p>
+                ) : null}
               </button>
             );
           })}

@@ -18,6 +18,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { captureRef } from "react-native-view-shot";
+import { BrandHeader } from "../components/BrandHeader";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { SectionHeader } from "../components/SectionHeader";
 import { useMobileCookbook } from "../context/mobileCookbook";
@@ -305,7 +306,7 @@ export function CookbookDetailScreen({
           >
             <View style={styles.homeHeroCard}>
               <View style={styles.fieldLabelRow}>
-                <Text style={styles.brand}>Flavor Fusion Chef</Text>
+                <BrandHeader compact />
                 <View style={styles.menuButtonSpacer} />
               </View>
               <Text style={styles.kicker}>Cookbook</Text>
@@ -363,7 +364,7 @@ export function CookbookDetailScreen({
         >
           <View style={styles.homeHeroCard}>
             <View style={styles.fieldLabelRow}>
-              <Text style={styles.brand}>Flavor Fusion Chef</Text>
+              <BrandHeader compact />
               <View style={styles.menuAnchor}>
                 <Pressable
                   accessibilityLabel="Open actions menu"

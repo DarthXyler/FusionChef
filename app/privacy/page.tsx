@@ -1,102 +1,94 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { LegalCallout, LegalSectionList } from "@/components/LegalSectionList";
+import { BodyText, PageHeader, PageShell, TextLink } from "@/components/PublicSite";
+import { legalLastUpdated, SUPPORT_EMAIL } from "@/lib/public-site-content";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
   description:
-    "Read how Flavor Fusion Chef handles recipe inputs, saved cookbook data, imported images, and support requests.",
+    "Read how Flavor Fusion Chef handles recipe inputs, mobile cookbook data, imported images, credits, and support requests.",
 };
 
 const policySections = [
   {
     title: "Information we collect",
     body: [
-      "When you use Flavor Fusion Chef, we may process recipe text you enter, images you choose to import, and cookbook records you decide to save.",
-      "We also store a device-level anonymous identifier for the mobile cookbook so saved recipes can be retrieved later without requiring a full account system.",
+      "Recipe text, cuisine preferences, meal type, spice level, and dietary preferences you choose to submit.",
+      "Recipe photos or imported images you choose to use with app features.",
+      "Saved cookbook records, generated recipe details, and related images you choose to keep.",
+      "Anonymous device or session identifiers used to connect app activity, saved recipes, credits, and support diagnostics.",
+      "Support messages you send, including your email address and any details or screenshots you include.",
     ],
   },
   {
     title: "How we use information",
     body: [
-      "We use your recipe input and selected options to generate fusion recipes, shopping lists, swaps, and related images.",
-      "Saved cookbook data is used only to help you revisit recipes you chose to keep. Support emails are used to respond to questions or resolve issues.",
+      "To generate fusion recipes, rerolls, shopping lists, substitutions, and related recipe images.",
+      "To save and retrieve cookbook entries that you choose to keep.",
+      "To operate credits, purchase verification, fraud prevention, and support workflows.",
+      "To diagnose errors, prevent abuse, protect service reliability, and improve the app experience.",
     ],
   },
   {
-    title: "Storage and third-party services",
+    title: "Service providers",
     body: [
-      "Flavor Fusion Chef uses hosted infrastructure and service providers to operate the app, including cloud hosting, database storage, image storage, and AI generation services.",
-      "Those providers may process limited data needed to deliver the feature you requested, such as generating a recipe or storing a cookbook entry.",
+      "Flavor Fusion Chef uses hosted services for app hosting, database storage, file storage, AI generation, authentication, purchase verification, and email-based support.",
+      "Those providers process only the data needed to provide the feature you requested or to keep the service operating securely.",
     ],
   },
   {
     title: "Your choices",
     body: [
-      "You can choose not to save a recipe, delete saved cookbook recipes from the app, or contact support if you need help with stored data related to your usage.",
-      "If you clear local app storage on your device, locally cached cookbook data may be removed, but recipes saved to the backend can still be retrieved when the app reconnects.",
+      "You can choose not to submit a recipe, not to import photos, and not to save generated recipes.",
+      "You can delete saved recipes in the app where deletion is available, or contact support for help with data-related requests.",
+      "You can contact support if credits or purchase-related state appears incorrect after a completed Apple purchase.",
     ],
   },
   {
-    title: "Updates to this policy",
+    title: "Children",
     body: [
-      "We may update this Privacy Policy as the product evolves. The latest published version on this page will be the version that applies.",
+      "Flavor Fusion Chef is intended for general cooking use and is not designed to knowingly collect personal information from children.",
     ],
   },
-];
+  {
+    title: "Updates",
+    body: [
+      "We may update this Privacy Policy as the product changes. The latest published version on this page is the version that applies.",
+    ],
+  },
+] as const;
 
 export default function PrivacyPage() {
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-8 animate-rise-in lg:space-y-10">
-      <section className="space-y-3 rounded-[2rem] border border-emerald-100 bg-white px-6 py-8 shadow-sm sm:px-8">
-        <p className="inline-block rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white">
-          Privacy Policy
+    <PageShell maxWidth="max-w-4xl">
+      <PageHeader
+        eyebrow="Privacy Policy"
+        title="How Flavor Fusion Chef handles your data."
+        meta={`Last updated: ${legalLastUpdated}`}
+      >
+        <p>
+          This policy explains what the app may process when you generate recipes, import recipe
+          photos, save cookbook entries, use credits, or contact support.
         </p>
-        <h1 className="font-serif text-4xl leading-tight text-zinc-900 md:text-5xl">
-          How Flavor Fusion Chef handles your data.
-        </h1>
-        <p className="max-w-3xl text-lg text-zinc-700">
-          This page explains what we collect, why we use it, and how saved cookbook and imported
-          recipe data are handled across the web app and mobile app.
-        </p>
-        <p className="text-sm text-zinc-500">Last updated: March 24, 2026</p>
-      </section>
+      </PageHeader>
 
-      <section className="space-y-4 rounded-[2rem] border border-zinc-200 bg-white px-6 py-7 shadow-sm sm:px-8">
-        {policySections.map((section) => (
-          <div key={section.title} className="space-y-2 border-b border-zinc-100 pb-5 last:border-b-0 last:pb-0">
-            <h2 className="font-serif text-2xl text-zinc-900">{section.title}</h2>
-            {section.body.map((paragraph) => (
-              <p key={paragraph} className="text-base leading-8 text-zinc-700">
-                {paragraph}
-              </p>
-            ))}
-          </div>
-        ))}
-      </section>
+      <LegalSectionList sections={policySections} />
 
-      <section className="rounded-[2rem] border border-emerald-100 bg-emerald-50/70 px-6 py-6 shadow-sm sm:px-8">
-        <h2 className="font-serif text-2xl text-zinc-900">Contact</h2>
-        <p className="mt-3 text-base leading-8 text-zinc-700">
-          Questions about this policy or a data-related request can be sent to{" "}
+      <LegalCallout title="Contact">
+        <BodyText className="mt-3">
+          Privacy questions or data-related requests can be sent to{" "}
           <a
             className="font-semibold text-emerald-700 underline decoration-emerald-300 underline-offset-4"
-            href="mailto:darthxyler@gmail.com"
+            href={`mailto:${SUPPORT_EMAIL}?subject=Flavor%20Fusion%20Chef%20Privacy`}
           >
-            darthxyler@gmail.com
+            {SUPPORT_EMAIL}
           </a>
           .
-        </p>
+        </BodyText>
         <p className="mt-4 text-sm text-zinc-600">
-          Need general help instead? Visit the{" "}
-          <Link
-            className="font-semibold text-emerald-700 underline decoration-emerald-300 underline-offset-4"
-            href="/support"
-          >
-            Support page
-          </Link>
-          .
+          For purchase or app support, visit <TextLink href="/support">Support</TextLink>.
         </p>
-      </section>
-    </div>
+      </LegalCallout>
+    </PageShell>
   );
 }

@@ -1,12 +1,10 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import { Pacifico_400Regular } from "@expo-google-fonts/pacifico";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { MobileCookbookProvider } from "./src/context/mobileCookbook";
 import type {
   CookbookStackParamList,
@@ -14,10 +12,11 @@ import type {
   RootTabParamList,
 } from "./src/navigation/types";
 import { HomeScreen } from "./src/screens/HomeScreen";
+import { DashboardHomeScreen } from "./src/screens/DashboardHomeScreen";
 import { RecipeWorkspaceScreen } from "./src/screens/RecipeWorkspaceScreen";
 import { CookbookListScreen } from "./src/screens/CookbookListScreen";
 import { CookbookDetailScreen } from "./src/screens/CookbookDetailScreen";
-import { styles } from "./src/styles/appStyles";
+import { ProfileScreen } from "./src/screens/ProfileScreen";
 
 const HomeStack = createNativeStackNavigator<HomeStackParamList>();
 const CookbookStack = createNativeStackNavigator<CookbookStackParamList>();
@@ -43,7 +42,27 @@ function CookbookStackNavigator() {
 function HomeStackNavigator() {
   return (
     <HomeStack.Navigator>
-      <HomeStack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+      <HomeStack.Screen
+        name="DashboardHome"
+        component={DashboardHomeScreen}
+        options={{ headerShown: false }}
+      />
+      <HomeStack.Screen
+        name="RecipeWorkspace"
+        component={RecipeWorkspaceScreen}
+        options={{
+          headerShown: false,
+          gestureEnabled: false,
+        }}
+      />
+    </HomeStack.Navigator>
+  );
+}
+
+function CreateStackNavigator() {
+  return (
+    <HomeStack.Navigator>
+      <HomeStack.Screen name="CreateFusion" component={HomeScreen} options={{ headerShown: false }} />
       <HomeStack.Screen
         name="RecipeWorkspace"
         component={RecipeWorkspaceScreen}
@@ -57,18 +76,6 @@ function HomeStackNavigator() {
 }
 
 export default function App() {
-  const [fontsLoaded] = useFonts({
-    Pacifico_400Regular,
-  });
-
-  if (!fontsLoaded) {
-    return (
-      <SafeAreaProvider>
-        <SafeAreaView style={styles.safeArea} />
-      </SafeAreaProvider>
-    );
-  }
-
   return (
     <SafeAreaProvider>
       <MobileCookbookProvider>
@@ -80,13 +87,13 @@ export default function App() {
               tabBarActiveTintColor: "#10b981",
               tabBarInactiveTintColor: "#6b7280",
               tabBarLabelStyle: {
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: "700",
               },
               tabBarStyle: {
                 backgroundColor: "#ffffff",
                 borderTopColor: "#d1fae5",
-                height: 68,
+                height: 70,
                 paddingBottom: 8,
                 paddingTop: 8,
               },
@@ -99,8 +106,7 @@ export default function App() {
                 tabPress: (event) => {
                   event.preventDefault();
                   navigation.navigate("Explore", {
-                    screen: "Home",
-                    params: { resetToken: String(Date.now()) },
+                    screen: "DashboardHome",
                   });
                 },
               })}
@@ -122,6 +128,35 @@ export default function App() {
                 tabBarLabel: "Cookbook",
                 tabBarIcon: ({ color, size }) => (
                   <MaterialCommunityIcons color={color} name="chef-hat" size={size} />
+                ),
+              }}
+            />
+            <RootTab.Screen
+              name="Create"
+              component={CreateStackNavigator}
+              listeners={({ navigation }) => ({
+                tabPress: (event) => {
+                  event.preventDefault();
+                  navigation.navigate("Create", {
+                    screen: "CreateFusion",
+                    params: { resetToken: String(Date.now()) },
+                  });
+                },
+              })}
+              options={{
+                tabBarLabel: "Create",
+                tabBarIcon: ({ color, size }) => (
+                  <MaterialIcons color={color} name="add-box" size={size} />
+                ),
+              }}
+            />
+            <RootTab.Screen
+              name="Profile"
+              component={ProfileScreen}
+              options={{
+                tabBarLabel: "Profile",
+                tabBarIcon: ({ color, size }) => (
+                  <MaterialIcons color={color} name="person-outline" size={size} />
                 ),
               }}
             />

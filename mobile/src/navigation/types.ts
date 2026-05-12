@@ -7,9 +7,14 @@ import type {
 } from "../types/recipe";
 
 export type HomeStackParamList = {
-  Home:
+  DashboardHome: undefined;
+  CreateFusion:
     | {
         resetToken?: string;
+        importPhotoOnOpen?: boolean;
+        creditGateToken?: string;
+        creditGateInput?: FuseRequest;
+        creditGateReason?: "insufficient_credits_402";
       }
     | undefined;
   RecipeWorkspace:
@@ -25,7 +30,9 @@ export type HomeStackParamList = {
 
 export type RootTabParamList = {
   Explore: NavigatorScreenParams<HomeStackParamList> | undefined;
-  Cookbook: undefined;
+  Cookbook: NavigatorScreenParams<CookbookStackParamList> | undefined;
+  Create: NavigatorScreenParams<HomeStackParamList> | undefined;
+  Profile: undefined;
 };
 
 export type CookbookStackParamList = {

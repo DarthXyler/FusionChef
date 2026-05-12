@@ -5,8 +5,10 @@ import {
   ActionSheetIOS,
   Alert,
   Image,
+  ImageBackground,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -17,6 +19,7 @@ import {
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { BrandHeader } from "../components/BrandHeader";
 import { PrimaryButton } from "../components/PrimaryButton";
 import {
   CUISINE_OPTIONS,
@@ -27,9 +30,10 @@ import {
 import { useResponsiveFlags } from "../hooks/useResponsiveFlags";
 import type { HomeStackParamList } from "../navigation/types";
 import { sampleGeneratedRecipeRecord } from "../data/sampleGeneratedRecipe";
-import { loginWithGoogleForMobile } from "../services/auth";
+import { clearMobileAuthToken, loginWithGoogleForMobile } from "../services/auth";
 import {
   fetchMonetizationAccountSnapshot,
+  getAvailableAppleProductIds,
   getConfiguredAppleProductIds,
   purchaseAppleCredits,
 } from "../services/monetization";
@@ -37,6 +41,8 @@ import { fetchOcrExtractedText } from "../services/ocr";
 import type { ImportedRecipePhoto } from "../types/importedRecipePhoto";
 import type { DietaryStyle, FuseRequest, MealType, SpiceLevel } from "../types/recipe";
 import { styles } from "../styles/appStyles";
+import fusionPassBackground from "../../assets/fusion-pass-bg.png";
+import googleGLogo from "../../assets/google-g-logo.png";
 
 /**
  * Home screen:
@@ -45,6 +51,8 @@ import { styles } from "../styles/appStyles";
  * - navigates to RecipeWorkspace with a pending fuse request
  */
 const DEFAULT_MOBILE_FUSION_CUISINE = CUISINE_OPTIONS[0] ?? "Japanese";
+const PRIVACY_POLICY_URL = "https://flavor-fusion-chef.vercel.app/privacy";
+const SUPPORT_URL = "https://flavor-fusion-chef.vercel.app/support";
 const MAX_OCR_IMAGE_DATA_URL_CHARS = 3_700_000;
 const OCR_IMAGE_VARIANTS_BALANCED = [
   { maxDimension: 1600, compress: 0.65 },
@@ -82,7 +90,13 @@ function generateRequestId() {
 type CreditPackOption = {
   productId: string;
   credits: number;
+  label: string;
+  displayPriceUsd: number;
+  packageKey: string;
+  active: boolean;
 };
+
+type CreditGateAuthState = "checking" | "unauthenticated" | "authenticated";
 
 function inferCreditsFromProductId(productId: string) {
   const match = productId.match(/(\d+)(?!.*\d)/);
@@ -93,38 +107,16 @@ function inferCreditsFromProductId(productId: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-async function selectAppleCreditPack(options: CreditPackOption[]) {
+function formatPriceUsd(value: number) {
+  return `$${value.toFixed(2)}`;
+}
+
+function getRecommendedPackId(options: CreditPackOption[]) {
   if (options.length === 0) {
-    return null;
+    return "";
   }
-
-  if (Platform.OS === "ios") {
-    return new Promise<CreditPackOption | null>((resolve) => {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ["Cancel", ...options.map((option) => `${option.credits} credits`)],
-          cancelButtonIndex: 0,
-        },
-        (buttonIndex) => {
-          if (buttonIndex === 0) {
-            resolve(null);
-            return;
-          }
-          resolve(options[buttonIndex - 1] ?? null);
-        },
-      );
-    });
-  }
-
-  return new Promise<CreditPackOption | null>((resolve) => {
-    Alert.alert("Choose credits", "Select a credit pack.", [
-      { text: "Cancel", style: "cancel", onPress: () => resolve(null) },
-      ...options.map((option) => ({
-        text: `${option.credits} credits`,
-        onPress: () => resolve(option),
-      })),
-    ]);
-  });
+  const middleIndex = Math.floor(options.length / 2);
+  return options[middleIndex]?.productId ?? options[0]?.productId ?? "";
 }
 
 type ImageManipulatorModule = {
@@ -210,9 +202,9 @@ function isLikelyImageSizeError(message: string) {
 export function HomeScreen({
   navigation,
   route,
-}: NativeStackScreenProps<HomeStackParamList, "Home">) {
+}: NativeStackScreenProps<HomeStackParamList, "CreateFusion">) {
   const insets = useSafeAreaInsets();
-  const { isCompactScreen, isVeryCompactScreen } = useResponsiveFlags();
+  const { isCompactScreen, isVeryCompactScreen, isShortScreen } = useResponsiveFlags();
   const [baseRecipe, setBaseRecipe] = useState("");
   const [mealType, setMealType] = useState<MealType>(sampleGeneratedRecipeRecord.sourceInput.mealType);
   const [fusionCuisine, setFusionCuisine] = useState<string>(DEFAULT_MOBILE_FUSION_CUISINE);
@@ -232,6 +224,9 @@ export function HomeScreen({
   const [isCreditGateBusy, setIsCreditGateBusy] = useState(false);
   const [creditGateMessage, setCreditGateMessage] = useState("");
   const [pendingCreditGateInput, setPendingCreditGateInput] = useState<FuseRequest | null>(null);
+  const [creditPackOptions, setCreditPackOptions] = useState<CreditPackOption[]>([]);
+  const [selectedCreditPackId, setSelectedCreditPackId] = useState("");
+  const [creditGateAuthState, setCreditGateAuthState] = useState<CreditGateAuthState>("checking");
   const shouldShowSpiceLevel = mealType !== "dessert" && mealType !== "beverage";
 
   useEffect(() => {
@@ -240,6 +235,17 @@ export function HomeScreen({
       // Ignore prefetch failures; runtime flow has fallback checks.
     });
   }, []);
+
+  useEffect(() => {
+    if (creditPackOptions.length === 0) {
+      setSelectedCreditPackId("");
+      return;
+    }
+    if (creditPackOptions.some((option) => option.productId === selectedCreditPackId)) {
+      return;
+    }
+    setSelectedCreditPackId(getRecommendedPackId(creditPackOptions));
+  }, [creditPackOptions, selectedCreditPackId]);
 
   function resetHomeForm() {
     // Full reset used when user taps Home tab again.
@@ -258,6 +264,9 @@ export function HomeScreen({
     setIsCreditGateBusy(false);
     setCreditGateMessage("");
     setPendingCreditGateInput(null);
+    setCreditPackOptions([]);
+    setSelectedCreditPackId("");
+    setCreditGateAuthState("checking");
   }
 
   useEffect(() => {
@@ -268,6 +277,74 @@ export function HomeScreen({
 
     resetHomeForm();
   }, [route.params?.resetToken]);
+
+  useEffect(() => {
+    if (!route.params?.importPhotoOnOpen) {
+      return;
+    }
+
+    void handleChoosePhoto();
+    navigation.setParams({ importPhotoOnOpen: undefined });
+  }, [navigation, route.params?.importPhotoOnOpen]);
+
+  useEffect(() => {
+    const creditGateToken = route.params?.creditGateToken;
+    const creditGateInput = route.params?.creditGateInput;
+    const creditGateReason = route.params?.creditGateReason;
+    if (!creditGateToken || !creditGateInput) {
+      return;
+    }
+
+    let cancelled = false;
+    setBaseRecipe(creditGateInput.baseRecipe);
+    setMealType(creditGateInput.mealType);
+    setFusionCuisine(creditGateInput.fusionCuisine);
+    setDietaryStyle(creditGateInput.dietaryStyle);
+    setSpiceLevel(creditGateInput.spiceLevel);
+    setPendingCreditGateInput(creditGateInput);
+    setCreditGateMessage(
+      creditGateReason === "insufficient_credits_402"
+        ? "Credits exhausted. Your free tries and credits are used up. Choose a pack to continue."
+        : "",
+    );
+
+    async function openCreditGateFromRoute() {
+      const account = await fetchMonetizationAccountSnapshot({ preferCache: true });
+      if (cancelled) {
+        return;
+      }
+      setCreditGateAuthState(account.authenticated ? "authenticated" : "unauthenticated");
+      const options = await getAppleCreditPackOptions();
+      if (cancelled) {
+        return;
+      }
+      setCreditPackOptions(options);
+      setSelectedCreditPackId((current) => current || getRecommendedPackId(options));
+      setIsCreditGateOpen(true);
+    }
+
+    void openCreditGateFromRoute().catch(() => {
+      if (!cancelled) {
+        setCreditGateAuthState("unauthenticated");
+        setIsCreditGateOpen(true);
+      }
+    });
+
+    navigation.setParams({
+      creditGateToken: undefined,
+      creditGateInput: undefined,
+      creditGateReason: undefined,
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    navigation,
+    route.params?.creditGateInput,
+    route.params?.creditGateReason,
+    route.params?.creditGateToken,
+  ]);
 
   async function buildImportedRecipePhoto(
     asset: ImagePicker.ImagePickerAsset,
@@ -539,22 +616,61 @@ export function HomeScreen({
     const configuredFallback = getConfiguredAppleProductIds().map((productId) => ({
       productId,
       credits: inferCreditsFromProductId(productId),
+      label: `${inferCreditsFromProductId(productId)} Credits`,
+      displayPriceUsd: 0,
+      packageKey: `fallback_${productId}`,
+      active: true,
     }));
 
+    let baseOptions = configuredFallback;
     try {
       const account = await fetchMonetizationAccountSnapshot({ preferCache: true });
-      const applePacks = account.products
-        .filter((product) => product.provider === "apple_app_store")
-        .map((product) => ({ productId: product.productId, credits: product.credits }))
+      const pricingPacks = account.pricingPackages
+        .filter((pack) => pack.active)
+        .map((pack) => ({
+          productId: pack.appleProductId,
+          credits: pack.credits,
+          label: pack.label,
+          displayPriceUsd: pack.displayPriceUsd,
+          packageKey: pack.packageKey,
+          active: pack.active,
+        }))
         .sort((left, right) => left.credits - right.credits);
-      if (applePacks.length > 0) {
-        return applePacks;
+      if (pricingPacks.length > 0) {
+        baseOptions = pricingPacks;
+      } else {
+        const applePacks = account.products
+          .filter((product) => product.provider === "apple_app_store")
+          .map((product) => ({
+            productId: product.productId,
+            credits: product.credits,
+            label: `${product.credits} Credits`,
+            displayPriceUsd: 0,
+            packageKey: `product_${product.productId}`,
+            active: true,
+          }))
+          .sort((left, right) => left.credits - right.credits);
+        if (applePacks.length > 0) {
+          baseOptions = applePacks;
+        }
       }
     } catch {
       // Fallback remains available.
     }
 
-    return configuredFallback;
+    try {
+      const availableProductIds = await getAvailableAppleProductIds(
+        baseOptions.map((option) => option.productId),
+      );
+      if (availableProductIds.length === 0) {
+        return [];
+      }
+
+      const availableSet = new Set(availableProductIds);
+      return baseOptions.filter((option) => availableSet.has(option.productId));
+    } catch {
+      return baseOptions;
+    }
   }
 
   function startFuseNavigation(input: FuseRequest) {
@@ -571,19 +687,14 @@ export function HomeScreen({
     if (!pendingCreditGateInput || isCreditGateBusy) {
       return;
     }
+    if (creditGateAuthState !== "authenticated") {
+      setCreditGateMessage("Login first to continue with paid credits.");
+      return;
+    }
 
     setIsCreditGateBusy(true);
-    setCreditGateMessage("");
     try {
-      let account = await fetchMonetizationAccountSnapshot();
-      if (!account.authenticated) {
-        const loggedIn = await loginWithGoogleForMobile();
-        if (!loggedIn) {
-          setCreditGateMessage("Login is required to continue with paid credits.");
-          return;
-        }
-        account = await fetchMonetizationAccountSnapshot({ forceRefresh: true });
-      }
+      const account = await fetchMonetizationAccountSnapshot({ forceRefresh: true });
 
       if (
         !shouldRequireCreditsForFuse({
@@ -598,14 +709,20 @@ export function HomeScreen({
         return;
       }
 
-      const options = await getAppleCreditPackOptions();
+      let options = creditPackOptions;
       if (options.length === 0) {
-        setCreditGateMessage("No credit packs are configured yet.");
+        options = await getAppleCreditPackOptions();
+        setCreditPackOptions(options);
+      }
+      if (options.length === 0) {
+        setCreditGateMessage("No credit packs are available from App Store yet.");
         return;
       }
 
-      const selectedPack = await selectAppleCreditPack(options);
+      const selectedPack =
+        options.find((option) => option.productId === selectedCreditPackId) ?? options[0] ?? null;
       if (!selectedPack) {
+        setCreditGateMessage("Choose a credit pack to continue.");
         return;
       }
 
@@ -626,6 +743,50 @@ export function HomeScreen({
     } finally {
       setIsCreditGateBusy(false);
     }
+  }
+
+  async function handleCreditGateGoogleLogin() {
+    if (isCreditGateBusy) {
+      return;
+    }
+
+    setIsCreditGateBusy(true);
+    setCreditGateMessage("");
+    try {
+      const loggedIn = await loginWithGoogleForMobile();
+      if (!loggedIn) {
+        setCreditGateMessage("Login was cancelled. Try again to continue.");
+        setCreditGateAuthState("unauthenticated");
+        return;
+      }
+      const account = await fetchMonetizationAccountSnapshot({ forceRefresh: true });
+      setCreditGateAuthState(account.authenticated ? "authenticated" : "unauthenticated");
+      if (!account.authenticated) {
+        setCreditGateMessage("Login succeeded, but account verification failed. Try again.");
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Could not complete Google login right now.";
+      setCreditGateMessage(message);
+      setCreditGateAuthState("unauthenticated");
+    } finally {
+      setIsCreditGateBusy(false);
+    }
+  }
+
+  function handleCreditGateAppleLogin() {
+    setCreditGateMessage("Apple login will be enabled next.");
+  }
+
+  async function handleCreditGateLogout() {
+    if (isCreditGateBusy) {
+      return;
+    }
+    await clearMobileAuthToken();
+    setCreditGateAuthState("unauthenticated");
+    setCreditGateMessage("Logged out. Login to continue with paid credits.");
   }
 
   async function handleGenerateRecipe() {
@@ -655,8 +816,18 @@ export function HomeScreen({
       });
 
       if (needsCredits) {
+        const options = await getAppleCreditPackOptions();
+        setCreditPackOptions(options);
+        setSelectedCreditPackId((current) => current || getRecommendedPackId(options));
         setPendingCreditGateInput(pendingInput);
-        setCreditGateMessage("");
+        setCreditGateAuthState(account.authenticated ? "authenticated" : "unauthenticated");
+        if (options.length === 0) {
+          setCreditGateMessage(
+            "No credit packs are available in App Store for this build yet. Check App Store Connect product setup.",
+          );
+        } else {
+          setCreditGateMessage("");
+        }
         setIsCreditGateOpen(true);
         return;
       }
@@ -681,6 +852,16 @@ export function HomeScreen({
     setIsExtractingText(false);
   }
 
+  async function openCreditGateLink(url: string, label: string) {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert("Link unavailable", `Could not open ${label} right now.`);
+    }
+  }
+
+  const recommendedCreditPackId = getRecommendedPackId(creditPackOptions);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.screen}>
@@ -693,7 +874,7 @@ export function HomeScreen({
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.homeHeroCard}>
-            <Text style={styles.brand}>Flavor Fusion Chef</Text>
+            <BrandHeader />
             <Text style={styles.kicker}>AI Recipe Studio</Text>
             <Text
               style={[
@@ -932,61 +1113,317 @@ export function HomeScreen({
             }
           }}
         >
-          <SafeAreaView style={styles.modalSafeArea}>
-            <View
-              style={[
-                styles.modalSheet,
-                { paddingTop: Math.max(insets.top + 12, 28), paddingBottom: 24 },
-              ]}
+          <View style={styles.creditGateRoot}>
+            <ImageBackground
+              imageStyle={styles.creditGateBackgroundImage}
+              source={fusionPassBackground}
+              style={styles.creditGateBackground}
             >
-              <View
-                style={[
-                  styles.modalHeader,
-                  isCompactScreen && styles.modalHeaderCompact,
-                ]}
-              >
-                <View style={styles.modalHeaderTextBlock}>
-                  <Text style={styles.modalTitle}>Continue Your Fusion</Text>
-                  <Text style={styles.modalSubtitle}>
-                    You have used today&apos;s free fusions. Login and add credits to keep creating.
-                  </Text>
-                </View>
-                <Pressable
-                  accessibilityLabel="Close credit setup"
-                  onPress={() => !isCreditGateBusy && setIsCreditGateOpen(false)}
-                  style={({ pressed }) => [
-                    styles.modalCloseButton,
-                    pressed && styles.menuButtonPressed,
+              <View style={styles.creditGateOverlay}>
+                <View pointerEvents="none" style={styles.creditGateTopScrim} />
+                <View
+                  style={[
+                    styles.modalSheet,
+                    styles.creditGateSheet,
+                    isShortScreen && styles.creditGateSheetCompact,
+                    {
+                      paddingTop: Math.max(insets.top + 12, 28),
+                      paddingBottom: Math.max(insets.bottom + 16, 24),
+                    },
                   ]}
                 >
-                  <Text style={styles.modalCloseLabel}>Close</Text>
-                </Pressable>
-              </View>
+                  <View style={styles.creditGateMainContent}>
+                    <View
+                      style={[
+                        styles.modalHeader,
+                        isCompactScreen && styles.modalHeaderCompact,
+                      ]}
+                    >
+                      <View style={styles.modalHeaderTextBlock}>
+                        <Text
+                          style={[
+                            styles.modalTitle,
+                            styles.creditGateHeaderTitle,
+                            isCompactScreen && styles.creditGateHeaderTitleCompact,
+                            isVeryCompactScreen && styles.creditGateHeaderTitleVeryCompact,
+                          ]}
+                        >
+                          Fusion Pass
+                        </Text>
+                        <Text
+                          style={[
+                            styles.modalSubtitle,
+                            styles.creditGateHeaderSubtitle,
+                            isCompactScreen && styles.creditGateHeaderSubtitleCompact,
+                            isVeryCompactScreen && styles.creditGateHeaderSubtitleVeryCompact,
+                          ]}
+                        >
+                          Unlock more fusions instantly with flexible credit packs.
+                        </Text>
+                      </View>
+                      <Pressable
+                        accessibilityLabel="Close credit setup"
+                        onPress={() => !isCreditGateBusy && setIsCreditGateOpen(false)}
+                        style={({ pressed }) => [
+                          styles.modalCloseButton,
+                          isCompactScreen && styles.modalCloseButtonCompact,
+                          pressed && styles.menuButtonPressed,
+                        ]}
+                      >
+                        <Text style={styles.modalCloseLabel}>Close</Text>
+                      </Pressable>
+                    </View>
 
-              <View style={styles.modalPreviewCard}>
-                <Text style={styles.modalSectionLabel}>What you get</Text>
-                <View style={styles.homeBulletList}>
-                  <Text style={styles.homeBullet}>✓ Keep all saved cookbook data</Text>
-                  <Text style={styles.homeBullet}>✓ Buy only what you need in credits</Text>
-                  <Text style={styles.homeBullet}>✓ Continue fusing without losing your draft</Text>
+                    <View
+                      style={[
+                        styles.creditGateIntroCard,
+                        isCompactScreen && styles.creditGateIntroCardCompact,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.modalSectionLabel,
+                          styles.creditGateIntroTitle,
+                          isCompactScreen && styles.creditGateIntroTitleCompact,
+                          isVeryCompactScreen && styles.creditGateIntroTitleVeryCompact,
+                        ]}
+                      >
+                        Choose a credit pack
+                      </Text>
+                      <View style={styles.creditGateIntroPoints}>
+                        <Text style={styles.creditGateIntroPoint}>
+                          <Text style={styles.creditGateCheckMark}>{"\u2713 "}</Text>
+                          One-time credits, no subscription
+                        </Text>
+                        <Text style={styles.creditGateIntroPoint}>
+                          <Text style={styles.creditGateCheckMark}>{"\u2713 "}</Text>
+                          Purchase only when needed
+                        </Text>
+                        <Text style={styles.creditGateIntroPoint}>
+                          <Text style={styles.creditGateCheckMark}>{"\u2713 "}</Text>
+                          Continue your fusion right after purchase
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.creditPackList,
+                        isCompactScreen && styles.creditPackListCompact,
+                        isVeryCompactScreen && styles.creditPackListVeryCompact,
+                      ]}
+                    >
+                      {creditPackOptions.map((option) => {
+                        const isSelected = option.productId === selectedCreditPackId;
+                        const isRecommended = option.productId === recommendedCreditPackId;
+                        return (
+                          <Pressable
+                            key={option.productId}
+                            accessibilityLabel={`Select ${option.label}`}
+                            disabled={isCreditGateBusy}
+                            onPress={() => setSelectedCreditPackId(option.productId)}
+                            style={({ pressed }) => [
+                              styles.creditPackCard,
+                              isCompactScreen && styles.creditPackCardCompact,
+                              isVeryCompactScreen && styles.creditPackCardVeryCompact,
+                              isSelected && styles.creditPackCardSelected,
+                              pressed && styles.creditPackCardPressed,
+                            ]}
+                          >
+                            <View style={styles.creditPackHeaderRow}>
+                              <Text
+                                adjustsFontSizeToFit
+                                minimumFontScale={0.85}
+                                numberOfLines={1}
+                                style={[
+                                  styles.creditPackLabel,
+                                  isCompactScreen && styles.creditPackLabelCompact,
+                                  isVeryCompactScreen && styles.creditPackLabelVeryCompact,
+                                  isSelected && styles.creditPackLabelSelected,
+                                ]}
+                              >
+                                {option.label}
+                              </Text>
+                            </View>
+
+                            <View style={styles.creditPackMetaRow}>
+                              <Text
+                                adjustsFontSizeToFit
+                                minimumFontScale={0.9}
+                                numberOfLines={1}
+                                style={[
+                                  styles.creditPackCredits,
+                                  isCompactScreen && styles.creditPackCreditsCompact,
+                                  isVeryCompactScreen && styles.creditPackCreditsVeryCompact,
+                                  isSelected && styles.creditPackCreditsSelected,
+                                ]}
+                              >
+                                {option.credits} credits
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.creditPackPrice,
+                                  isCompactScreen && styles.creditPackPriceCompact,
+                                  isVeryCompactScreen && styles.creditPackPriceVeryCompact,
+                                  isSelected && styles.creditPackPriceSelected,
+                                ]}
+                              >
+                                {formatPriceUsd(option.displayPriceUsd)}
+                              </Text>
+                              {isRecommended ? (
+                                <View
+                                  style={[
+                                    styles.creditPackRecommendedBadge,
+                                    isCompactScreen && styles.creditPackRecommendedBadgeCompact,
+                                    isVeryCompactScreen && styles.creditPackRecommendedBadgeVeryCompact,
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.creditPackRecommendedText,
+                                      isCompactScreen && styles.creditPackRecommendedTextCompact,
+                                      isVeryCompactScreen && styles.creditPackRecommendedTextVeryCompact,
+                                    ]}
+                                  >
+                                    Best Value
+                                  </Text>
+                                </View>
+                              ) : null}
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+
+                    {creditGateMessage ? (
+                      <View style={styles.emptyImportState}>
+                        <Text style={styles.emptyImportCopy}>{creditGateMessage}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  <View style={styles.creditGateFooter}>
+                    {creditGateAuthState !== "authenticated" ? (
+                      <View
+                        style={[
+                          styles.creditGateAuthActions,
+                          isShortScreen && styles.creditGateAuthActionsCompact,
+                        ]}
+                      >
+                        <Pressable
+                          accessibilityRole="button"
+                          disabled={isCreditGateBusy}
+                          onPress={handleCreditGateAppleLogin}
+                          style={({ pressed }) => [
+                            styles.creditGateAppleButton,
+                            isCompactScreen && styles.creditGateAuthButtonCompact,
+                            pressed && styles.creditGateAuthButtonPressed,
+                          ]}
+                        >
+                          <MaterialIcons name="apple" size={24} style={styles.creditGateAppleIcon} />
+                          <Text
+                            style={[
+                              styles.creditGateAppleButtonText,
+                              isCompactScreen && styles.creditGateAuthButtonTextCompact,
+                            ]}
+                          >
+                            Continue with Apple
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          accessibilityRole="button"
+                          disabled={isCreditGateBusy}
+                          onPress={() => void handleCreditGateGoogleLogin()}
+                          style={({ pressed }) => [
+                            styles.creditGateGoogleButton,
+                            isCompactScreen && styles.creditGateAuthButtonCompact,
+                            pressed && styles.creditGateAuthButtonPressed,
+                          ]}
+                        >
+                          <Image source={googleGLogo} style={styles.creditGateGoogleIconImage} />
+                          <Text
+                            style={[
+                              styles.creditGateGoogleButtonText,
+                              isCompactScreen && styles.creditGateAuthButtonTextCompact,
+                            ]}
+                          >
+                            Continue with Google
+                          </Text>
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <View style={styles.creditGateAuthActionsSpacer} />
+                    )}
+
+                    <View
+                      style={[
+                        styles.creditGateHelperSpacer,
+                        isShortScreen && styles.creditGateHelperSpacerCompact,
+                      ]}
+                    />
+                    <View style={styles.modalActions}>
+                      <PrimaryButton
+                        disabled={
+                          isCreditGateBusy ||
+                          !pendingCreditGateInput ||
+                          creditGateAuthState !== "authenticated"
+                        }
+                        label={isCreditGateBusy ? "Preparing..." : "Continue"}
+                        onPress={() => void handleCreditGateContinue()}
+                      />
+                    </View>
+                    {creditGateAuthState === "authenticated" ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        disabled={isCreditGateBusy}
+                        onPress={() => void handleCreditGateLogout()}
+                        style={({ pressed }) => [
+                          styles.creditGateLogoutButton,
+                          pressed && styles.creditGateAuthButtonPressed,
+                        ]}
+                      >
+                        <Text style={styles.creditGateLogoutText}>Log Out</Text>
+                      </Pressable>
+                    ) : null}
+                    <View
+                      style={[
+                        styles.creditGateLegalRow,
+                        isShortScreen && styles.creditGateLegalRowCompact,
+                      ]}
+                    >
+                      <Pressable
+                        accessibilityRole="link"
+                        onPress={() => void openCreditGateLink(PRIVACY_POLICY_URL, "Privacy Policy")}
+                      >
+                        <Text
+                          style={[
+                            styles.creditGateLegalLink,
+                            isShortScreen && styles.creditGateLegalLinkCompact,
+                          ]}
+                        >
+                          Privacy Policy
+                        </Text>
+                      </Pressable>
+                      <Text style={styles.creditGateLegalDivider}>{"\u2022"}</Text>
+                      <Pressable
+                        accessibilityRole="link"
+                        onPress={() => void openCreditGateLink(SUPPORT_URL, "Support")}
+                      >
+                        <Text
+                          style={[
+                            styles.creditGateLegalLink,
+                            isShortScreen && styles.creditGateLegalLinkCompact,
+                          ]}
+                        >
+                          Support
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
                 </View>
               </View>
-
-              {creditGateMessage ? (
-                <View style={styles.emptyImportState}>
-                  <Text style={styles.emptyImportCopy}>{creditGateMessage}</Text>
-                </View>
-              ) : null}
-
-              <View style={styles.modalActions}>
-                <PrimaryButton
-                  disabled={isCreditGateBusy || !pendingCreditGateInput}
-                  label={isCreditGateBusy ? "Preparing..." : "Continue with Google"}
-                  onPress={() => void handleCreditGateContinue()}
-                />
-              </View>
-            </View>
-          </SafeAreaView>
+            </ImageBackground>
+          </View>
         </Modal>
 
         <Modal

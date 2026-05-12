@@ -1,90 +1,82 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { BodyText, Card, CardTitle, PageHeader, PageShell, TextLink } from "@/components/PublicSite";
+import { SUPPORT_EMAIL } from "@/lib/public-site-content";
 
 export const metadata: Metadata = {
   title: "Support",
   description:
-    "Get help with Flavor Fusion Chef recipe generation, cookbook saves, mobile imports, and general support questions.",
+    "Get help with Flavor Fusion Chef recipe generation, cookbook saves, mobile imports, credits, and account questions.",
 };
 
 const supportTopics = [
   {
-    title: "Recipe generation issues",
-    body: "If a recipe fails to generate, includes a strange output, or produces the wrong image style, send the recipe title or input you used so the issue can be reproduced.",
+    title: "Credits and purchases",
+    body: "Include the credit pack, purchase time, and whether Apple showed the purchase as complete.",
+    href: "/refund-policy",
   },
   {
-    title: "Cookbook and saved recipes",
-    body: "If saved recipes are missing, not syncing correctly, or behaving unexpectedly across sessions, include the device and a short description of what happened.",
+    title: "Recipe generation",
+    body: "Share the base recipe, cuisine choice, and what looked wrong or unexpected.",
+    href: "/faq#recipe-generation-help",
   },
   {
-    title: "Mobile app help",
-    body: "If you hit problems with image import, sharing, scrolling, offline cookbook access, or screen layout, mention your device model and what screen you were on.",
+    title: "Recipe photo import",
+    body: "Mention whether the image came from camera or library, plus any error message you saw.",
+    href: "/faq#recipe-photo-import",
   },
-];
+  {
+    title: "Cookbook saves",
+    body: "Include the recipe title and whether the issue happened after reinstalling or changing devices.",
+    href: "/faq#cookbook-saves",
+  },
+] as const;
 
 export default function SupportPage() {
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-8 animate-rise-in lg:space-y-10">
-      <section className="space-y-3 rounded-[2rem] border border-emerald-100 bg-white px-6 py-8 shadow-sm sm:px-8">
-        <p className="inline-block rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white">
-          Support
+    <PageShell maxWidth="max-w-5xl">
+      <PageHeader eyebrow="Support" title="Help for your mobile cookbook.">
+        <p>
+          Get help with purchases, credits, recipe generation, photo imports, saved recipes, and
+          privacy questions.
         </p>
-        <h1 className="font-serif text-4xl leading-tight text-zinc-900 md:text-5xl">
-          Need help with Flavor Fusion Chef?
-        </h1>
-        <p className="max-w-3xl text-lg text-zinc-700">
-          Send a note and include as much detail as you can. That makes it much easier to fix
-          recipe, cookbook, import, or mobile app issues quickly.
-        </p>
-      </section>
+      </PageHeader>
 
-      <section className="rounded-[2rem] border border-zinc-200 bg-white px-6 py-7 shadow-sm sm:px-8">
-        <h2 className="font-serif text-2xl text-zinc-900">Contact support</h2>
-        <p className="mt-3 text-base leading-8 text-zinc-700">
-          Email{" "}
-          <a
-            className="font-semibold text-emerald-700 underline decoration-emerald-300 underline-offset-4"
-            href="mailto:darthxyler@gmail.com"
-          >
-            darthxyler@gmail.com
-          </a>{" "}
-          for help with the web app or mobile app.
-        </p>
-        <p className="mt-3 text-base leading-8 text-zinc-700">
-          Helpful details to include:
-        </p>
-        <ul className="mt-3 list-disc space-y-2 pl-5 text-base leading-8 text-zinc-700 marker:text-emerald-500">
-          <li>what you were trying to do</li>
-          <li>the recipe title or input used</li>
-          <li>the device or browser you were using</li>
-          <li>what happened instead of the expected result</li>
-        </ul>
-      </section>
-
-      <section className="space-y-4 rounded-[2rem] border border-zinc-200 bg-white px-6 py-7 shadow-sm sm:px-8">
-        <h2 className="font-serif text-2xl text-zinc-900">Common support topics</h2>
+      <section className="grid gap-5 md:grid-cols-2">
         {supportTopics.map((topic) => (
-          <div key={topic.title} className="rounded-3xl border border-emerald-100 bg-emerald-50/60 px-5 py-4">
-            <h3 className="text-lg font-semibold text-zinc-900">{topic.title}</h3>
-            <p className="mt-2 text-base leading-8 text-zinc-700">{topic.body}</p>
-          </div>
+          <Card key={topic.title} className="border-emerald-100 transition hover:-translate-y-1 hover:shadow-md">
+            <CardTitle>{topic.title}</CardTitle>
+            <BodyText className="mt-3">{topic.body}</BodyText>
+            <div className="mt-4">
+              <TextLink href={topic.href}>Related information</TextLink>
+            </div>
+          </Card>
         ))}
       </section>
 
-      <section className="rounded-[2rem] border border-emerald-100 bg-white px-6 py-6 shadow-sm sm:px-8">
-        <h2 className="font-serif text-2xl text-zinc-900">Privacy information</h2>
-        <p className="mt-3 text-base leading-8 text-zinc-700">
-          For details about how recipe inputs, saved cookbook entries, imported images, and
-          support requests are handled, read the{" "}
-          <Link
-            className="font-semibold text-emerald-700 underline decoration-emerald-300 underline-offset-4"
-            href="/privacy"
-          >
-            Privacy Policy
-          </Link>
-          .
-        </p>
-      </section>
-    </div>
+      <Card tone="green" className="overflow-hidden">
+        <div className="grid gap-6 md:grid-cols-[0.78fr_1.22fr] md:items-start">
+          <div className="space-y-3 md:pr-3">
+            <h2 className="text-3xl font-extrabold leading-tight text-zinc-950">Contact support</h2>
+            <BodyText className="max-w-md">
+              Email support with details that help reproduce the issue.
+            </BodyText>
+          </div>
+          <div className="rounded-lg border border-emerald-100 bg-white px-5 py-5 shadow-sm">
+            <a
+              className="text-lg font-semibold text-emerald-700 underline decoration-emerald-300 underline-offset-4"
+              href={`mailto:${SUPPORT_EMAIL}?subject=Flavor%20Fusion%20Chef%20Support`}
+            >
+              {SUPPORT_EMAIL}
+            </a>
+            <ul className="mt-4 list-disc space-y-2 pl-5 leading-7 text-zinc-700 marker:text-emerald-500">
+              <li>what you were trying to do</li>
+              <li>your device model and app version if available</li>
+              <li>the recipe title, credit pack, or screen involved</li>
+              <li>screenshots if they help explain the issue</li>
+            </ul>
+          </div>
+        </div>
+      </Card>
+    </PageShell>
   );
 }

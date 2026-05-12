@@ -25,6 +25,7 @@ import {
   isLikelyRecipeOrFoodName,
   RECIPE_INPUT_GUIDANCE_MESSAGE,
 } from "@/lib/recipe-input-guard";
+import { shouldBlockRetiredWebFusionRequest } from "@/lib/web-fusion-access";
 import {
   isFuseRequest,
   normalizeFuseRequest,
@@ -680,6 +681,13 @@ export async function POST(request: NextRequest) {
     return response;
   };
   try {
+    if (shouldBlockRetiredWebFusionRequest(request)) {
+      return NextResponse.json(
+        { error: "Web fusion is currently unavailable." },
+        { status: 403 },
+      );
+    }
+
     // Basic abuse protection.
     const limited = await enforceRateLimit(request, {
       bucket: "api-fuse",

@@ -6,6 +6,7 @@ import type { MealType } from "@/lib/types";
 import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
+import { shouldBlockRetiredWebFusionRequest } from "@/lib/web-fusion-access";
 
 type FuseImageRequest = {
   title: string;
@@ -210,6 +211,13 @@ export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
   const requestStartedAt = Date.now();
   try {
+    if (shouldBlockRetiredWebFusionRequest(request)) {
+      return NextResponse.json(
+        { error: "Web fusion image generation is currently unavailable." },
+        { status: 403 },
+      );
+    }
+
     // Request guardrails.
     const limited = await enforceRateLimit(request, {
       bucket: "api-fuse-image",

@@ -101,3 +101,7 @@ Goal: move from token-only admin access to user-friendly, strongly authenticated
 - [ ] Grant/deduct credits by account UID
 - [ ] Require reason + actor for every manual adjustment
 - [ ] Persist immutable audit trail for compensation actions
+
+## Fusion Pass UI Follow-ups
+
+- [ ] Add helper line under auth actions: "Secure payment. Cancel anytime." with lock icon (reserved layout space already added in modal footer).

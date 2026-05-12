@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { BrandHeader } from "../components/BrandHeader";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { useMobileCookbook } from "../context/mobileCookbook";
 import { useResponsiveFlags } from "../hooks/useResponsiveFlags";
@@ -202,7 +203,7 @@ export function CookbookListScreen({
           ListHeaderComponent={
             <>
               <View style={styles.homeHeroCard}>
-                <Text style={styles.brand}>Flavor Fusion Chef</Text>
+                <BrandHeader />
                 <Text style={styles.kicker}>Cookbook</Text>
                 <Text
                   style={[

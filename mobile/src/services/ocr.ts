@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from "../config/api";
+import { getMobileAnonymousId, getMobileDeviceKey } from "./mobileIdentity";
 
 type OcrRequest = {
   imageDataUrl?: string;
@@ -21,10 +22,16 @@ async function readErrorMessage(response: Response) {
 }
 
 export async function fetchOcrExtractedText(input: OcrRequest): Promise<string> {
+  const [mobileAnonId, mobileDeviceKey] = await Promise.all([
+    getMobileAnonymousId(),
+    getMobileDeviceKey(),
+  ]);
   const response = await fetch(`${getApiBaseUrl()}/api/ocr`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "x-flavor-fusion-anon-id": mobileAnonId,
+      "x-flavor-fusion-device-key": mobileDeviceKey,
     },
     body: JSON.stringify(input),
   });

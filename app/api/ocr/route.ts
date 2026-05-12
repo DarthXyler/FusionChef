@@ -4,6 +4,7 @@
  */
 import { NextResponse } from "next/server";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
+import { shouldBlockRetiredWebFusionRequest } from "@/lib/web-fusion-access";
 
 type OcrRequestBody = {
   imageDataUrl?: unknown;
@@ -203,6 +204,13 @@ function buildMessages(imageInput: string): OpenAIMessage[] {
 
 export async function POST(request: Request) {
   try {
+    if (shouldBlockRetiredWebFusionRequest(request)) {
+      return NextResponse.json(
+        { error: "Web recipe photo import is currently unavailable." },
+        { status: 403 },
+      );
+    }
+
     const limited = await enforceRateLimit(request, {
       bucket: "api-ocr",
       limit: 20,

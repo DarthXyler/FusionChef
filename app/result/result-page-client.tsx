@@ -324,16 +324,16 @@ export function ResultPageClient({ initialRecipeId = null }: ResultPageClientPro
   // Empty state if no result was found in local storage.
   if (!record) {
     return (
-      <section className="mx-auto w-full max-w-4xl rounded-3xl border border-zinc-200 bg-white p-8 text-center shadow-sm">
+      <section className="mx-auto w-full max-w-4xl rounded-lg border border-zinc-200 bg-white p-8 text-center shadow-sm">
         <h1 className="font-serif text-3xl text-zinc-900">No recipe found</h1>
         <p className="mt-3 text-zinc-600">
           Generate a fusion recipe first, then this page will show your result.
         </p>
         <Link
-          href="/"
-          className="mt-6 inline-block rounded-2xl bg-emerald-500 px-5 py-3 font-semibold text-white hover:bg-emerald-600"
+          href="/fusion"
+          className="mt-6 inline-block rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-white hover:bg-emerald-600"
         >
-          Back to Home
+          Back to Fusion
         </Link>
       </section>
     );
@@ -381,7 +381,7 @@ export function ResultPageClient({ initialRecipeId = null }: ResultPageClientPro
               {isRerolling ? "Rerolling..." : "Reroll"}
             </button>
             <Link
-              href="/"
+              href="/fusion"
               className="rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-emerald-900 hover:bg-zinc-50"
             >
               Back to Edit
