@@ -349,11 +349,26 @@ export async function POST(request: NextRequest) {
       await clearIdempotentRequest(idempotencyContext);
     }
     if (error instanceof RequestValidationError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ error: error.message, requestId }, { status: 400 });
     }
     if (error instanceof ProviderVerificationError) {
-      return NextResponse.json({ error: error.message }, { status: error.statusCode });
+      logPurchaseVerify({
+        requestId,
+        event: "provider_verification_failed",
+        message: error.message,
+        statusCode: error.statusCode,
+      });
+      return NextResponse.json(
+        { error: error.message, requestId },
+        { status: error.statusCode },
+      );
     }
-    return NextResponse.json({ error: "Could not verify purchase." }, { status: 500 });
+    logPurchaseVerify({
+      requestId,
+      event: "unexpected_verify_failure",
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return NextResponse.json({ error: "Could not verify purchase.", requestId }, { status: 500 });
   }
 }

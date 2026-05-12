@@ -89,9 +89,13 @@ function decodeJwtPayload(token: string) {
 }
 
 async function fetchJson(url: string, init: RequestInit) {
-  const response = await fetch(url, init);
-  const payload = (await response.json().catch(() => null)) as unknown;
-  return { response, payload };
+  try {
+    const response = await fetch(url, init);
+    const payload = (await response.json().catch(() => null)) as unknown;
+    return { response, payload };
+  } catch {
+    throw new ProviderVerificationError("Apple verification request could not reach App Store.", 502);
+  }
 }
 
 function buildAppleJwt() {
@@ -115,7 +119,15 @@ function buildAppleJwt() {
   const signer = createSign("SHA256");
   signer.update(signingInput);
   signer.end();
-  const signature = signer.sign(privateKey);
+  let signature: Buffer;
+  try {
+    signature = signer.sign(privateKey);
+  } catch {
+    throw new ProviderVerificationError(
+      "Apple verification credentials could not sign the request.",
+      500,
+    );
+  }
   return `${signingInput}.${base64UrlEncode(signature)}`;
 }
 
