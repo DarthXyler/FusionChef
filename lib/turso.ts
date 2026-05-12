@@ -2,7 +2,7 @@
  * Turso client access + query timeout wrapper.
  * Central place for DB connectivity and defensive query timeout handling.
  */
-import { createClient, type InStatement } from "@libsql/client";
+import { createClient, type InArgs, type InStatement } from "@libsql/client";
 
 let cachedClient: ReturnType<typeof createClient> | null = null;
 const DEFAULT_TURSO_QUERY_TIMEOUT_MS = 8_000;
@@ -50,6 +50,29 @@ export async function executeTurso(statement: InStatement | string, timeoutMs?: 
 
   try {
     return await Promise.race([client.execute(statement), timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+export async function executeTursoBatch(
+  statements: Array<InStatement | [string, InArgs?]>,
+  timeoutMs?: number,
+) {
+  const client = getTursoClient();
+  const queryTimeoutMs = timeoutMs ?? getTursoQueryTimeoutMs();
+
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Turso query timed out after ${queryTimeoutMs}ms.`));
+    }, queryTimeoutMs);
+  });
+
+  try {
+    return await Promise.race([client.batch(statements, "write"), timeoutPromise]);
   } finally {
     if (timeoutId) {
       clearTimeout(timeoutId);

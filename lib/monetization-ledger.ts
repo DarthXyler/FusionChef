@@ -3,7 +3,7 @@
  * S1 foundation: immutable ledger entries and safe reservation lifecycle operations.
  */
 import { randomUUID } from "crypto";
-import { executeTurso } from "@/lib/turso";
+import { executeTurso, executeTursoBatch } from "@/lib/turso";
 
 const MAX_ADMIN_CREDIT_AMOUNT = 100_000;
 
@@ -441,16 +441,18 @@ export async function grantCredits(params: {
   const eventType = params.eventType ?? "grant";
   const nowIso = new Date().toISOString();
   const entryId = randomUUID();
-  const result = await executeTurso({
-    sql: `WITH updated AS (
-            UPDATE credit_balances
+  const results = await executeTursoBatch([
+    {
+      sql: `UPDATE credit_balances
             SET
               available_credits = available_credits + ?,
               updated_at = ?
             WHERE anon_user_id = ?
-            RETURNING available_credits, pending_credits
-          )
-          INSERT INTO credit_ledger_entries (
+            RETURNING available_credits, pending_credits`,
+      args: [params.amount, nowIso, params.anonUserId],
+    },
+    {
+      sql: `INSERT INTO credit_ledger_entries (
             entry_id,
             anon_user_id,
             event_type,
@@ -464,20 +466,20 @@ export async function grantCredits(params: {
             metadata_json,
             created_at
           )
-          SELECT
+          VALUES (
             ?,
             ?,
             ?,
             ?,
-            updated.available_credits,
-            updated.pending_credits,
+            (SELECT available_credits FROM credit_balances WHERE anon_user_id = ?),
+            (SELECT pending_credits FROM credit_balances WHERE anon_user_id = ?),
             NULL,
             ?,
             ?,
             ?,
             ?,
             ?
-          FROM updated
+          )
           RETURNING
             entry_id,
             anon_user_id,
@@ -491,26 +493,31 @@ export async function grantCredits(params: {
             actor,
             metadata_json,
             created_at`,
-    args: [
-      params.amount,
-      nowIso,
-      params.anonUserId,
-      entryId,
-      params.anonUserId,
-      eventType,
-      params.amount,
-      params.idempotencyScope ?? null,
-      params.idempotencyKey ?? null,
-      params.actor,
-      toMetadataJson({
-        reason: params.reason ?? "",
-        ...(params.metadata ?? {}),
-      }),
-      nowIso,
-    ],
-  });
+      args: [
+        entryId,
+        params.anonUserId,
+        eventType,
+        params.amount,
+        params.anonUserId,
+        params.anonUserId,
+        params.idempotencyScope ?? null,
+        params.idempotencyKey ?? null,
+        params.actor,
+        toMetadataJson({
+          reason: params.reason ?? "",
+          ...(params.metadata ?? {}),
+        }),
+        nowIso,
+      ],
+    },
+  ]);
 
-  const row = result.rows[0] as Record<string, unknown> | undefined;
+  const updateRow = results[0]?.rows[0] as Record<string, unknown> | undefined;
+  if (!updateRow) {
+    throw new Error("Could not update credit balance.");
+  }
+
+  const row = results[1]?.rows[0] as Record<string, unknown> | undefined;
   if (!row) {
     throw new Error("Could not grant credits.");
   }
