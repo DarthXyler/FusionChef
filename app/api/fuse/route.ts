@@ -965,6 +965,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (error instanceof Error && error.message === "OPENAI_API_KEY is missing.") {
+      logFuseTiming({
+        requestId,
+        event: "request_failed",
+        actionKind: monetizationActionKind,
+        totalDurationMs: Date.now() - requestStartedAt,
+        stageTimings,
+        reason: "openai_api_key_missing",
+      });
+      return respond(
+        { error: "Recipe generation is not configured on the server." },
+        503,
+      );
+    }
+
+    if (
+      error instanceof Error &&
+      error.message === "OpenAI response did not include text content."
+    ) {
+      logFuseTiming({
+        requestId,
+        event: "request_failed",
+        actionKind: monetizationActionKind,
+        totalDurationMs: Date.now() - requestStartedAt,
+        stageTimings,
+        reason: "openai_empty_response",
+      });
+      return respond(
+        { error: "Recipe generation returned an empty response. Please try again." },
+        502,
+      );
+    }
+
     if (error instanceof Error && error.message === "IMPLAUSIBLE_RECIPE") {
       logFuseTiming({
         requestId,

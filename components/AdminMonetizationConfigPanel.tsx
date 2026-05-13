@@ -1970,15 +1970,15 @@ export function AdminMonetizationConfigPanel({
             </select>
           </label>
           <label className="space-y-1 text-sm font-semibold text-emerald-900">
-            Account link
+            App Account
             <select
               value={userLinkFilter}
               onChange={(event) => setUserLinkFilter(event.target.value)}
               className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
             >
-              <option value="linked">Linked app users</option>
-              <option value="all">All logged-in users</option>
-              <option value="unlinked">No app link</option>
+              <option value="linked">Active app users</option>
+              <option value="all">All signed-in users</option>
+              <option value="unlinked">Signed in only</option>
             </select>
           </label>
           <label className="space-y-1 text-sm font-semibold text-emerald-900">
