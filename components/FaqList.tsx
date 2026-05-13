@@ -3,10 +3,16 @@
 import { useEffect, useState } from "react";
 import { BodyText } from "@/components/PublicSite";
 
+type StructuredAnswer = {
+  intro: string;
+  bullets?: readonly string[];
+  outro?: string;
+};
+
 type FaqItem = {
   id: string;
   question: string;
-  answer: string | readonly string[];
+  answer: string | StructuredAnswer;
 };
 
 type SupportFaqItem = FaqItem & {
@@ -56,15 +62,14 @@ export function FaqList({
       if (
         nextUrl.origin === window.location.origin &&
         nextUrl.pathname === "/faq" &&
-        !nextUrl.search &&
-        !nextUrl.hash
+        !nextUrl.search
       ) {
-        if (window.location.pathname === "/faq" && (window.location.search || window.location.hash)) {
+        if (window.location.pathname === "/faq" && (window.location.search || window.location.hash !== nextUrl.hash)) {
           event.preventDefault();
-          window.history.pushState(null, "", "/faq");
+          window.history.pushState(null, "", `${nextUrl.pathname}${nextUrl.hash}`);
         }
         setActiveSupportKey("");
-        setOpenId(defaultId);
+        setOpenId(nextUrl.hash ? nextUrl.hash.replace(/^#/, "") : defaultId);
         window.setTimeout(syncWithHash, 0);
       }
     }
@@ -109,14 +114,20 @@ export function FaqList({
               {item.question}
               <span className="text-2xl leading-none text-emerald-700 transition group-open:rotate-45">+</span>
             </summary>
-            {Array.isArray(item.answer) ? (
-              <ul className="mt-3 max-w-3xl list-disc space-y-2 pl-5 leading-8 text-zinc-700 marker:text-emerald-500">
-                {item.answer.map((point) => (
-                  <li key={point}>{point}</li>
-                ))}
-              </ul>
-            ) : (
+            {typeof item.answer === "string" ? (
               <BodyText className="mt-3 max-w-3xl">{item.answer}</BodyText>
+            ) : (
+              <div className="mt-3 max-w-3xl space-y-3">
+                <BodyText>{item.answer.intro}</BodyText>
+                {item.answer.bullets ? (
+                  <ul className="list-disc space-y-2 pl-5 leading-8 text-zinc-700 marker:text-emerald-500">
+                    {item.answer.bullets.map((point) => (
+                      <li key={point}>{point}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {item.answer.outro ? <BodyText>{item.answer.outro}</BodyText> : null}
+              </div>
             )}
           </details>
         );

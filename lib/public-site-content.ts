@@ -71,19 +71,39 @@ export const supportFaqItems = [
     supportKey: "recipe-generation",
     id: "support-recipe-generation",
     question: "Recipe generation support",
-    answer:
-      "Use this guide when recipe generation gives an unexpected result. First, retry with a clear base dish name or recipe text, confirm the meal type matches the dish, and check whether the selected fusion cuisine and dietary style are too restrictive together. If you contact support, include the base recipe, meal type, fusion cuisine, dietary style, spice level, the generated recipe title, and a screenshot of the result. This helps us compare the exact input with the output.",
+    answer: {
+      intro: "Use this guide when recipe generation gives an unexpected result:",
+      bullets: [
+        "First, retry with a clear base dish name or recipe text, confirm the meal type matches the dish, and check whether the selected fusion cuisine and dietary style are too restrictive together.",
+        "If you contact support, include the base recipe, meal type, fusion cuisine, dietary style, spice level, the generated recipe title, and a screenshot of the result.",
+      ],
+      outro: "This helps us compare the exact input with the output.",
+    },
   },
   {
     supportKey: "recipe-photo-import",
     id: "support-recipe-photo-import",
     question: "Recipe photo import support",
-    answer: [
-      "Use this guide when importing a recipe photo does not work as expected.",
-      "Make sure the photo is clear, well lit, and includes the full recipe text.",
-      "If extraction looks incomplete, crop out unrelated content and refresh the extracted text before generating.",
-      "If you contact support, include whether the image came from camera or library, whether text extraction started, any error message, your device model, and a screenshot of the photo/import screen.",
-    ],
+    answer: {
+      intro: "Use this guide when importing a recipe photo does not work as expected:",
+      bullets: [
+        "Make sure the photo is clear, well lit, and includes the full recipe text.",
+        "If extraction looks incomplete, crop out unrelated content and refresh the extracted text before generating.",
+        "If you contact support, include whether the image came from camera or library, whether text extraction started, any error message, your device model, and a screenshot of the photo/import screen.",
+      ],
+    },
+  },
+  {
+    supportKey: "cookbook-saves",
+    id: "support-cookbook-saves",
+    question: "Cookbook saves support",
+    answer: {
+      intro: "Use this guide when a saved cookbook recipe is missing or not opening as expected:",
+      bullets: [
+        "Check whether the recipe appears under All, Favorites, or To Try in the Cookbook tab.",
+        "If you contact support, include the recipe title and whether the issue happened after reinstalling the app or changing devices.",
+      ],
+    },
   },
 ] as const;
 

@@ -27,7 +27,7 @@ const supportTopics = [
   {
     title: "Cookbook saves",
     body: "Include the recipe title and whether the issue happened after reinstalling or changing devices.",
-    href: "/faq#cookbook-saves",
+    href: "/faq?support=cookbook-saves#support-cookbook-saves",
   },
 ] as const;
 
