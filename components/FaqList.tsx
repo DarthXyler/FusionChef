@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BodyText } from "@/components/PublicSite";
+import { BodyText, Card, CardTitle } from "@/components/PublicSite";
 
 type FaqItem = {
   id: string;
@@ -31,11 +31,10 @@ export function FaqList({
       const supportItem = supportItems.find((item) => item.supportKey === supportKey);
       setActiveSupportKey(supportItem?.supportKey ?? "");
 
-      const visibleItems = supportItem ? [supportItem, ...items] : items;
       const hashId = window.location.hash.replace(/^#/, "");
-      const nextId = visibleItems.some((item) => item.id === hashId)
+      const nextId = items.some((item) => item.id === hashId)
         ? hashId
-        : supportItem?.id || defaultId;
+        : defaultId;
       setOpenId(nextId);
 
       if (hashId) {
@@ -55,12 +54,12 @@ export function FaqList({
     activeSupportKey.length > 0
       ? supportItems.find((item) => item.supportKey === activeSupportKey)
       : undefined;
-  const visibleItems = activeSupportItem ? [activeSupportItem, ...items] : items;
 
-  return (
+  const faqSection = (
     <section className="divide-y divide-emerald-100 rounded-2xl border border-emerald-100 bg-white shadow-sm">
-      {visibleItems.map((item) => {
+      {items.map((item) => {
         const isOpen = item.id === openId;
+
         return (
           <details
             key={item.id}
@@ -82,5 +81,25 @@ export function FaqList({
         );
       })}
     </section>
+  );
+
+  if (!activeSupportItem) {
+    return faqSection;
+  }
+
+  return (
+    <div className="space-y-5">
+      <div id={activeSupportItem.id} className="scroll-mt-28">
+        <Card tone="green">
+          <p className="text-xs font-extrabold uppercase tracking-wide text-emerald-700">
+            Support guide
+          </p>
+          <CardTitle>{activeSupportItem.question}</CardTitle>
+          <BodyText className="mt-3 max-w-3xl">{activeSupportItem.answer}</BodyText>
+        </Card>
+      </div>
+
+      {faqSection}
+    </div>
   );
 }
