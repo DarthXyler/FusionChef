@@ -123,6 +123,10 @@ export function DashboardHomeScreen({
     });
   }
 
+  function openRecentFusions() {
+    navigation.navigate("RecentFusions");
+  }
+
   function openRecentFusion(item: DashboardFusionSummary) {
     const parentNavigation = navigation.getParent<NavigationProp<RootTabParamList>>();
     const savedSummary = summaries.find((summary) => summary.recipeId === item.id);
@@ -136,9 +140,16 @@ export function DashboardHomeScreen({
       return;
     }
 
+    if (item.record) {
+      navigation.navigate("RecipeWorkspace", {
+        initialRecord: item.record,
+      });
+      return;
+    }
+
     Alert.alert(
       "Recipe not saved",
-      "This recent fusion is local history only. Save recipes to open them later from your cookbook.",
+      "This older recent fusion only has a summary on this device. New recent fusions can be reopened and saved from here.",
       [
         { text: "Open Cookbook", onPress: () => openCookbook("all") },
         { text: "Create New", onPress: () => openCreate() },
@@ -225,7 +236,7 @@ export function DashboardHomeScreen({
             <Text style={styles.dashboardSectionTitle}>Recent Fusions</Text>
             <Pressable
               accessibilityRole="button"
-              onPress={() => openCookbook("all")}
+              onPress={openRecentFusions}
               style={({ pressed }) => [pressed && styles.profileRowPressed]}
             >
               <Text style={styles.dashboardViewAll}>View all</Text>

@@ -13,6 +13,7 @@ import type {
 } from "./src/navigation/types";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { DashboardHomeScreen } from "./src/screens/DashboardHomeScreen";
+import { RecentFusionsScreen } from "./src/screens/RecentFusionsScreen";
 import { RecipeWorkspaceScreen } from "./src/screens/RecipeWorkspaceScreen";
 import { CookbookListScreen } from "./src/screens/CookbookListScreen";
 import { CookbookDetailScreen } from "./src/screens/CookbookDetailScreen";
@@ -45,6 +46,11 @@ function HomeStackNavigator() {
       <HomeStack.Screen
         name="DashboardHome"
         component={DashboardHomeScreen}
+        options={{ headerShown: false }}
+      />
+      <HomeStack.Screen
+        name="RecentFusions"
+        component={RecentFusionsScreen}
         options={{ headerShown: false }}
       />
       <HomeStack.Screen

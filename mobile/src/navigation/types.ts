@@ -8,6 +8,7 @@ import type {
 
 export type HomeStackParamList = {
   DashboardHome: undefined;
+  RecentFusions: undefined;
   CreateFusion:
     | {
         resetToken?: string;

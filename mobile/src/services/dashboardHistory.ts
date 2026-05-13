@@ -14,6 +14,7 @@ export type DashboardFusionSummary = {
   usageCount?: number;
   isFavorite?: boolean;
   isToTry?: boolean;
+  record?: GeneratedRecipeRecord;
 };
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -70,6 +71,7 @@ export async function upsertDashboardFusionHistory(record: GeneratedRecipeRecord
     fusionCuisine: record.recipe.fusionCuisine,
     createdAt: record.createdAt,
     imageUrl: record.recipe.imageUrl,
+    record,
   };
   return saveDashboardFusionHistory([
     nextItem,
