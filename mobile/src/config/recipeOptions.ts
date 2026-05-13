@@ -10,7 +10,7 @@ export const CUISINE_OPTIONS = [
   "Chinese",
   "French",
   "Greek",
-  "Peruvian",
+  "Indian",
 ] as const;
 
 export const MEAL_TYPE_OPTIONS: Array<{ value: MealType; label: string }> = [

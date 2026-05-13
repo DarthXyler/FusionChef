@@ -53,9 +53,9 @@ const testCases = [
   },
   {
     id: "case-06",
-    title: "Peruvian Chili Tofu Rice Bowl",
+    title: "Indian Chili Tofu Rice Bowl",
     baseCuisine: "Japanese",
-    fusionCuisine: "Peruvian",
+    fusionCuisine: "Indian",
     mealType: "main",
   },
 ];
