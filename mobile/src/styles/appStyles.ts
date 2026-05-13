@@ -1118,7 +1118,7 @@ export const styles = StyleSheet.create({
   profileStatsCard: {
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderColor: "#e5e7eb",
+    borderColor: "#d1fae5",
     borderRadius: 20,
     borderWidth: 1,
     flexDirection: "row",
@@ -1150,7 +1150,7 @@ export const styles = StyleSheet.create({
   },
   profileRowsCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#e5e7eb",
+    borderColor: "#d1fae5",
     borderRadius: 22,
     borderWidth: 1,
     marginBottom: 18,
