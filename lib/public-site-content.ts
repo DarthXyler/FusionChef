@@ -47,22 +47,27 @@ export const faqItems = [
       "Yes. Recipes you choose to keep can be saved to your mobile cookbook so you can revisit them later.",
   },
   {
-    id: "recipe-photo-import",
-    question: "Can I import a recipe photo?",
-    answer:
-      "The mobile app is designed to help import recipe photos and turn them into structured recipe input before creating a fusion version.",
-  },
-  {
-    id: "recipe-generation-help",
-    question: "What if a generated recipe looks wrong or unexpected?",
-    answer:
-      "If a generated recipe looks off, check the base recipe wording, cuisine choice, and dietary preferences first. If the result still looks wrong, contact support with the recipe details and what felt incorrect.",
-  },
-  {
     id: "purchases-handled",
     question: "Where are purchases handled?",
     answer:
       "iOS purchases are handled by Apple through the App Store purchase flow. Refund requests for Apple purchases are handled under Apple's policies.",
+  },
+] as const;
+
+export const supportFaqItems = [
+  {
+    supportKey: "recipe-generation",
+    id: "support-recipe-generation",
+    question: "Recipe generation support",
+    answer:
+      "If a generated recipe looks wrong or unexpected, include the base recipe, selected meal type, fusion cuisine, dietary style, spice level, and what felt incorrect. Screenshots help us compare the input with the generated result.",
+  },
+  {
+    supportKey: "recipe-photo-import",
+    id: "support-recipe-photo-import",
+    question: "Recipe photo import support",
+    answer:
+      "If photo import does not work as expected, include whether the image came from camera or library, whether text extraction started, the error message if one appeared, and a clear screenshot of the recipe photo when possible.",
   },
 ] as const;
 

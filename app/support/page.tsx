@@ -17,12 +17,12 @@ const supportTopics = [
   {
     title: "Recipe generation",
     body: "Share the base recipe, cuisine choice, and what looked wrong or unexpected.",
-    href: "/faq#recipe-generation-help",
+    href: "/faq?support=recipe-generation#support-recipe-generation",
   },
   {
     title: "Recipe photo import",
     body: "Mention whether the image came from camera or library, plus any error message you saw.",
-    href: "/faq#recipe-photo-import",
+    href: "/faq?support=recipe-photo-import#support-recipe-photo-import",
   },
   {
     title: "Cookbook saves",

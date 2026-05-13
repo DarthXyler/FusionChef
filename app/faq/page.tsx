@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { FaqList } from "@/components/FaqList";
 import { BodyText, Card, PageHeader, PageShell, PrimaryLink } from "@/components/PublicSite";
-import { faqItems } from "@/lib/public-site-content";
+import { faqItems, supportFaqItems } from "@/lib/public-site-content";
 
 export const metadata: Metadata = {
   title: "FAQ",
@@ -15,7 +15,7 @@ export default function FaqPage() {
         <p>Quick answers about the mobile app, credits, recipe imports, cookbook saves, and support.</p>
       </PageHeader>
 
-      <FaqList items={faqItems} />
+      <FaqList items={faqItems} supportItems={supportFaqItems} />
 
       <Card tone="green">
         <h2 className="text-3xl font-extrabold leading-tight text-zinc-950">Still need help?</h2>
