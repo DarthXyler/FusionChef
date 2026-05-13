@@ -1,6 +1,6 @@
 export const SUPPORT_EMAIL = "darthxyler@gmail.com";
 
-export const creditPacks = [
+export const fallbackCreditPacks = [
   {
     name: "Starter Pack",
     credits: 20,

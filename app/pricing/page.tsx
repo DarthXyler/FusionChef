@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { BodyText, Card, CardTitle, PageHeader, PageShell, TextLink } from "@/components/PublicSite";
-import { creditPacks } from "@/lib/public-site-content";
+import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
+import { fallbackCreditPacks } from "@/lib/public-site-content";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Pricing",
@@ -15,7 +18,41 @@ const usageNotes = [
   "Final local pricing and taxes are shown by Apple during purchase.",
 ] as const;
 
-export default function PricingPage() {
+const packageDescriptions: Record<string, string> = {
+  pack_1: "A light pack for trying a few fusion ideas and saving your favorites.",
+  pack_2: "A flexible pack for regular recipe experiments and rerolls.",
+  pack_3: "Best for frequent cooks who want a larger idea bank ready to go.",
+};
+
+function formatPriceUsd(value: number) {
+  return `$${value.toFixed(2)}`;
+}
+
+async function getPublicCreditPacks() {
+  try {
+    const config = await getMonetizationRuntimeConfig();
+    const activePacks = config.pricingPackages
+      .filter((pack) => pack.active)
+      .map((pack) => ({
+        name: pack.label,
+        credits: pack.credits,
+        price: formatPriceUsd(pack.displayPriceUsd),
+        productId: pack.appleProductId,
+        description:
+          packageDescriptions[pack.packageKey] ||
+          "A one-time credit pack for recipe generation and rerolls.",
+        featured: pack.packageKey === "pack_2",
+      }));
+
+    return activePacks.length > 0 ? activePacks : fallbackCreditPacks;
+  } catch {
+    return fallbackCreditPacks;
+  }
+}
+
+export default async function PricingPage() {
+  const creditPacks = await getPublicCreditPacks();
+
   return (
     <PageShell maxWidth="max-w-5xl">
       <PageHeader eyebrow="Pricing" title="Simple one-time credit packs.">
