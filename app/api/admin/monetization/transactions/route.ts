@@ -4,6 +4,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
+import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
 import {
   commitReservedCredits,
   getCreditAccountSnapshot,
@@ -338,6 +339,19 @@ export async function POST(request: NextRequest) {
     });
 
     if (payload.action === "grant") {
+      const runtimeConfig = await getMonetizationRuntimeConfig();
+      if (!runtimeConfig.allowCompActions) {
+        const responseBody = { error: "Manual credit grants are disabled by monetization policy." };
+        if (idempotencyContext) {
+          await completeIdempotentRequest(idempotencyContext, 409, responseBody);
+        }
+        const response = NextResponse.json(responseBody, { status: 409 });
+        if (idempotencyContext) {
+          response.headers.set("Idempotency-Status", "stored");
+        }
+        withNoStore(response);
+        return response;
+      }
       const result = await grantCredits({
         anonUserId: payload.anonUserId,
         amount: payload.amount,

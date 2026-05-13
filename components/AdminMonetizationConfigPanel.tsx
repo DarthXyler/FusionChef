@@ -97,10 +97,57 @@ type ObserveTopUserRow = {
   wouldBlockNow: boolean;
 };
 
+type AdminUserRow = {
+  authUserId: string;
+  email: string;
+  normalizedEmail: string;
+  name: string;
+  role: string;
+  canonicalAnonUserId: string;
+  availableCredits: number;
+  pendingCredits: number;
+  purchaseCount: number;
+  cookbookCount: number;
+  lastLoginAt: string;
+  createdAt: string;
+};
+
+type AdminUsersPayload = {
+  users: AdminUserRow[];
+  hasMore: boolean;
+  nextCursor: string | null;
+};
+
+type BatchGrantTarget = {
+  input: string;
+  status: "ready" | "missing" | "ambiguous" | "duplicate_input" | "duplicate_target";
+  message: string;
+  user: AdminUserRow | null;
+};
+
+type BatchGrantResult = {
+  mode: "dry_run" | "commit";
+  allowCompActions: boolean;
+  amount: number;
+  summary: {
+    totalInputs: number;
+    ready: number;
+    missing: number;
+    ambiguous: number;
+    duplicateInputs: number;
+    duplicateTargets: number;
+    totalCredits: number;
+    granted: number;
+  };
+  targets: BatchGrantTarget[];
+  previewTruncated: boolean;
+};
+
 type PanelKey =
   | "adminAccess"
   | "quickPresets"
   | "pricing"
+  | "users"
   | "observeAnalytics"
   | "reconciliation"
   | "runtimeSettings";
@@ -110,7 +157,14 @@ type PanelNoticeState = {
   success: string;
 };
 
-type AdminTab = "access" | "presets" | "pricing" | "analytics" | "runtime" | "reconciliation";
+type AdminTab =
+  | "access"
+  | "presets"
+  | "pricing"
+  | "users"
+  | "analytics"
+  | "runtime"
+  | "reconciliation";
 
 const TOKEN_STORAGE_KEY = "flavor-fusion-admin-token:v1";
 const ACTOR_STORAGE_KEY = "flavor-fusion-admin-actor:v1";
@@ -187,6 +241,7 @@ const DEFAULT_PANEL_NOTICES: Record<PanelKey, PanelNoticeState> = {
   adminAccess: { error: "", success: "" },
   quickPresets: { error: "", success: "" },
   pricing: { error: "", success: "" },
+  users: { error: "", success: "" },
   observeAnalytics: { error: "", success: "" },
   reconciliation: { error: "", success: "" },
   runtimeSettings: { error: "", success: "" },
@@ -196,6 +251,7 @@ const ADMIN_TABS: Array<{ key: AdminTab; label: string }> = [
   { key: "access", label: "Access" },
   { key: "presets", label: "Presets" },
   { key: "pricing", label: "Pricing" },
+  { key: "users", label: "Users" },
   { key: "analytics", label: "Analytics" },
   { key: "runtime", label: "Policy" },
   { key: "reconciliation", label: "Reconciliation" },
@@ -206,6 +262,7 @@ function isAdminTab(value: unknown): value is AdminTab {
     value === "access" ||
     value === "presets" ||
     value === "pricing" ||
+    value === "users" ||
     value === "analytics" ||
     value === "runtime" ||
     value === "reconciliation"
@@ -214,6 +271,10 @@ function isAdminTab(value: unknown): value is AdminTab {
 
 function generateIdempotencyKey(scope: string) {
   return `${scope}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isRuntimeConfig(value: unknown): value is RuntimeConfig {
@@ -410,6 +471,60 @@ function maskAnonUserId(value: string) {
     return value;
   }
   return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+function csvEscape(value: unknown) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function isAdminUserRow(value: unknown): value is AdminUserRow {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.authUserId === "string" &&
+    typeof candidate.email === "string" &&
+    typeof candidate.name === "string" &&
+    typeof candidate.role === "string" &&
+    typeof candidate.canonicalAnonUserId === "string" &&
+    typeof candidate.availableCredits === "number" &&
+    typeof candidate.pendingCredits === "number" &&
+    typeof candidate.purchaseCount === "number" &&
+    typeof candidate.cookbookCount === "number" &&
+    typeof candidate.lastLoginAt === "string"
+  );
+}
+
+function isAdminUsersPayload(value: unknown): value is AdminUsersPayload {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    Array.isArray(candidate.users) &&
+    candidate.users.every(isAdminUserRow) &&
+    typeof candidate.hasMore === "boolean" &&
+    (typeof candidate.nextCursor === "string" || candidate.nextCursor === null)
+  );
+}
+
+function isBatchGrantResult(value: unknown): value is BatchGrantResult {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  const summary = candidate.summary;
+  return (
+    (candidate.mode === "dry_run" || candidate.mode === "commit") &&
+    typeof candidate.allowCompActions === "boolean" &&
+    typeof candidate.amount === "number" &&
+    typeof summary === "object" &&
+    summary !== null &&
+    !Array.isArray(summary) &&
+    Array.isArray(candidate.targets)
+  );
 }
 
 function toIsoLabel(value: string) {
@@ -615,6 +730,26 @@ export function AdminMonetizationConfigPanel({
     useState<ObserveTodayEstimate>(DEFAULT_OBSERVE_TODAY);
   const [observeTrend, setObserveTrend] = useState<ObserveTrendRow[]>([]);
   const [observeTopUsers, setObserveTopUsers] = useState<ObserveTopUserRow[]>([]);
+  const [users, setUsers] = useState<AdminUserRow[]>([]);
+  const [usersNextCursor, setUsersNextCursor] = useState<string | null>(null);
+  const [usersHasMore, setUsersHasMore] = useState(false);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [isExportingUsers, setIsExportingUsers] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
+  const [userRoleFilter, setUserRoleFilter] = useState("all");
+  const [userPaymentFilter, setUserPaymentFilter] = useState("all");
+  const [userCookbookFilter, setUserCookbookFilter] = useState("all");
+  const [userLinkFilter, setUserLinkFilter] = useState("linked");
+  const [userMinCredits, setUserMinCredits] = useState("");
+  const [userMaxCredits, setUserMaxCredits] = useState("");
+  const [userLastLoginSince, setUserLastLoginSince] = useState("");
+  const [grantIdentifiersText, setGrantIdentifiersText] = useState("");
+  const [grantAmount, setGrantAmount] = useState(20);
+  const [grantReason, setGrantReason] = useState("");
+  const [grantBatchLabel, setGrantBatchLabel] = useState("");
+  const [grantDryRun, setGrantDryRun] = useState<BatchGrantResult | null>(null);
+  const [isRunningGrantDryRun, setIsRunningGrantDryRun] = useState(false);
+  const [isCommittingGrantBatch, setIsCommittingGrantBatch] = useState(false);
   const [panelNotices, setPanelNotices] =
     useState<Record<PanelKey, PanelNoticeState>>(DEFAULT_PANEL_NOTICES);
   const [hasHydratedClientState, setHasHydratedClientState] = useState(false);
@@ -682,6 +817,13 @@ export function AdminMonetizationConfigPanel({
     }
   }
 
+  useEffect(() => {
+    if (hasHydratedClientState && activeTab === "users" && users.length === 0 && !isLoadingUsers) {
+      void loadUsers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, hasHydratedClientState]);
+
   function buildAdminHeaders(options?: { includeActor?: boolean }) {
     const headers: Record<string, string> = {};
     const token = adminToken.trim();
@@ -693,6 +835,183 @@ export function AdminMonetizationConfigPanel({
       headers["x-admin-actor"] = actor;
     }
     return headers;
+  }
+
+  function buildUsersQuery(cursor?: string | null, limit = 100) {
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    if (cursor) {
+      params.set("cursor", cursor);
+    }
+    if (userSearch.trim()) {
+      params.set("search", userSearch.trim());
+    }
+    params.set("role", userRoleFilter);
+    params.set("payment", userPaymentFilter);
+    params.set("cookbook", userCookbookFilter);
+    params.set("linkStatus", userLinkFilter);
+    if (userMinCredits.trim()) {
+      params.set("minCredits", userMinCredits.trim());
+    }
+    if (userMaxCredits.trim()) {
+      params.set("maxCredits", userMaxCredits.trim());
+    }
+    if (userLastLoginSince.trim()) {
+      params.set("lastLoginSince", userLastLoginSince.trim());
+    }
+    return params.toString();
+  }
+
+  async function loadUsers(options?: { append?: boolean; cursor?: string | null }) {
+    setIsLoadingUsers(true);
+    clearPanelNotice("users");
+    try {
+      const response = await fetch(`/api/admin/monetization/users?${buildUsersQuery(options?.cursor)}`, {
+        method: "GET",
+        headers: buildAdminHeaders(),
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as unknown;
+      if (!response.ok) {
+        throw new Error(
+          isObjectRecord(payload) && typeof payload.error === "string"
+            ? payload.error
+            : "Could not load users.",
+        );
+      }
+      if (!isAdminUsersPayload(payload)) {
+        throw new Error("Users response format was invalid.");
+      }
+      setUsers((current) => (options?.append ? [...current, ...payload.users] : payload.users));
+      setUsersNextCursor(payload.nextCursor);
+      setUsersHasMore(payload.hasMore);
+    } catch (error) {
+      setPanelError("users", error instanceof Error ? error.message : "Could not load users.");
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  }
+
+  async function exportUsersCsv() {
+    setIsExportingUsers(true);
+    clearPanelNotice("users");
+    try {
+      const headers = [
+        "email",
+        "name",
+        "role",
+        "authUserId",
+        "canonicalAnonUserId",
+        "availableCredits",
+        "pendingCredits",
+        "purchaseCount",
+        "cookbookCount",
+        "lastLoginAt",
+        "createdAt",
+      ];
+      const rows: string[] = [headers.join(",")];
+      let cursor: string | null = null;
+      let pageCount = 0;
+      let exported = 0;
+      do {
+        const response = await fetch(`/api/admin/monetization/users?${buildUsersQuery(cursor, 500)}`, {
+          method: "GET",
+          headers: buildAdminHeaders(),
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as unknown;
+        if (!response.ok || !isAdminUsersPayload(payload)) {
+          throw new Error("Could not export users.");
+        }
+        payload.users.forEach((user) => {
+          rows.push(
+            [
+              user.email,
+              user.name,
+              user.role,
+              user.authUserId,
+              user.canonicalAnonUserId,
+              user.availableCredits,
+              user.pendingCredits,
+              user.purchaseCount,
+              user.cookbookCount,
+              user.lastLoginAt,
+              user.createdAt,
+            ]
+              .map(csvEscape)
+              .join(","),
+          );
+        });
+        exported += payload.users.length;
+        cursor = payload.nextCursor;
+        pageCount += 1;
+      } while (cursor && pageCount < 200);
+
+      const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `flavor-fusion-users-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setPanelSuccess("users", `Exported ${exported} user row(s).`);
+    } catch (error) {
+      setPanelError("users", error instanceof Error ? error.message : "Could not export users.");
+    } finally {
+      setIsExportingUsers(false);
+    }
+  }
+
+  async function runGrantBatch(mode: "dry_run" | "commit") {
+    if (mode === "dry_run") {
+      setIsRunningGrantDryRun(true);
+    } else {
+      setIsCommittingGrantBatch(true);
+    }
+    clearPanelNotice("users");
+    try {
+      const response = await fetch("/api/admin/monetization/users", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...buildAdminHeaders({ includeActor: true }),
+          ...(mode === "commit" ? { "idempotency-key": generateIdempotencyKey("bulk-grant") } : {}),
+        },
+        body: JSON.stringify({
+          mode,
+          identifiersText: grantIdentifiersText,
+          amount: grantAmount,
+          reason: grantReason,
+          batchLabel: grantBatchLabel,
+        }),
+      });
+      const payload = (await response.json()) as unknown;
+      if (!response.ok) {
+        throw new Error(
+          isObjectRecord(payload) && typeof payload.error === "string"
+            ? payload.error
+            : "Could not run grant batch.",
+        );
+      }
+      if (!isBatchGrantResult(payload)) {
+        throw new Error("Grant batch response format was invalid.");
+      }
+      setGrantDryRun(payload);
+      setPanelSuccess(
+        "users",
+        mode === "commit"
+          ? `Granted ${payload.summary.granted} user(s), ${payload.summary.totalCredits} total credits.`
+          : `Dry run ready: ${payload.summary.ready} user(s), ${payload.summary.totalCredits} total credits.`,
+      );
+      if (mode === "commit") {
+        void loadUsers();
+      }
+    } catch (error) {
+      setPanelError("users", error instanceof Error ? error.message : "Could not run grant batch.");
+    } finally {
+      setIsRunningGrantDryRun(false);
+      setIsCommittingGrantBatch(false);
+    }
   }
 
   async function readConfig(
@@ -1570,6 +1889,286 @@ export function AdminMonetizationConfigPanel({
         {panelNotices.pricing.success ? (
           <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
             {panelNotices.pricing.success}
+          </p>
+        ) : null}
+      </section>
+      ) : null}
+
+      {activeTab === "users" ? (
+      <section className="space-y-5 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-emerald-900">Users</h2>
+            <p className="text-sm text-zinc-700">
+              Search logged-in users, export filtered lists in pages, and dry-run bulk credit grants before committing.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void loadUsers()}
+              disabled={isLoadingUsers}
+              className="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isLoadingUsers ? "Loading..." : "Apply Filters"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void exportUsersCsv()}
+              disabled={isExportingUsers}
+              className="cursor-pointer rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isExportingUsers ? "Exporting..." : "Export CSV"}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <label className="space-y-1 text-sm font-semibold text-emerald-900 md:col-span-2">
+            Search email, name, auth id, or credit id
+            <input
+              type="text"
+              value={userSearch}
+              onChange={(event) => setUserSearch(event.target.value)}
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            />
+          </label>
+          <label className="space-y-1 text-sm font-semibold text-emerald-900">
+            Payment
+            <select
+              value={userPaymentFilter}
+              onChange={(event) => setUserPaymentFilter(event.target.value)}
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            >
+              <option value="all">All users</option>
+              <option value="paying">Paying users</option>
+              <option value="non_paying">Non-paying users</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-sm font-semibold text-emerald-900">
+            Cookbook
+            <select
+              value={userCookbookFilter}
+              onChange={(event) => setUserCookbookFilter(event.target.value)}
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            >
+              <option value="all">Any cookbook</option>
+              <option value="has_saved">Has saved recipes</option>
+              <option value="none_saved">No saved recipes</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-sm font-semibold text-emerald-900">
+            Role
+            <select
+              value={userRoleFilter}
+              onChange={(event) => setUserRoleFilter(event.target.value)}
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            >
+              <option value="all">All roles</option>
+              <option value="user">Users</option>
+              <option value="admin">Admins</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-sm font-semibold text-emerald-900">
+            Account link
+            <select
+              value={userLinkFilter}
+              onChange={(event) => setUserLinkFilter(event.target.value)}
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            >
+              <option value="linked">Linked app users</option>
+              <option value="all">All logged-in users</option>
+              <option value="unlinked">No app link</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-sm font-semibold text-emerald-900">
+            Min credits
+            <input
+              type="number"
+              min={0}
+              value={userMinCredits}
+              onChange={(event) => setUserMinCredits(event.target.value)}
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            />
+          </label>
+          <label className="space-y-1 text-sm font-semibold text-emerald-900">
+            Max credits
+            <input
+              type="number"
+              min={0}
+              value={userMaxCredits}
+              onChange={(event) => setUserMaxCredits(event.target.value)}
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            />
+          </label>
+          <label className="space-y-1 text-sm font-semibold text-emerald-900">
+            Last login since
+            <input
+              type="date"
+              value={userLastLoginSince}
+              onChange={(event) => setUserLastLoginSince(event.target.value)}
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            />
+          </label>
+        </div>
+
+        <div className="overflow-hidden rounded-2xl border border-zinc-200">
+          <div className="max-h-[460px] overflow-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="sticky top-0 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
+                <tr>
+                  <th className="px-3 py-2">User</th>
+                  <th className="px-3 py-2">Credits</th>
+                  <th className="px-3 py-2">Purchases</th>
+                  <th className="px-3 py-2">Cookbook</th>
+                  <th className="px-3 py-2">Last Login</th>
+                  <th className="px-3 py-2">Credit ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={user.authUserId} className="border-t border-zinc-100 text-zinc-800">
+                    <td className="px-3 py-2">
+                      <p className="font-semibold text-zinc-950">{user.email}</p>
+                      <p className="text-xs text-zinc-500">{user.name || user.role}</p>
+                    </td>
+                    <td className="px-3 py-2 font-semibold">{user.availableCredits}</td>
+                    <td className="px-3 py-2">{user.purchaseCount}</td>
+                    <td className="px-3 py-2">{user.cookbookCount}</td>
+                    <td className="px-3 py-2 text-xs">{toIsoLabel(user.lastLoginAt)}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{maskAnonUserId(user.canonicalAnonUserId)}</td>
+                  </tr>
+                ))}
+                {users.length === 0 ? (
+                  <tr>
+                    <td className="px-3 py-6 text-center text-zinc-500" colSpan={6}>
+                      No users loaded for the current filters.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {usersHasMore ? (
+          <button
+            type="button"
+            onClick={() => void loadUsers({ append: true, cursor: usersNextCursor })}
+            disabled={isLoadingUsers}
+            className="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Load More
+          </button>
+        ) : null}
+
+        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-900">Batch Credit Grant</h3>
+          <p className="mt-1 text-sm text-zinc-700">
+            Paste emails, auth ids, or credit ids. Run dry run first; commit grants only ready matched logged-in users.
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[1.4fr_0.6fr]">
+            <label className="space-y-1 text-sm font-semibold text-emerald-900">
+              Users
+              <textarea
+                value={grantIdentifiersText}
+                onChange={(event) => setGrantIdentifiersText(event.target.value)}
+                rows={7}
+                className="w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                placeholder="one email or user id per line"
+              />
+            </label>
+            <div className="space-y-3">
+              <label className="space-y-1 text-sm font-semibold text-emerald-900">
+                Credits per user
+                <input
+                  type="number"
+                  min={1}
+                  value={grantAmount}
+                  onChange={(event) => setGrantAmount(clampPackageCredits(Number(event.target.value)))}
+                  className="w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                />
+              </label>
+              <label className="space-y-1 text-sm font-semibold text-emerald-900">
+                Batch label
+                <input
+                  type="text"
+                  value={grantBatchLabel}
+                  onChange={(event) => setGrantBatchLabel(event.target.value)}
+                  className="w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                />
+              </label>
+              <label className="space-y-1 text-sm font-semibold text-emerald-900">
+                Reason
+                <input
+                  type="text"
+                  value={grantReason}
+                  onChange={(event) => setGrantReason(event.target.value)}
+                  className="w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+                />
+              </label>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void runGrantBatch("dry_run")}
+              disabled={isRunningGrantDryRun || isCommittingGrantBatch}
+              className="cursor-pointer rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isRunningGrantDryRun ? "Checking..." : "Dry Run"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void runGrantBatch("commit")}
+              disabled={
+                isCommittingGrantBatch ||
+                !grantDryRun ||
+                grantDryRun.summary.ready < 1 ||
+                grantDryRun.allowCompActions === false
+              }
+              className="cursor-pointer rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isCommittingGrantBatch ? "Granting..." : "Commit Grant"}
+            </button>
+          </div>
+          {grantDryRun ? (
+            <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-3 text-sm text-zinc-700">
+              <p>
+                Ready: <span className="font-semibold text-zinc-950">{grantDryRun.summary.ready}</span>
+                {" | "}Missing: {grantDryRun.summary.missing}
+                {" | "}Ambiguous: {grantDryRun.summary.ambiguous}
+                {" | "}Duplicates: {grantDryRun.summary.duplicateInputs + grantDryRun.summary.duplicateTargets}
+                {" | "}Total credits:{" "}
+                <span className="font-semibold text-zinc-950">{grantDryRun.summary.totalCredits}</span>
+              </p>
+              {!grantDryRun.allowCompActions ? (
+                <p className="mt-2 font-semibold text-red-700">
+                  Manual credit grants are disabled in Policy.
+                </p>
+              ) : null}
+              <div className="mt-3 max-h-44 overflow-auto">
+                {grantDryRun.targets.slice(0, 40).map((target) => (
+                  <p key={`${target.input}-${target.status}`} className="border-t border-zinc-100 py-1 text-xs">
+                    <span className="font-mono">{target.input}</span> -{" "}
+                    <span className={target.status === "ready" ? "text-emerald-700" : "text-amber-700"}>
+                      {target.status}
+                    </span>{" "}
+                    {target.message}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {panelNotices.users.error ? (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {panelNotices.users.error}
+          </p>
+        ) : null}
+        {panelNotices.users.success ? (
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {panelNotices.users.success}
           </p>
         ) : null}
       </section>
