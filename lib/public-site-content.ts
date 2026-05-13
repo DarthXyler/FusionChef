@@ -35,12 +35,6 @@ export const faqItems = [
       "Flavor Fusion Chef is a mobile cooking app that helps you turn a base recipe into a practical fusion recipe with cuisine, spice, and dietary preferences.",
   },
   {
-    id: "web-generator-availability",
-    question: "Is the web recipe generator still available?",
-    answer:
-      "The public website is now focused on onboarding, pricing, support, and legal information. The older web fusion interface is preserved behind a feature switch for future use.",
-  },
-  {
     id: "credits-work",
     question: "How do credits work?",
     answer:
