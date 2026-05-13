@@ -22,7 +22,7 @@ export const styles = StyleSheet.create({
   menuButton: {
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 14,
     borderWidth: 1,
     height: 42,
@@ -96,7 +96,7 @@ export const styles = StyleSheet.create({
   },
   homeCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 22,
     borderWidth: 1,
     gap: 10,
@@ -188,7 +188,7 @@ export const styles = StyleSheet.create({
   cookbookSearchWrap: {
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 16,
     borderWidth: 1,
     flex: 1,
@@ -252,7 +252,7 @@ export const styles = StyleSheet.create({
   },
   heroImageCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 24,
     borderWidth: 1,
     marginBottom: 12,
@@ -377,7 +377,7 @@ export const styles = StyleSheet.create({
   resultActionSecondary: {
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 16,
     borderWidth: 1,
     flex: 1,
@@ -440,7 +440,7 @@ export const styles = StyleSheet.create({
   },
   recipeInput: {
     backgroundColor: "#fafaf9",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 18,
     borderWidth: 1,
     color: "#111827",
@@ -479,7 +479,7 @@ export const styles = StyleSheet.create({
   },
   choiceChip: {
     backgroundColor: "#f4f4f5",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 14,
@@ -501,7 +501,7 @@ export const styles = StyleSheet.create({
   levelChip: {
     alignItems: "center",
     backgroundColor: "#f4f4f5",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 999,
     borderWidth: 1,
     height: 42,
@@ -1069,7 +1069,7 @@ export const styles = StyleSheet.create({
   },
   profileCreditPackCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 16,
     borderWidth: 1,
     flex: 1,
@@ -1158,7 +1158,7 @@ export const styles = StyleSheet.create({
   },
   profileRow: {
     alignItems: "center",
-    borderBottomColor: "#f3f4f6",
+    borderBottomColor: "#d1fae5",
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     gap: 12,
@@ -1224,7 +1224,7 @@ export const styles = StyleSheet.create({
   profileEditCloseButton: {
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderColor: "#e5e7eb",
+    borderColor: "#d1fae5",
     borderRadius: 999,
     borderWidth: 1,
     height: 38,
@@ -1243,7 +1243,7 @@ export const styles = StyleSheet.create({
   },
   profileNameInput: {
     backgroundColor: "#ffffff",
-    borderColor: "#d1d5db",
+    borderColor: "#d1fae5",
     borderRadius: 16,
     borderWidth: 1,
     color: "#111827",
@@ -1254,7 +1254,7 @@ export const styles = StyleSheet.create({
   },
   profileReadonlyField: {
     backgroundColor: "#f9fafb",
-    borderColor: "#e5e7eb",
+    borderColor: "#d1fae5",
     borderRadius: 16,
     borderWidth: 1,
     justifyContent: "center",
@@ -1414,7 +1414,7 @@ export const styles = StyleSheet.create({
   },
   dashboardRecipeCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#e5e7eb",
+    borderColor: "#d1fae5",
     borderRadius: 18,
     borderWidth: 1,
     flex: 1,
@@ -1615,7 +1615,7 @@ export const styles = StyleSheet.create({
   dashboardCookbookTile: {
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderColor: "#e5e7eb",
+    borderColor: "#d1fae5",
     borderRadius: 16,
     borderWidth: 1,
     flex: 1,
@@ -1680,7 +1680,7 @@ export const styles = StyleSheet.create({
   },
   captureCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 28,
     borderWidth: 1,
     overflow: "hidden",
@@ -1688,7 +1688,7 @@ export const styles = StyleSheet.create({
   },
   visibleCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 24,
     borderWidth: 1,
     marginBottom: 16,
@@ -1696,7 +1696,7 @@ export const styles = StyleSheet.create({
   },
   importCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 24,
     borderWidth: 1,
     gap: 14,
@@ -1705,7 +1705,7 @@ export const styles = StyleSheet.create({
   },
   compactImportCard: {
     backgroundColor: "#fafaf9",
-    borderColor: "#e4e4e7",
+    borderColor: "#d1fae5",
     borderRadius: 20,
     borderWidth: 1,
     gap: 12,
@@ -1771,7 +1771,7 @@ export const styles = StyleSheet.create({
     alignItems: "center",
     aspectRatio: 4 / 3,
     backgroundColor: "#fafaf9",
-    borderBottomColor: "#e4e4e7",
+    borderBottomColor: "#d1fae5",
     borderBottomWidth: 1,
     justifyContent: "center",
     paddingHorizontal: 18,
@@ -2051,7 +2051,7 @@ export const styles = StyleSheet.create({
   },
   previewCard: {
     backgroundColor: "#fafaf9",
-    borderColor: "#e4e4e7",
+    borderColor: "#d1fae5",
     borderRadius: 20,
     borderWidth: 1,
     gap: 12,
@@ -2085,7 +2085,7 @@ export const styles = StyleSheet.create({
   },
   extractedTextInput: {
     backgroundColor: "#fafaf9",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 18,
     borderWidth: 1,
     color: "#111827",
@@ -2208,7 +2208,7 @@ export const styles = StyleSheet.create({
     alignItems: "center",
     alignSelf: "flex-start",
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 14,
     borderWidth: 1,
     justifyContent: "center",
@@ -2230,7 +2230,7 @@ export const styles = StyleSheet.create({
   },
   modalPreviewCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 22,
     borderWidth: 1,
     gap: 12,
@@ -2238,7 +2238,7 @@ export const styles = StyleSheet.create({
   },
   creditGateIntroCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 22,
     borderWidth: 1,
     gap: 12,
@@ -2281,7 +2281,7 @@ export const styles = StyleSheet.create({
   },
   creditPackCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 16,
     borderWidth: 1,
     flex: 1,
@@ -2402,7 +2402,7 @@ export const styles = StyleSheet.create({
   },
   modalEditorCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 22,
     borderWidth: 1,
     gap: 12,
@@ -2465,7 +2465,7 @@ export const styles = StyleSheet.create({
   creditGateGoogleButton: {
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderColor: "#d4d4d8",
+    borderColor: "#d1fae5",
     borderRadius: 18,
     borderWidth: 1,
     flexDirection: "row",
@@ -2532,7 +2532,7 @@ export const styles = StyleSheet.create({
   },
   emptyImportState: {
     backgroundColor: "#fafaf9",
-    borderColor: "#e4e4e7",
+    borderColor: "#d1fae5",
     borderRadius: 20,
     borderStyle: "dashed",
     borderWidth: 1,
