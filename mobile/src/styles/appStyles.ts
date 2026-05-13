@@ -1557,6 +1557,18 @@ export const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
+  recentFusionActionSpacer: {
+    flex: 1,
+    minWidth: 4,
+  },
+  recentFusionActionDate: {
+    color: "#047857",
+    flexShrink: 0,
+    fontSize: 12,
+    fontWeight: "900",
+    maxWidth: 58,
+    textAlign: "right",
+  },
   recentFusionActionButton: {
     alignItems: "center",
     backgroundColor: "#ffffff",

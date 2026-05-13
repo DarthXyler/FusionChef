@@ -175,9 +175,6 @@ export function RecentFusionsScreen({
                         <Text style={styles.cookbookCardMeta}>
                           {item.baseCuisine} + {item.fusionCuisine}
                         </Text>
-                        <Text style={styles.cookbookCardDate}>
-                          {formatRecentDate(item.createdAt)}
-                        </Text>
                         <View style={styles.cookbookFlagRow}>
                           {isSaved ? (
                             <View style={styles.cookbookFlagPill}>
@@ -277,6 +274,11 @@ export function RecentFusionsScreen({
                           />
                         )}
                       </Pressable>
+
+                      <View style={styles.recentFusionActionSpacer} />
+                      <Text numberOfLines={1} style={styles.recentFusionActionDate}>
+                        {formatRecentDate(item.createdAt)}
+                      </Text>
                     </View>
                   </View>
                 );
