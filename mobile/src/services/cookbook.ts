@@ -113,6 +113,8 @@ function isCookbookDetailCachePayload(value: unknown): value is CookbookDetailCa
 async function buildCookbookHeaders(extraHeaders?: Record<string, string>) {
   const mobileAnonId = await getMobileAnonymousId();
   const mobileDeviceKey = await getMobileDeviceKey();
+  // Every cookbook request sends both account auth and device identity.
+  // The server uses them to attach old anonymous records to the signed-in user.
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "x-flavor-fusion-anon-id": mobileAnonId,
@@ -131,6 +133,8 @@ async function syncAnonymousIdFromResponse(response: Response) {
   if (!canonicalAnonId) {
     return;
   }
+  // If the server merged old records under a better canonical ID, keep using
+  // that ID on this device from now on.
   await setMobileAnonymousId(canonicalAnonId);
 }
 
@@ -256,6 +260,8 @@ export async function readCachedCookbookRecipe(
 export async function saveCookbookRecipe(
   record: GeneratedRecipeRecord | CookbookRecipeRecord,
 ): Promise<CookbookRecipeRecord> {
+  // Saving is idempotent by recipe ID, so tapping Save twice should not create
+  // duplicate cookbook rows.
   const response = await fetch(`${getApiBaseUrl()}/api/cookbook`, {
     method: "POST",
     headers: await buildCookbookHeaders({

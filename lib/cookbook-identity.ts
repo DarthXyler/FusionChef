@@ -249,6 +249,8 @@ export async function resolveCookbookIdentity(request: NextRequest): Promise<Coo
 
   try {
     await ensureIdentitySchema();
+    // The app has old anonymous records and new signed-in accounts.
+    // This block chooses one permanent owner ID, then moves older records into it.
     const linkedCanonical = deviceKey ? await readCanonicalIdForDevice(deviceKey) : null;
     const authCanonical = authUserId ? await readCanonicalIdForAuthUser(authUserId) : null;
     const aliasCanonical = await resolveAliasCanonicalId(baseIdentity.anonUserId);
@@ -267,6 +269,8 @@ export async function resolveCookbookIdentity(request: NextRequest): Promise<Coo
       if (candidateId === canonicalAnonUserId) {
         continue;
       }
+      // Keep user data rather than deleting it: old anonymous cookbook rows are merged
+      // into the account/device identity that will be used from now on.
       await mergeCookbookAnonymousUsers(candidateId, canonicalAnonUserId);
       await upsertAliasForAnonId(candidateId, canonicalAnonUserId);
     }

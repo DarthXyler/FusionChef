@@ -264,6 +264,8 @@ export async function GET(request: NextRequest) {
     const maxCredits = params.get("maxCredits");
     const lastLoginSince = params.get("lastLoginSince")?.trim() ?? "";
 
+    // Admin users can be filtered by identity, payment state, cookbook usage,
+    // credits, and login recency without loading everyone into memory.
     const where: string[] = ["1 = 1"];
     const args: Array<string | number> = [];
 
@@ -389,6 +391,8 @@ function parseBatchPayload(body: unknown) {
   const rawIdentifiers = Array.isArray(body.identifiers)
     ? body.identifiers.map((value) => asString(value))
     : asString(body.identifiersText).split(/[\n,;\t ]+/);
+  // Batch grants accept pasted emails/user IDs so support can handle one user
+  // or a large list with the same dry-run/commit flow.
   const identifiers = rawIdentifiers.map((value) => value.trim()).filter(Boolean);
   if (identifiers.length < 1) {
     throw new RequestValidationError("At least one email or user id is required.");

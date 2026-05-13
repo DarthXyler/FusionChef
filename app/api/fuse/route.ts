@@ -356,6 +356,8 @@ async function preflightFuseMonetization(params: {
   actionKind: MonetizationActionKind;
   requestId: string;
 }) {
+  // Before the recipe is generated, decide whether this request is free,
+  // blocked, or needs a paid credit reservation.
   const runtimeConfig = await getMonetizationRuntimeConfig();
   const creditCost = getCreditCostForKind(params.actionKind, runtimeConfig);
   if (!runtimeConfig.enabled || runtimeConfig.enforcementMode !== "enforce") {
@@ -393,6 +395,7 @@ async function preflightFuseMonetization(params: {
   }
 
   if (freeActionsRemaining > 0) {
+    // Free allowance is used first. No credits are reserved in this case.
     return {
       blocked: false,
       runtimeEnabled: runtimeConfig.enabled,
@@ -408,6 +411,8 @@ async function preflightFuseMonetization(params: {
 
   let reserveResult: Awaited<ReturnType<typeof reserveCredits>>;
   try {
+    // Paid requests reserve credits before calling the AI provider.
+    // If generation later fails, the reservation is released.
     reserveResult = await reserveCredits({
       anonUserId: params.anonUserId,
       amount: creditCost,
@@ -487,6 +492,8 @@ async function finalizeReservedFuseCredit(params: {
 }) {
   if (params.target === "commit") {
     try {
+      // Commit means the recipe was successfully produced, so the reserved
+      // credits become a real spend in the ledger.
       const commitResult = await commitReservedCredits({
         anonUserId: params.anonUserId,
         reservationId: params.reservationId,
@@ -521,6 +528,8 @@ async function finalizeReservedFuseCredit(params: {
   }
 
   try {
+    // Release means the recipe did not complete, so reserved credits return
+    // to the user's available balance.
     const releaseResult = await releaseReservedCredits({
       anonUserId: params.anonUserId,
       reservationId: params.reservationId,

@@ -434,6 +434,8 @@ export async function grantCredits(params: {
   idempotencyKey?: string | null;
   metadata?: Record<string, unknown>;
 }) {
+  // All manual and purchase credit additions pass through here so the balance
+  // and audit ledger always agree.
   assertPositiveCreditAmount(params.amount);
   await ensureSchema();
   await ensureBalanceRow(params.anonUserId);
@@ -544,6 +546,8 @@ export async function reserveCredits(params: {
   idempotencyKey?: string | null;
   metadata?: Record<string, unknown>;
 }): Promise<ReserveCreditsResult> {
+  // Reservation is a temporary hold: available credits go down and pending
+  // credits go up until the API either commits or releases the hold.
   assertPositiveCreditAmount(params.amount);
   await ensureSchema();
   await ensureBalanceRow(params.anonUserId);
@@ -835,6 +839,8 @@ async function finalizeReservation(params: {
   idempotencyKey?: string | null;
   metadata?: Record<string, unknown>;
 }): Promise<FinalizeReservationResult> {
+  // Finalizing closes a reservation exactly once. Commit records a real spend;
+  // release gives the held credits back after a failed or abandoned request.
   await ensureSchema();
   await ensureBalanceRow(params.anonUserId);
 

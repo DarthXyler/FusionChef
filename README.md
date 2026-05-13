@@ -2,6 +2,8 @@
 
 Flavor Fusion Chef is a Next.js web app that takes a base recipe and generates a structured fusion version using AI.
 
+For a plain-English explanation of the product, data storage, credits, cookbook, recent fusions, purchases, and admin tools, read [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md).
+
 You can:
 - Generate a fusion recipe from free-text input
 - Reroll variations

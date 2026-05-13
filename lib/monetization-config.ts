@@ -176,6 +176,8 @@ const DEFAULT_PRICING_PACKAGES: MonetizationPricingPackage[] = [
 ];
 
 function normalizePricingPackages(raw: unknown) {
+  // Admins can edit package labels, prices, and product IDs. These guards keep
+  // bad admin input from breaking the mobile/web pricing screens.
   if (!Array.isArray(raw)) {
     return DEFAULT_PRICING_PACKAGES;
   }

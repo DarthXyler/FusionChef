@@ -4,6 +4,8 @@ import type { CookbookRecipeSummary, GeneratedRecipeRecord } from "../types/reci
 const DASHBOARD_HISTORY_KEY = "flavor_fusion_dashboard_history_v1";
 const MAX_DASHBOARD_HISTORY_ITEMS = 12;
 
+// Local safety net for recipes the user generated but may not have saved yet.
+// This is device-only history, separate from the Turso-backed Cookbook.
 export type DashboardFusionSummary = {
   id: string;
   title: string;
@@ -64,6 +66,8 @@ export async function saveDashboardFusionHistory(items: DashboardFusionSummary[]
 
 export async function upsertDashboardFusionHistory(record: GeneratedRecipeRecord) {
   const current = await readDashboardFusionHistory();
+  // Store the full generated record so the user can reopen and save it later.
+  // Older app versions stored only the small summary fields.
   const nextItem: DashboardFusionSummary = {
     id: record.recipe.id,
     title: record.recipe.title,

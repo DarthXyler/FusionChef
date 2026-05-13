@@ -43,6 +43,8 @@ export function useMobileCookbook() {
 }
 
 export function MobileCookbookProvider({ children }: { children: ReactNode }) {
+  // This provider is the mobile app's single source of truth for saved recipes.
+  // It keeps the UI responsive with local cache, but Turso remains the real storage.
   const [cookbookSummaries, setCookbookSummaries] = useState<CookbookRecipeSummary[]>([]);
   const [cookbookRecordCache, setCookbookRecordCache] = useState<Record<string, CookbookRecipeRecord>>(
     {},
@@ -57,6 +59,8 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
   const [summarySyncError, setSummarySyncError] = useState("");
 
   const upsertCookbookRecordState = useCallback((record: CookbookRecipeRecord) => {
+    // Any save, refresh, flag update, or detail load eventually comes through here,
+    // so list cards and detail screens stay in sync.
     const nextSummary = buildCookbookSummary(record);
     setCookbookRecordCache((current) => ({
       ...current,
@@ -81,6 +85,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
+    // Show cached cookbook entries quickly while the network request catches up.
     void readCachedCookbookSummaries().then((cachedSummaries) => {
       if (cancelled || cachedSummaries.length === 0) {
         return;
@@ -232,6 +237,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
   const updateRecipeFlags = useCallback(
     async (recipeId: string, flags: { isFavorite?: boolean; isToTry?: boolean }) => {
       const currentRecord = cookbookRecordCache[recipeId];
+      // Update the button state immediately, then roll back if the API call fails.
       if (currentRecord) {
         upsertCookbookRecordState({
           ...currentRecord,

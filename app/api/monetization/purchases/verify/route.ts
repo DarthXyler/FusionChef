@@ -171,6 +171,8 @@ export async function POST(request: NextRequest) {
             packageName: body.packageName,
           });
 
+    // The app store confirms the purchase; our own catalog decides how many
+    // credits that product is worth.
     const credits = getCreditsForProduct(body.provider, verification.productId);
     if (!credits) {
       logPurchaseVerify({
@@ -193,6 +195,8 @@ export async function POST(request: NextRequest) {
     );
 
     if (existing && existing.anonUserId !== identity.anonUserId) {
+      // A purchase token can only belong to one user identity. This prevents
+      // replaying the same store purchase against another account.
       logPurchaseVerify({
         requestId,
         event: "verification_risk",
@@ -209,6 +213,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (existing && verification.state === "revoked" && existing.status !== "revoked") {
+      // If Apple/Google later reports a refund or revocation, try to remove
+      // the credits that were originally granted for that purchase.
       const remainingToReverse = Math.max(0, existing.grantedCredits - existing.reversedCredits);
       if (remainingToReverse > 0) {
         const reversal = await applyPurchaseReversalDeduction({
@@ -292,6 +298,8 @@ export async function POST(request: NextRequest) {
     }
 
     const grantResult = await grantCredits({
+      // Verified new purchase: grant credits once and record the transaction
+      // so retries return the same result instead of granting twice.
       anonUserId: identity.anonUserId,
       amount: credits,
       actor: "purchase_verification",
