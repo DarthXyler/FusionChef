@@ -61,16 +61,11 @@ export function FaqList({
     <section className="divide-y divide-emerald-100 rounded-2xl border border-emerald-100 bg-white shadow-sm">
       {visibleItems.map((item) => {
         const isOpen = item.id === openId;
-        const isSupportOnly = activeSupportItem?.id === item.id;
-
         return (
           <details
             key={item.id}
             id={item.id}
-            className={[
-              "group scroll-mt-28 px-5 py-4",
-              isSupportOnly ? "bg-emerald-50/70" : "",
-            ].join(" ")}
+            className="group scroll-mt-28 px-5 py-4"
             open={isOpen}
             onToggle={(event) => {
               if ((event.currentTarget as HTMLDetailsElement).open) {
@@ -79,14 +74,7 @@ export function FaqList({
             }}
           >
             <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-lg text-left text-lg font-extrabold text-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-4">
-              <span>
-                {isSupportOnly ? (
-                  <span className="mb-1 block text-xs font-extrabold uppercase tracking-wide text-emerald-700">
-                    Support topic
-                  </span>
-                ) : null}
-                {item.question}
-              </span>
+              {item.question}
               <span className="text-2xl leading-none text-emerald-700 transition group-open:rotate-45">+</span>
             </summary>
             <BodyText className="mt-3 max-w-3xl">{item.answer}</BodyText>

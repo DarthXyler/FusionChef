@@ -47,6 +47,18 @@ export const faqItems = [
       "Yes. Recipes you choose to keep can be saved to your mobile cookbook so you can revisit them later.",
   },
   {
+    id: "recipe-photo-import",
+    question: "Can I import a recipe photo?",
+    answer:
+      "Yes. The mobile app can help turn a recipe photo into structured recipe input before creating a fusion version.",
+  },
+  {
+    id: "recipe-generation-help",
+    question: "What if a generated recipe looks wrong or unexpected?",
+    answer:
+      "Check the base recipe wording, cuisine choice, meal type, and dietary preferences first. If the result still looks wrong, contact support with the recipe details.",
+  },
+  {
     id: "purchases-handled",
     question: "Where are purchases handled?",
     answer:
@@ -60,14 +72,14 @@ export const supportFaqItems = [
     id: "support-recipe-generation",
     question: "Recipe generation support",
     answer:
-      "If a generated recipe looks wrong or unexpected, include the base recipe, selected meal type, fusion cuisine, dietary style, spice level, and what felt incorrect. Screenshots help us compare the input with the generated result.",
+      "Use this guide when recipe generation gives an unexpected result. First, retry with a clear base dish name or recipe text, confirm the meal type matches the dish, and check whether the selected fusion cuisine and dietary style are too restrictive together. If you contact support, include the base recipe, meal type, fusion cuisine, dietary style, spice level, the generated recipe title, and a screenshot of the result. This helps us compare the exact input with the output.",
   },
   {
     supportKey: "recipe-photo-import",
     id: "support-recipe-photo-import",
     question: "Recipe photo import support",
     answer:
-      "If photo import does not work as expected, include whether the image came from camera or library, whether text extraction started, the error message if one appeared, and a clear screenshot of the recipe photo when possible.",
+      "Use this guide when importing a recipe photo does not work as expected. Make sure the photo is clear, well lit, and includes the full recipe text. If extraction looks incomplete, try cropping out unrelated content and refresh the extracted text before generating. If you contact support, include whether the image came from camera or library, whether text extraction started, any error message you saw, your device model, and a screenshot of the photo/import screen.",
   },
 ] as const;
 
