@@ -244,6 +244,8 @@ export async function GET(request: NextRequest) {
         enforcementMode: runtimeConfig.enforcementMode,
         freeDailyFuseActions: runtimeConfig.freeDailyFuseActions,
         freeDailyRerollActions: runtimeConfig.freeDailyRerollActions,
+        fuseCreditCost: runtimeConfig.fuseCreditCost,
+        rerollCreditCost: runtimeConfig.rerollCreditCost,
       },
       generatedAt: nowIso,
       timezone,
@@ -275,4 +277,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Could not load observe analytics report." }, { status: 500 });
   }
 }
-

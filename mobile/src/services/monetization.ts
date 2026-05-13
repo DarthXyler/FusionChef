@@ -72,6 +72,10 @@ export type MonetizationAccountSnapshot = {
   authenticated: boolean;
   enabled: boolean;
   enforcementMode: "off" | "observe" | "enforce";
+  actionCosts: {
+    fuse: number;
+    reroll: number;
+  };
   balance: CreditBalance;
   freeRemaining: {
     fuse: number;
@@ -320,6 +324,10 @@ export async function fetchMonetizationAccountSnapshot(options?: {
     authenticated: payload.authenticated === true,
     enabled: payload.enabled === true,
     enforcementMode,
+    actionCosts: {
+      fuse: asInteger(isObjectRecord(payload.actionCosts) ? payload.actionCosts.fuse : 2, 2),
+      reroll: asInteger(isObjectRecord(payload.actionCosts) ? payload.actionCosts.reroll : 1, 1),
+    },
     balance: parseBalance(payload.balance) ?? {
       availableCredits: 0,
       pendingCredits: 0,

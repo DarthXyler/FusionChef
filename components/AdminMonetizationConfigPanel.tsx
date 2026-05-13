@@ -29,6 +29,8 @@ type RuntimeConfig = {
   enforcementMode: EnforcementMode;
   freeDailyFuseActions: number;
   freeDailyRerollActions: number;
+  fuseCreditCost: number;
+  rerollCreditCost: number;
   allowCompActions: boolean;
   pricingPackages: PricingPackageConfig[];
   seasonalOffers: SeasonalOfferConfig[];
@@ -56,6 +58,8 @@ type ObserveRuntime = {
   enforcementMode: EnforcementMode;
   freeDailyFuseActions: number;
   freeDailyRerollActions: number;
+  fuseCreditCost: number;
+  rerollCreditCost: number;
 };
 
 type ObserveSnapshot24h = {
@@ -148,6 +152,8 @@ const DEFAULT_FORM: RuntimeConfig = {
   enforcementMode: "off",
   freeDailyFuseActions: 0,
   freeDailyRerollActions: 0,
+  fuseCreditCost: 2,
+  rerollCreditCost: 1,
   allowCompActions: true,
   pricingPackages: DEFAULT_PRICING_PACKAGES,
   seasonalOffers: [],
@@ -160,6 +166,8 @@ const DEFAULT_OBSERVE_RUNTIME: ObserveRuntime = {
   enforcementMode: "off",
   freeDailyFuseActions: 0,
   freeDailyRerollActions: 0,
+  fuseCreditCost: 2,
+  rerollCreditCost: 1,
 };
 
 const DEFAULT_OBSERVE_SNAPSHOT: ObserveSnapshot24h = {
@@ -223,6 +231,10 @@ function isRuntimeConfig(value: unknown): value is RuntimeConfig {
     Number.isFinite(candidate.freeDailyFuseActions) &&
     typeof candidate.freeDailyRerollActions === "number" &&
     Number.isFinite(candidate.freeDailyRerollActions) &&
+    typeof candidate.fuseCreditCost === "number" &&
+    Number.isFinite(candidate.fuseCreditCost) &&
+    typeof candidate.rerollCreditCost === "number" &&
+    Number.isFinite(candidate.rerollCreditCost) &&
     typeof candidate.allowCompActions === "boolean" &&
     Array.isArray(candidate.pricingPackages) &&
     candidate.pricingPackages.every(isPricingPackageConfig) &&
@@ -324,6 +336,17 @@ function clampDailyLimit(value: number) {
   return normalized;
 }
 
+function clampActionCreditCost(value: number) {
+  const normalized = Math.trunc(value);
+  if (normalized < 1) {
+    return 1;
+  }
+  if (normalized > 100) {
+    return 100;
+  }
+  return normalized;
+}
+
 function clampReconciliationLimit(value: number) {
   const normalized = Math.trunc(value);
   if (normalized < 1) {
@@ -413,7 +436,11 @@ function isObserveRuntime(value: unknown): value is ObserveRuntime {
     typeof candidate.freeDailyFuseActions === "number" &&
     Number.isFinite(candidate.freeDailyFuseActions) &&
     typeof candidate.freeDailyRerollActions === "number" &&
-    Number.isFinite(candidate.freeDailyRerollActions)
+    Number.isFinite(candidate.freeDailyRerollActions) &&
+    typeof candidate.fuseCreditCost === "number" &&
+    Number.isFinite(candidate.fuseCreditCost) &&
+    typeof candidate.rerollCreditCost === "number" &&
+    Number.isFinite(candidate.rerollCreditCost)
   );
 }
 
@@ -492,6 +519,8 @@ function isPresetExactMatch(preset: Preset, current: RuntimeConfig) {
     isPresetActive(preset, current) &&
     current.freeDailyFuseActions === preset.config.freeDailyFuseActions &&
     current.freeDailyRerollActions === preset.config.freeDailyRerollActions &&
+    current.fuseCreditCost === preset.config.fuseCreditCost &&
+    current.rerollCreditCost === preset.config.rerollCreditCost &&
     current.allowCompActions === preset.config.allowCompActions
   );
 }
@@ -505,6 +534,8 @@ type Preset = {
     | "enforcementMode"
     | "freeDailyFuseActions"
     | "freeDailyRerollActions"
+    | "fuseCreditCost"
+    | "rerollCreditCost"
     | "allowCompActions"
   >;
 };
@@ -518,6 +549,8 @@ const PRESETS: Preset[] = [
       enforcementMode: "off",
       freeDailyFuseActions: 0,
       freeDailyRerollActions: 0,
+      fuseCreditCost: 2,
+      rerollCreditCost: 1,
       allowCompActions: true,
     },
   },
@@ -529,6 +562,8 @@ const PRESETS: Preset[] = [
       enforcementMode: "observe",
       freeDailyFuseActions: 3,
       freeDailyRerollActions: 2,
+      fuseCreditCost: 2,
+      rerollCreditCost: 1,
       allowCompActions: true,
     },
   },
@@ -540,6 +575,8 @@ const PRESETS: Preset[] = [
       enforcementMode: "enforce",
       freeDailyFuseActions: 3,
       freeDailyRerollActions: 2,
+      fuseCreditCost: 2,
+      rerollCreditCost: 1,
       allowCompActions: true,
     },
   },
@@ -722,6 +759,8 @@ export function AdminMonetizationConfigPanel({
           enforcementMode: form.enforcementMode,
           freeDailyFuseActions: clampDailyLimit(form.freeDailyFuseActions),
           freeDailyRerollActions: clampDailyLimit(form.freeDailyRerollActions),
+          fuseCreditCost: clampActionCreditCost(form.fuseCreditCost),
+          rerollCreditCost: clampActionCreditCost(form.rerollCreditCost),
           allowCompActions: form.allowCompActions,
           pricingPackages: form.pricingPackages,
           seasonalOffers: form.seasonalOffers,
@@ -1803,6 +1842,46 @@ export function AdminMonetizationConfigPanel({
             />
             <p className="text-xs font-normal text-zinc-600">
               Number of free Reroll actions each user gets per day before credit spend starts in enforce mode. Range: 0-20.
+            </p>
+          </label>
+
+          <label className="space-y-2 text-sm font-semibold text-emerald-900">
+            Recipe Generation Credit Cost
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={form.fuseCreditCost}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  fuseCreditCost: clampActionCreditCost(Number(event.target.value)),
+                }))
+              }
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-base font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            />
+            <p className="text-xs font-normal text-zinc-600">
+              Credits charged for one new recipe generation after free Fuse actions are used in enforce mode. Current production target: 2 credits.
+            </p>
+          </label>
+
+          <label className="space-y-2 text-sm font-semibold text-emerald-900">
+            Reroll Credit Cost
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={form.rerollCreditCost}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  rerollCreditCost: clampActionCreditCost(Number(event.target.value)),
+                }))
+              }
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-base font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            />
+            <p className="text-xs font-normal text-zinc-600">
+              Credits charged for one reroll after free Reroll actions are used in enforce mode. Keep this lower than generation if rerolls should feel lightweight.
             </p>
           </label>
 

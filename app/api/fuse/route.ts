@@ -55,6 +55,7 @@ type MonetizationPreflightResult = {
   freeActionLimit: number;
   usedToday: number;
   freeActionsRemaining: number;
+  creditCost: number;
   reservationId: string | null;
   balance: Awaited<ReturnType<typeof getCreditBalance>> | null;
 };
@@ -67,7 +68,6 @@ const MAX_BASE_RECIPE_CHARS = 10_000;
 const MAX_FUSION_CUISINE_CHARS = 80;
 const DEFAULT_GENERATION_TEMPERATURE = 0.85;
 const REPAIR_TEMPERATURE = 0.35;
-const CREDIT_COST_PER_ACTION = 1;
 const CREDIT_RESERVATION_TTL_MS = 10 * 60 * 1_000;
 const EGG_PATTERN = /\begg(s)?\b/i;
 const COCONUT_DAIRY_PATTERN = /\bcoconut\s+(milk|cream|yogurt|curd)\b/i;
@@ -344,12 +344,20 @@ function getUsedTodayForKind(
   return actionKind === "reroll" ? usage.rerollCount : usage.fuseCount;
 }
 
+function getCreditCostForKind(
+  actionKind: MonetizationActionKind,
+  config: Awaited<ReturnType<typeof getMonetizationRuntimeConfig>>,
+) {
+  return actionKind === "reroll" ? config.rerollCreditCost : config.fuseCreditCost;
+}
+
 async function preflightFuseMonetization(params: {
   anonUserId: string;
   actionKind: MonetizationActionKind;
   requestId: string;
 }) {
   const runtimeConfig = await getMonetizationRuntimeConfig();
+  const creditCost = getCreditCostForKind(params.actionKind, runtimeConfig);
   if (!runtimeConfig.enabled || runtimeConfig.enforcementMode !== "enforce") {
     return {
       blocked: false,
@@ -358,6 +366,7 @@ async function preflightFuseMonetization(params: {
       freeActionLimit: 0,
       usedToday: 0,
       freeActionsRemaining: 0,
+      creditCost,
       reservationId: null,
       balance: null,
     } satisfies MonetizationPreflightResult;
@@ -391,6 +400,7 @@ async function preflightFuseMonetization(params: {
       freeActionLimit,
       usedToday,
       freeActionsRemaining,
+      creditCost,
       reservationId: null,
       balance: null,
     } satisfies MonetizationPreflightResult;
@@ -400,7 +410,7 @@ async function preflightFuseMonetization(params: {
   try {
     reserveResult = await reserveCredits({
       anonUserId: params.anonUserId,
-      amount: CREDIT_COST_PER_ACTION,
+      amount: creditCost,
       actionKind: params.actionKind,
       actor: "api_fuse_enforcement",
       reason: "Credit spend for Fuse API action.",
@@ -424,7 +434,7 @@ async function preflightFuseMonetization(params: {
     });
     const balance = await getCreditBalance(params.anonUserId).catch(() => null);
     const availableCredits = balance?.availableCredits ?? 0;
-    if (availableCredits < CREDIT_COST_PER_ACTION) {
+    if (availableCredits < creditCost) {
       return {
         blocked: true,
         runtimeEnabled: runtimeConfig.enabled,
@@ -432,6 +442,7 @@ async function preflightFuseMonetization(params: {
         freeActionLimit,
         usedToday,
         freeActionsRemaining: 0,
+        creditCost,
         reservationId: null,
         balance,
       } satisfies MonetizationPreflightResult;
@@ -448,6 +459,7 @@ async function preflightFuseMonetization(params: {
       freeActionLimit,
       usedToday,
       freeActionsRemaining: 0,
+      creditCost,
       reservationId: null,
       balance,
     } satisfies MonetizationPreflightResult;
@@ -460,6 +472,7 @@ async function preflightFuseMonetization(params: {
     freeActionLimit,
     usedToday,
     freeActionsRemaining: 0,
+    creditCost,
     reservationId: reserveResult.reservation.reservationId,
     balance: reserveResult.balance,
   } satisfies MonetizationPreflightResult;
@@ -761,7 +774,7 @@ export async function POST(request: NextRequest) {
           reason: "insufficient_credits",
           actionKind: monetizationActionKind,
           purchaseRequired: true,
-          creditsRequired: CREDIT_COST_PER_ACTION,
+          creditsRequired: monetizationPreflight.creditCost,
           freeActionLimit: monetizationPreflight.freeActionLimit,
           usedToday: monetizationPreflight.usedToday,
           freeActionsRemaining: monetizationPreflight.freeActionsRemaining,

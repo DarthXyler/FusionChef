@@ -12,8 +12,6 @@ import { getMonetizationCreditCatalog } from "@/lib/monetization-credit-packs";
 import { getCreditBalance } from "@/lib/monetization-ledger";
 import { getTodayDailyMonetizationUsage } from "@/lib/monetization-operations";
 
-const CREDIT_COST_PER_ACTION = 1;
-
 function withIdentity(response: NextResponse, anonUserId: string) {
   response.headers.set("x-flavor-fusion-anon-id", anonUserId);
 }
@@ -83,8 +81,8 @@ export async function GET(request: NextRequest) {
       enabled: runtimeConfig.enabled,
       enforcementMode: runtimeConfig.enforcementMode,
       actionCosts: {
-        fuse: CREDIT_COST_PER_ACTION,
-        reroll: CREDIT_COST_PER_ACTION,
+        fuse: runtimeConfig.fuseCreditCost,
+        reroll: runtimeConfig.rerollCreditCost,
       },
       freeDaily: {
         fuse: runtimeConfig.freeDailyFuseActions,

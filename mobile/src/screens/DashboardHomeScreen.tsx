@@ -3,7 +3,7 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useFocusEffect, type NavigationProp } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useCallback, useMemo, useState } from "react";
-import { Image, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { Alert, Image, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppCreditHeader } from "../components/AppCreditHeader";
 import { useMobileCookbook } from "../context/mobileCookbook";
@@ -113,6 +113,40 @@ export function DashboardHomeScreen({
     });
   }
 
+  function openCookbook(filter: "all" | "favorites" | "toTry" = "all") {
+    const parentNavigation = navigation.getParent<NavigationProp<RootTabParamList>>();
+    parentNavigation?.navigate("Cookbook", {
+      screen: "CookbookList",
+      params: {
+        initialFilter: filter,
+      },
+    });
+  }
+
+  function openRecentFusion(item: DashboardFusionSummary) {
+    const parentNavigation = navigation.getParent<NavigationProp<RootTabParamList>>();
+    const savedSummary = summaries.find((summary) => summary.recipeId === item.id);
+    if (savedSummary) {
+      parentNavigation?.navigate("Cookbook", {
+        screen: "CookbookDetail",
+        params: {
+          recipeId: savedSummary.recipeId,
+        },
+      });
+      return;
+    }
+
+    Alert.alert(
+      "Recipe not saved",
+      "This recent fusion is local history only. Save recipes to open them later from your cookbook.",
+      [
+        { text: "Open Cookbook", onPress: () => openCookbook("all") },
+        { text: "Create New", onPress: () => openCreate() },
+        { text: "Cancel", style: "cancel" },
+      ],
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.screen}>
@@ -189,12 +223,26 @@ export function DashboardHomeScreen({
 
           <View style={styles.dashboardSectionHeader}>
             <Text style={styles.dashboardSectionTitle}>Recent Fusions</Text>
-            <Text style={styles.dashboardViewAll}>View all</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => openCookbook("all")}
+              style={({ pressed }) => [pressed && styles.profileRowPressed]}
+            >
+              <Text style={styles.dashboardViewAll}>View all</Text>
+            </Pressable>
           </View>
           <View style={styles.dashboardRecipeRow}>
             {dashboardRecipes.length > 0 ? (
               dashboardRecipes.map((item, index) => (
-                <View key={item.id} style={styles.dashboardRecipeCard}>
+                <Pressable
+                  accessibilityRole="button"
+                  key={item.id}
+                  onPress={() => openRecentFusion(item)}
+                  style={({ pressed }) => [
+                    styles.dashboardRecipeCard,
+                    pressed && styles.profileRowPressed,
+                  ]}
+                >
                   <View style={styles.dashboardRecipeImageWrap}>
                     {item.imageUrl ? (
                       <Image
@@ -211,9 +259,24 @@ export function DashboardHomeScreen({
                         />
                       </View>
                     )}
-                    <View style={styles.dashboardHeartBadge}>
-                      <MaterialIcons color="#ef4444" name="favorite-border" size={20} />
-                    </View>
+                    {item.isFavorite || item.isToTry ? (
+                      <View style={styles.dashboardRecipeBadgeRow}>
+                        {item.isFavorite ? (
+                          <View style={styles.dashboardRecipeStateBadge}>
+                            <MaterialIcons color="#ef4444" name="favorite" size={18} />
+                          </View>
+                        ) : null}
+                        {item.isToTry ? (
+                          <View style={styles.dashboardRecipeStateBadge}>
+                            <MaterialCommunityIcons
+                              color="#b45309"
+                              name="silverware-fork-knife"
+                              size={17}
+                            />
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : null}
                   </View>
                   <View style={styles.dashboardRecipeBody}>
                     <Text numberOfLines={2} style={styles.dashboardRecipeTitle}>
@@ -229,7 +292,7 @@ export function DashboardHomeScreen({
                       </View>
                     ) : null}
                   </View>
-                </View>
+                </Pressable>
               ))
             ) : (
               <View style={styles.dashboardEmptyRecentCard}>
@@ -246,26 +309,42 @@ export function DashboardHomeScreen({
             <Text style={styles.dashboardSectionTitle}>My Cookbook</Text>
           </View>
           <View style={styles.dashboardCookbookGrid}>
-            <View style={styles.dashboardCookbookTile}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => openCookbook("all")}
+              style={({ pressed }) => [
+                styles.dashboardCookbookTile,
+                pressed && styles.profileRowPressed,
+              ]}
+            >
               <MaterialCommunityIcons color="#047857" name="book-open-variant" size={25} />
               <Text style={styles.dashboardCookbookTileTitle}>All Recipes</Text>
               <Text style={styles.dashboardCookbookTileMeta}>{summaries.length} recipes</Text>
-            </View>
-            <View style={styles.dashboardCookbookTile}>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => openCookbook("favorites")}
+              style={({ pressed }) => [
+                styles.dashboardCookbookTile,
+                pressed && styles.profileRowPressed,
+              ]}
+            >
               <MaterialIcons color="#ef4444" name="favorite-border" size={27} />
               <Text style={styles.dashboardCookbookTileTitle}>Favorites</Text>
               <Text style={styles.dashboardCookbookTileMeta}>{favoriteCount} recipes</Text>
-            </View>
-            <View style={styles.dashboardCookbookTile}>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => openCookbook("toTry")}
+              style={({ pressed }) => [
+                styles.dashboardCookbookTile,
+                pressed && styles.profileRowPressed,
+              ]}
+            >
               <MaterialCommunityIcons color="#b45309" name="silverware-fork-knife" size={25} />
               <Text style={styles.dashboardCookbookTileTitle}>To Try</Text>
               <Text style={styles.dashboardCookbookTileMeta}>{toTryCount} recipes</Text>
-            </View>
-            <View style={styles.dashboardCookbookTile}>
-              <MaterialCommunityIcons color="#047857" name="chef-hat" size={25} />
-              <Text style={styles.dashboardCookbookTileTitle}>Created by Me</Text>
-              <Text style={styles.dashboardCookbookTileMeta}>{summaries.length} recipes</Text>
-            </View>
+            </Pressable>
           </View>
         </ScrollView>
       </View>

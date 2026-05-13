@@ -40,7 +40,11 @@ export type RootTabParamList = {
 };
 
 export type CookbookStackParamList = {
-  CookbookList: undefined;
+  CookbookList:
+    | {
+        initialFilter?: "all" | "favorites" | "toTry";
+      }
+    | undefined;
   CookbookDetail: { recipeId: string };
 };
 

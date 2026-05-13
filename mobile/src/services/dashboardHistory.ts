@@ -12,6 +12,8 @@ export type DashboardFusionSummary = {
   createdAt: string;
   imageUrl?: string;
   usageCount?: number;
+  isFavorite?: boolean;
+  isToTry?: boolean;
 };
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -85,5 +87,7 @@ export function cookbookSummaryToDashboardFusion(
     fusionCuisine: summary.fusionCuisine,
     createdAt: summary.savedAt,
     imageUrl: summary.imageUrl,
+    isFavorite: summary.isFavorite === true,
+    isToTry: summary.isToTry === true,
   };
 }

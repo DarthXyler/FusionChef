@@ -186,6 +186,20 @@ function parseConfigPatch(body: unknown): MonetizationRuntimeConfigPatch {
     patch.freeDailyRerollActions = Math.trunc(body.freeDailyRerollActions);
   }
 
+  if (typeof body.fuseCreditCost !== "undefined") {
+    if (typeof body.fuseCreditCost !== "number" || !Number.isFinite(body.fuseCreditCost)) {
+      throw new RequestValidationError("fuseCreditCost must be a number.");
+    }
+    patch.fuseCreditCost = Math.trunc(body.fuseCreditCost);
+  }
+
+  if (typeof body.rerollCreditCost !== "undefined") {
+    if (typeof body.rerollCreditCost !== "number" || !Number.isFinite(body.rerollCreditCost)) {
+      throw new RequestValidationError("rerollCreditCost must be a number.");
+    }
+    patch.rerollCreditCost = Math.trunc(body.rerollCreditCost);
+  }
+
   if (typeof body.allowCompActions !== "undefined") {
     if (typeof body.allowCompActions !== "boolean") {
       throw new RequestValidationError("allowCompActions must be boolean.");

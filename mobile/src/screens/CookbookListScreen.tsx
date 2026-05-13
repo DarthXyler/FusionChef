@@ -34,6 +34,7 @@ type CookbookFilterOption = "all" | "favorites" | "toTry";
 
 export function CookbookListScreen({
   navigation,
+  route,
 }: NativeStackScreenProps<CookbookStackParamList, "CookbookList">) {
   const { isCompactScreen, isVeryCompactScreen } = useResponsiveFlags();
   const {
@@ -48,13 +49,23 @@ export function CookbookListScreen({
     loadSummaries,
     refreshSummaries,
     loadMoreSummaries,
-    updateRecipeFlags,
     deleteRecord,
   } = useMobileCookbook();
   const [deletingRecipeId, setDeletingRecipeId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<CookbookSortOption>("newest");
   const [filterBy, setFilterBy] = useState<CookbookFilterOption>("all");
+
+  useEffect(() => {
+    const requestedFilter = route.params?.initialFilter;
+    if (
+      requestedFilter === "all" ||
+      requestedFilter === "favorites" ||
+      requestedFilter === "toTry"
+    ) {
+      setFilterBy(requestedFilter);
+    }
+  }, [route.params?.initialFilter]);
 
   useEffect(() => {
     // First mount load; subsequent tab returns use context cache/state.
@@ -174,26 +185,6 @@ export function CookbookListScreen({
         },
       },
     ]);
-  }
-
-  async function handleToggleSummaryFlag(
-    summary: CookbookRecipeSummary,
-    flag: "favorite" | "toTry",
-  ) {
-    try {
-      await updateRecipeFlags(
-        summary.recipeId,
-        flag === "favorite"
-          ? { isFavorite: summary.isFavorite !== true }
-          : { isToTry: summary.isToTry !== true },
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error && error.message.trim().length > 0
-          ? error.message
-          : "Could not update recipe.";
-      Alert.alert("Update failed", message);
-    }
   }
 
   return (
@@ -381,24 +372,6 @@ export function CookbookListScreen({
                       <Text style={styles.cookbookCardMeta}>
                         {summary.baseCuisine} + {summary.fusionCuisine}
                       </Text>
-                      <View style={styles.cookbookFlagRow}>
-                        {summary.isFavorite ? (
-                          <View style={styles.cookbookFlagPill}>
-                            <MaterialIcons color="#ef4444" name="favorite" size={13} />
-                            <Text style={styles.cookbookFlagPillText}>Favorite</Text>
-                          </View>
-                        ) : null}
-                        {summary.isToTry ? (
-                          <View style={styles.cookbookFlagPill}>
-                            <MaterialCommunityIcons
-                              color="#b45309"
-                              name="silverware-fork-knife"
-                              size={13}
-                            />
-                            <Text style={styles.cookbookFlagPillText}>To Try</Text>
-                          </View>
-                        ) : null}
-                      </View>
                     </View>
                   </View>
                 </Pressable>
@@ -414,36 +387,6 @@ export function CookbookListScreen({
                       day: "numeric",
                     })}
                   </Text>
-                  <Pressable
-                    accessibilityLabel={`${summary.isFavorite ? "Remove favorite" : "Favorite"} ${summary.title}`}
-                    onPress={() => handleToggleSummaryFlag(summary, "favorite")}
-                    style={({ pressed }) => [
-                      styles.cookbookFlagButton,
-                      summary.isFavorite && styles.cookbookFlagButtonActive,
-                      pressed && styles.cookbookDeleteButtonPressed,
-                    ]}
-                  >
-                    <MaterialIcons
-                      color={summary.isFavorite ? "#ffffff" : "#ef4444"}
-                      name={summary.isFavorite ? "favorite" : "favorite-border"}
-                      size={17}
-                    />
-                  </Pressable>
-                  <Pressable
-                    accessibilityLabel={`${summary.isToTry ? "Remove to try" : "Mark to try"} ${summary.title}`}
-                    onPress={() => handleToggleSummaryFlag(summary, "toTry")}
-                    style={({ pressed }) => [
-                      styles.cookbookFlagButton,
-                      summary.isToTry && styles.cookbookFlagButtonActiveWarm,
-                      pressed && styles.cookbookDeleteButtonPressed,
-                    ]}
-                  >
-                    <MaterialCommunityIcons
-                      color={summary.isToTry ? "#ffffff" : "#b45309"}
-                      name="silverware-fork-knife"
-                      size={16}
-                    />
-                  </Pressable>
                   <Pressable
                     accessibilityLabel={`Delete ${summary.title}`}
                     disabled={deletingRecipeId === summary.recipeId}

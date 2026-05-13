@@ -41,7 +41,12 @@ export function CookbookDetailScreen({
 }: NativeStackScreenProps<CookbookStackParamList, "CookbookDetail">) {
   const { isCompactScreen, isVeryCompactScreen } = useResponsiveFlags();
   const recipeCardRef = useRef<View>(null);
+  const recordRevisionRef = useRef(0);
+  const flagRequestRevisionRef = useRef({ favorite: 0, toTry: 0 });
   const { getRecord, loadRecord, refreshRecord, updateRecipeFlags, deleteRecord } = useMobileCookbook();
+  const getRecordRef = useRef(getRecord);
+  const loadRecordRef = useRef(loadRecord);
+  const refreshRecordRef = useRef(refreshRecord);
   const [captureCardSize, setCaptureCardSize] = useState({ width: 0, height: 0 });
   const [isSharingImage, setIsSharingImage] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
@@ -53,7 +58,6 @@ export function CookbookDetailScreen({
   const [isLoading, setIsLoading] = useState(record === null);
   const [loadError, setLoadError] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isUpdatingFlags, setIsUpdatingFlags] = useState(false);
   const [isShowingCachedRecord, setIsShowingCachedRecord] = useState(record !== null);
   const [detailSyncError, setDetailSyncError] = useState("");
 
@@ -73,15 +77,26 @@ export function CookbookDetailScreen({
   const featuredSteps = useMemo(() => (recipe ? recipe.steps.slice(0, 3) : []), [recipe]);
 
   useEffect(() => {
+    getRecordRef.current = getRecord;
+    loadRecordRef.current = loadRecord;
+    refreshRecordRef.current = refreshRecord;
+  }, [getRecord, loadRecord, refreshRecord]);
+
+  useEffect(() => {
     // Fast path: render cached record immediately, then refresh in background.
-    const cachedRecord = getRecord(route.params.recipeId);
+    const recipeId = route.params.recipeId;
+    const cachedRecord = getRecordRef.current(recipeId);
     if (cachedRecord) {
+      const refreshRevision = recordRevisionRef.current;
       setRecord(cachedRecord);
       setIsLoading(false);
       setLoadError("");
       setIsShowingCachedRecord(true);
-      void refreshRecord(route.params.recipeId)
+      void refreshRecordRef.current(recipeId)
         .then((nextRecord) => {
+          if (recordRevisionRef.current !== refreshRevision) {
+            return;
+          }
           setRecord(nextRecord);
           setIsShowingCachedRecord(false);
           setDetailSyncError("");
@@ -99,7 +114,7 @@ export function CookbookDetailScreen({
     let cancelled = false;
     setIsLoading(true);
     // Cold path: no cache available, load full detail from API.
-    void loadRecord(route.params.recipeId)
+    void loadRecordRef.current(recipeId)
       .then((nextRecord) => {
         if (cancelled) {
           return;
@@ -128,7 +143,7 @@ export function CookbookDetailScreen({
     return () => {
       cancelled = true;
     };
-  }, [getRecord, loadRecord, refreshRecord, route.params.recipeId]);
+  }, [route.params.recipeId]);
 
   useEffect(() => {
     // Shopping checklist state is local to each recipe detail session.
@@ -298,8 +313,8 @@ export function CookbookDetailScreen({
     ]);
   }
 
-  async function handleToggleFlag(flag: "favorite" | "toTry") {
-    if (!record || isUpdatingFlags) {
+  function handleToggleFlag(flag: "favorite" | "toTry") {
+    if (!record) {
       return;
     }
     const nextFlags =
@@ -307,21 +322,33 @@ export function CookbookDetailScreen({
         ? { isFavorite: record.isFavorite !== true }
         : { isToTry: record.isToTry !== true };
 
-    setRecord({ ...record, ...nextFlags });
-    setIsUpdatingFlags(true);
-    try {
-      const updatedRecord = await updateRecipeFlags(record.recipe.id, nextFlags);
-      setRecord(updatedRecord);
-    } catch (error) {
-      setRecord(record);
-      const message =
-        error instanceof Error && error.message.trim().length > 0
-          ? error.message
-          : "Could not update recipe.";
-      Alert.alert("Update failed", message);
-    } finally {
-      setIsUpdatingFlags(false);
-    }
+    recordRevisionRef.current += 1;
+    flagRequestRevisionRef.current[flag] += 1;
+    const requestRevision = flagRequestRevisionRef.current[flag];
+    const rollbackRecord = record;
+    const optimisticRecord = { ...record, ...nextFlags };
+    setRecord(optimisticRecord);
+
+    void updateRecipeFlags(record.recipe.id, nextFlags)
+      .then((updatedRecord) => {
+        if (flagRequestRevisionRef.current[flag] !== requestRevision) {
+          return;
+        }
+        recordRevisionRef.current += 1;
+        setRecord((current) => (current ? { ...current, ...updatedRecord } : updatedRecord));
+      })
+      .catch((error) => {
+        if (flagRequestRevisionRef.current[flag] !== requestRevision) {
+          return;
+        }
+        recordRevisionRef.current += 1;
+        setRecord(rollbackRecord);
+        const message =
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "Could not update recipe.";
+        Alert.alert("Update failed", message);
+      });
   }
 
   if (isLoading || !record || !recipe) {
@@ -462,7 +489,6 @@ export function CookbookDetailScreen({
           >
             <Pressable
               onPress={() => handleToggleFlag("favorite")}
-              disabled={isUpdatingFlags}
               style={({ pressed }) => [
                 styles.resultActionSecondary,
                 record.isFavorite && styles.resultActionPrimary,
@@ -477,13 +503,12 @@ export function CookbookDetailScreen({
                     isCompactScreen && styles.resultActionTextCompact,
                   ]}
                 >
-                  {record.isFavorite ? "Favorited" : "Favorite"}
+                  Favorite
                 </Text>
               </View>
             </Pressable>
             <Pressable
               onPress={() => handleToggleFlag("toTry")}
-              disabled={isUpdatingFlags}
               style={({ pressed }) => [
                 styles.resultActionSecondary,
                 record.isToTry && styles.resultActionPrimary,
@@ -498,7 +523,7 @@ export function CookbookDetailScreen({
                     isCompactScreen && styles.resultActionTextCompact,
                   ]}
                 >
-                  {record.isToTry ? "To Try" : "Mark To Try"}
+                  Mark To Try
                 </Text>
               </View>
             </Pressable>

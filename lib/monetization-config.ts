@@ -6,6 +6,7 @@ import { executeTurso } from "@/lib/turso";
 
 const GLOBAL_CONFIG_KEY = "global";
 const DEFAULT_MAX_FREE_DAILY_ACTIONS = 20;
+const DEFAULT_MAX_ACTION_CREDIT_COST = 100;
 const DEFAULT_MAX_SEASONAL_OFFERS = 20;
 const PACKAGE_KEYS = ["pack_1", "pack_2", "pack_3"] as const;
 const CONFIG_CACHE_TTL_MS = 10_000;
@@ -43,6 +44,8 @@ export type MonetizationRuntimeConfig = {
   enforcementMode: MonetizationEnforcementMode;
   freeDailyFuseActions: number;
   freeDailyRerollActions: number;
+  fuseCreditCost: number;
+  rerollCreditCost: number;
   allowCompActions: boolean;
   pricingPackages: MonetizationPricingPackage[];
   seasonalOffers: MonetizationSeasonalOffer[];
@@ -57,6 +60,8 @@ export type MonetizationRuntimeConfigPatch = Partial<
     | "enforcementMode"
     | "freeDailyFuseActions"
     | "freeDailyRerollActions"
+    | "fuseCreditCost"
+    | "rerollCreditCost"
     | "allowCompActions"
     | "pricingPackages"
     | "seasonalOffers"
@@ -259,6 +264,8 @@ function normalizeConfig(raw: unknown, updatedAt: string, updatedBy: string): Mo
       enforcementMode: "off",
       freeDailyFuseActions: 0,
       freeDailyRerollActions: 0,
+      fuseCreditCost: 2,
+      rerollCreditCost: 1,
       allowCompActions: true,
       pricingPackages: DEFAULT_PRICING_PACKAGES,
       seasonalOffers: [],
@@ -279,6 +286,8 @@ function normalizeConfig(raw: unknown, updatedAt: string, updatedBy: string): Mo
     enforcementMode,
     freeDailyFuseActions: toPositiveInteger(raw.freeDailyFuseActions, 0),
     freeDailyRerollActions: toPositiveInteger(raw.freeDailyRerollActions, 0),
+    fuseCreditCost: toIntegerInRange(raw.fuseCreditCost, 2, 1, DEFAULT_MAX_ACTION_CREDIT_COST),
+    rerollCreditCost: toIntegerInRange(raw.rerollCreditCost, 1, 1, DEFAULT_MAX_ACTION_CREDIT_COST),
     allowCompActions: raw.allowCompActions !== false,
     pricingPackages: normalizePricingPackages(raw.pricingPackages),
     seasonalOffers: normalizeSeasonalOffers(raw.seasonalOffers),
@@ -392,6 +401,28 @@ function applyPatch(
     );
   }
 
+  if (
+    !Number.isFinite(next.fuseCreditCost) ||
+    Math.trunc(next.fuseCreditCost) !== next.fuseCreditCost ||
+    next.fuseCreditCost < 1 ||
+    next.fuseCreditCost > DEFAULT_MAX_ACTION_CREDIT_COST
+  ) {
+    throw new MonetizationConfigValidationError(
+      `fuseCreditCost must be an integer between 1 and ${DEFAULT_MAX_ACTION_CREDIT_COST}.`,
+    );
+  }
+
+  if (
+    !Number.isFinite(next.rerollCreditCost) ||
+    Math.trunc(next.rerollCreditCost) !== next.rerollCreditCost ||
+    next.rerollCreditCost < 1 ||
+    next.rerollCreditCost > DEFAULT_MAX_ACTION_CREDIT_COST
+  ) {
+    throw new MonetizationConfigValidationError(
+      `rerollCreditCost must be an integer between 1 and ${DEFAULT_MAX_ACTION_CREDIT_COST}.`,
+    );
+  }
+
   const seenPackageKeys = new Set<MonetizationPackageKey>();
   if (next.pricingPackages.length !== PACKAGE_KEYS.length) {
     throw new MonetizationConfigValidationError("pricingPackages must contain exactly 3 packages.");
@@ -464,6 +495,8 @@ export async function updateMonetizationRuntimeConfig(
     enforcementMode: next.enforcementMode,
     freeDailyFuseActions: next.freeDailyFuseActions,
     freeDailyRerollActions: next.freeDailyRerollActions,
+    fuseCreditCost: next.fuseCreditCost,
+    rerollCreditCost: next.rerollCreditCost,
     allowCompActions: next.allowCompActions,
     pricingPackages: next.pricingPackages,
     seasonalOffers: next.seasonalOffers,

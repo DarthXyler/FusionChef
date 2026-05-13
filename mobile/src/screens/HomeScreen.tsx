@@ -602,6 +602,7 @@ export function HomeScreen({
     enforcementMode: "off" | "observe" | "enforce";
     freeRemainingFuse: number;
     availableCredits: number;
+    fuseCreditCost: number;
   }) {
     if (!params.enabled || params.enforcementMode !== "enforce") {
       return false;
@@ -609,7 +610,7 @@ export function HomeScreen({
     if (params.freeRemainingFuse > 0) {
       return false;
     }
-    return params.availableCredits < 1;
+    return params.availableCredits < params.fuseCreditCost;
   }
 
   async function getAppleCreditPackOptions() {
@@ -702,6 +703,7 @@ export function HomeScreen({
           enforcementMode: account.enforcementMode,
           freeRemainingFuse: account.freeRemaining.fuse,
           availableCredits: account.balance.availableCredits,
+          fuseCreditCost: account.actionCosts.fuse,
         })
       ) {
         setIsCreditGateOpen(false);
@@ -813,6 +815,7 @@ export function HomeScreen({
         enforcementMode: account.enforcementMode,
         freeRemainingFuse: account.freeRemaining.fuse,
         availableCredits: account.balance.availableCredits,
+        fuseCreditCost: account.actionCosts.fuse,
       });
 
       if (needsCredits) {

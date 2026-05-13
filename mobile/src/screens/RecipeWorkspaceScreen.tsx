@@ -277,7 +277,9 @@ export function RecipeWorkspaceScreen({
         return true;
       }
 
-      return account.balance.availableCredits >= 1;
+      const requiredCredits =
+        actionKind === "reroll" ? account.actionCosts.reroll : account.actionCosts.fuse;
+      return account.balance.availableCredits >= requiredCredits;
     } catch {
       // If snapshot check fails, rely on server-side enforcement.
       return true;

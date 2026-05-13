@@ -77,6 +77,10 @@ function formatPriceUsd(value: number) {
   return value > 0 ? `$${value.toFixed(2)}` : "";
 }
 
+function formatCreditCount(value: number) {
+  return `${value} credit${value === 1 ? "" : "s"}`;
+}
+
 function getRecommendedPackId(options: CreditPackOption[]) {
   if (options.length === 0) {
     return "";
@@ -162,6 +166,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   const [creditPackOptions, setCreditPackOptions] = useState<CreditPackOption[]>([]);
   const [selectedCreditPackId, setSelectedCreditPackId] = useState("");
   const [creditPurchaseMessage, setCreditPurchaseMessage] = useState("");
+  const [isCreditInfoExpanded, setIsCreditInfoExpanded] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftPhotoUri, setDraftPhotoUri] = useState("");
@@ -172,6 +177,10 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   const availableCredits = accountSnapshot?.balance.availableCredits ?? 0;
   const freeFuseRemaining = accountSnapshot?.freeRemaining.fuse ?? 0;
   const freeRerollRemaining = accountSnapshot?.freeRemaining.reroll ?? 0;
+  const fuseCreditCost = accountSnapshot?.actionCosts.fuse ?? 2;
+  const rerollCreditCost = accountSnapshot?.actionCosts.reroll ?? 1;
+  const fuseCreditCostLabel = formatCreditCount(fuseCreditCost);
+  const rerollCreditCostLabel = formatCreditCount(rerollCreditCost);
   const appVersion =
     Constants.expoConfig?.version || Constants.manifest2?.extra?.expoClient?.version || "2.0.0";
 
@@ -664,6 +673,50 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
               )}
             </Pressable>
           </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: isCreditInfoExpanded }}
+            onPress={() => setIsCreditInfoExpanded((current) => !current)}
+            style={({ pressed }) => [
+              styles.profileCreditInfoCard,
+              pressed && styles.profileCreditInfoCardPressed,
+            ]}
+          >
+            <View style={styles.profileCreditInfoHeader}>
+              <View style={styles.profileCreditInfoTitleRow}>
+                <View style={styles.profileCreditInfoIcon}>
+                  <MaterialIcons color="#047857" name="info-outline" size={18} />
+                </View>
+                <View style={styles.profileCreditInfoTextWrap}>
+                  <Text style={styles.profileCreditInfoTitle}>How credits are used</Text>
+                  <Text style={styles.profileCreditInfoSummary}>
+                    Generation {fuseCreditCostLabel}, reroll {rerollCreditCostLabel}.
+                  </Text>
+                </View>
+              </View>
+              <MaterialIcons
+                color="#6b7280"
+                name={isCreditInfoExpanded ? "expand-less" : "expand-more"}
+                size={24}
+              />
+            </View>
+            {isCreditInfoExpanded ? (
+              <View style={styles.profileCreditInfoDetails}>
+                <View style={styles.profileCreditInfoDetailRow}>
+                  <Text style={styles.profileCreditInfoDetailLabel}>Recipe generation</Text>
+                  <Text style={styles.profileCreditInfoDetailValue}>{fuseCreditCostLabel}</Text>
+                </View>
+                <View style={styles.profileCreditInfoDetailRow}>
+                  <Text style={styles.profileCreditInfoDetailLabel}>Reroll</Text>
+                  <Text style={styles.profileCreditInfoDetailValue}>{rerollCreditCostLabel}</Text>
+                </View>
+                <Text style={styles.profileCreditInfoNote}>
+                  Free actions are used first when available. Credits are charged only after a
+                  successful result.
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
           {creditPurchaseMessage && !isCreditSheetOpen ? (
             <Text style={styles.profileCreditPurchaseMessage}>{creditPurchaseMessage}</Text>
           ) : null}
