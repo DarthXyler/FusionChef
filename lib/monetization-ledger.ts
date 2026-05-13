@@ -586,21 +586,22 @@ export async function reserveCredits(params: {
   const nowIso = new Date().toISOString();
   const reservationId = params.reservationId?.trim() || randomUUID();
   const entryId = randomUUID();
-  let result;
+  let results;
   try {
-    result = await executeTurso({
-      sql: `WITH updated_balance AS (
-              UPDATE credit_balances
+    results = await executeTursoBatch([
+      {
+        sql: `UPDATE credit_balances
               SET
                 available_credits = available_credits - ?,
                 pending_credits = pending_credits + ?,
                 updated_at = ?
               WHERE anon_user_id = ?
                 AND available_credits >= ?
-              RETURNING available_credits, pending_credits
-            ),
-            inserted_reservation AS (
-              INSERT INTO credit_reservations (
+              RETURNING available_credits, pending_credits`,
+        args: [params.amount, params.amount, nowIso, params.anonUserId, params.amount],
+      },
+      {
+        sql: `INSERT INTO credit_reservations (
                 reservation_id,
                 anon_user_id,
                 action_kind,
@@ -614,85 +615,75 @@ export async function reserveCredits(params: {
                 created_at,
                 updated_at
               )
+              SELECT ?, ?, ?, ?, 'reserved', ?, ?, ?, ?, ?, ?, ?
+              WHERE changes() > 0`,
+        args: [
+          reservationId,
+          params.anonUserId,
+          params.actionKind,
+          params.amount,
+          params.reason ?? "",
+          toMetadataJson(params.metadata),
+          params.expiresAt ?? null,
+          params.idempotencyScope ?? null,
+          params.idempotencyKey ?? null,
+          nowIso,
+          nowIso,
+        ],
+      },
+      {
+        sql: `INSERT INTO credit_ledger_entries (
+                entry_id,
+                anon_user_id,
+                event_type,
+                amount,
+                balance_available_after,
+                balance_pending_after,
+                reservation_id,
+                idempotency_scope,
+                idempotency_key,
+                actor,
+                metadata_json,
+                created_at
+              )
               SELECT
                 ?,
                 ?,
+                'reserve',
                 ?,
-                ?,
-                'reserved',
-                ?,
+                credit_balances.available_credits,
+                credit_balances.pending_credits,
                 ?,
                 ?,
                 ?,
                 ?,
                 ?,
                 ?
-              FROM updated_balance
-              RETURNING reservation_id
-            )
-            INSERT INTO credit_ledger_entries (
-              entry_id,
-              anon_user_id,
-              event_type,
-              amount,
-              balance_available_after,
-              balance_pending_after,
-              reservation_id,
-              idempotency_scope,
-              idempotency_key,
-              actor,
-              metadata_json,
-              created_at
-            )
-            SELECT
-              ?,
-              ?,
-              'reserve',
-              ?,
-              updated_balance.available_credits,
-              updated_balance.pending_credits,
-              inserted_reservation.reservation_id,
-              ?,
-              ?,
-              ?,
-              ?,
-              ?
-            FROM updated_balance
-            JOIN inserted_reservation ON 1 = 1
-            RETURNING
-              reservation_id,
-              balance_available_after,
-              balance_pending_after`,
-      args: [
-        params.amount,
-        params.amount,
-        nowIso,
-        params.anonUserId,
-        params.amount,
-        reservationId,
-        params.anonUserId,
-        params.actionKind,
-        params.amount,
-        params.reason ?? "",
-        toMetadataJson(params.metadata),
-        params.expiresAt ?? null,
-        params.idempotencyScope ?? null,
-        params.idempotencyKey ?? null,
-        nowIso,
-        nowIso,
-        entryId,
-        params.anonUserId,
-        params.amount,
-        params.idempotencyScope ?? null,
-        params.idempotencyKey ?? null,
-        params.actor,
-        toMetadataJson({
-          reason: params.reason ?? "",
-          ...(params.metadata ?? {}),
-        }),
-        nowIso,
-      ],
-    });
+              FROM credit_balances
+              JOIN credit_reservations ON credit_reservations.reservation_id = ?
+              WHERE credit_balances.anon_user_id = ?
+              RETURNING
+                reservation_id,
+                balance_available_after,
+                balance_pending_after`,
+        args: [
+          entryId,
+          params.anonUserId,
+          params.amount,
+          reservationId,
+          params.idempotencyScope ?? null,
+          params.idempotencyKey ?? null,
+          params.actor,
+          toMetadataJson({
+            reason: params.reason ?? "",
+            ...(params.metadata ?? {}),
+          }),
+          nowIso,
+          reservationId,
+          params.anonUserId,
+        ],
+      },
+    ]);
   } catch (error) {
     const existingReservationAfterConflict = await resolveExistingIdempotentReservation();
     if (existingReservationAfterConflict) {
@@ -701,7 +692,7 @@ export async function reserveCredits(params: {
     throw error;
   }
 
-  const row = result.rows[0] as Record<string, unknown> | undefined;
+  const row = results[2]?.rows[0] as Record<string, unknown> | undefined;
   if (!row) {
     return { ok: false, reason: "insufficient_credits" };
   }
@@ -860,9 +851,9 @@ async function finalizeReservation(params: {
   const shouldRelease = params.targetStatus === "released";
   const eventType: CreditLedgerEvent = shouldRelease ? "release" : "commit";
 
-  const result = await executeTurso({
-    sql: `WITH moved_reservation AS (
-            UPDATE credit_reservations
+  const results = await executeTursoBatch([
+    {
+      sql: `UPDATE credit_reservations
             SET
               status = ?,
               reason = CASE
@@ -876,82 +867,91 @@ async function finalizeReservation(params: {
               updated_at = ?
             WHERE reservation_id = ?
               AND anon_user_id = ?
-              AND status = 'reserved'
-            RETURNING reservation_id, amount
-          ),
-          updated_balance AS (
-            UPDATE credit_balances
+              AND status = 'reserved'`,
+      args: [
+        params.targetStatus,
+        params.reason ?? "",
+        params.reason ?? "",
+        toMetadataJson(params.metadata),
+        toMetadataJson(params.metadata),
+        nowIso,
+        params.reservationId,
+        params.anonUserId,
+      ],
+    },
+    {
+      sql: `UPDATE credit_balances
             SET
-              available_credits = available_credits + CASE
-                WHEN ? THEN (SELECT amount FROM moved_reservation)
-                ELSE 0
-              END,
-              pending_credits = pending_credits - (SELECT amount FROM moved_reservation),
+              available_credits = available_credits + ?,
+              pending_credits = pending_credits - ?,
               updated_at = ?
             WHERE anon_user_id = ?
-              AND EXISTS (SELECT 1 FROM moved_reservation)
-            RETURNING available_credits, pending_credits
-          )
-          INSERT INTO credit_ledger_entries (
-            entry_id,
-            anon_user_id,
-            event_type,
-            amount,
-            balance_available_after,
-            balance_pending_after,
-            reservation_id,
-            idempotency_scope,
-            idempotency_key,
-            actor,
-            metadata_json,
-            created_at
-          )
-          SELECT
-            ?,
-            ?,
-            ?,
-            (SELECT amount FROM moved_reservation),
-            updated_balance.available_credits,
-            updated_balance.pending_credits,
-            moved_reservation.reservation_id,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?
-          FROM moved_reservation
-          JOIN updated_balance ON 1 = 1
-          RETURNING
-            reservation_id,
-            balance_available_after,
-            balance_pending_after`,
-    args: [
-      params.targetStatus,
-      params.reason ?? "",
-      params.reason ?? "",
-      toMetadataJson(params.metadata),
-      toMetadataJson(params.metadata),
-      nowIso,
-      params.reservationId,
-      params.anonUserId,
-      shouldRelease ? 1 : 0,
-      nowIso,
-      params.anonUserId,
-      entryId,
-      params.anonUserId,
-      eventType,
-      params.idempotencyScope ?? null,
-      params.idempotencyKey ?? null,
-      params.actor,
-      toMetadataJson({
-        reason: params.reason ?? "",
-        ...(params.metadata ?? {}),
-      }),
-      nowIso,
-    ],
-  });
+              AND pending_credits >= ?
+              AND changes() > 0
+            RETURNING available_credits, pending_credits`,
+      args: [
+        shouldRelease ? existing.amount : 0,
+        existing.amount,
+        nowIso,
+        params.anonUserId,
+        existing.amount,
+      ],
+    },
+    {
+      sql: `INSERT INTO credit_ledger_entries (
+              entry_id,
+              anon_user_id,
+              event_type,
+              amount,
+              balance_available_after,
+              balance_pending_after,
+              reservation_id,
+              idempotency_scope,
+              idempotency_key,
+              actor,
+              metadata_json,
+              created_at
+            )
+            SELECT
+              ?,
+              ?,
+              ?,
+              ?,
+              credit_balances.available_credits,
+              credit_balances.pending_credits,
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              ?
+            FROM credit_balances
+            WHERE credit_balances.anon_user_id = ?
+              AND changes() > 0
+            RETURNING
+              reservation_id,
+              balance_available_after,
+              balance_pending_after`,
+      args: [
+        entryId,
+        params.anonUserId,
+        eventType,
+        existing.amount,
+        params.reservationId,
+        params.idempotencyScope ?? null,
+        params.idempotencyKey ?? null,
+        params.actor,
+        toMetadataJson({
+          reason: params.reason ?? "",
+          ...(params.metadata ?? {}),
+        }),
+        nowIso,
+        params.anonUserId,
+      ],
+    },
+  ]);
 
-  const row = result.rows[0] as Record<string, unknown> | undefined;
+  const row = results[2]?.rows[0] as Record<string, unknown> | undefined;
   if (!row) {
     return { ok: false, reason: "already_finalized" };
   }
