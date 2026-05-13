@@ -1552,12 +1552,6 @@ export const styles = StyleSheet.create({
     gap: 6,
     minWidth: 0,
   },
-  recentFusionTitleRow: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "space-between",
-  },
   recentFusionActionRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -1575,6 +1569,10 @@ export const styles = StyleSheet.create({
     justifyContent: "center",
     minHeight: 40,
     paddingHorizontal: 10,
+  },
+  recentFusionSaveButton: {
+    flex: 0,
+    width: 104,
   },
   recentFusionActionButtonActive: {
     backgroundColor: "#10b981",

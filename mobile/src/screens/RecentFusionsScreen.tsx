@@ -169,16 +169,14 @@ export function RecentFusionsScreen({
                       )}
 
                       <View style={styles.recentFusionBody}>
-                        <View style={styles.recentFusionTitleRow}>
-                          <Text numberOfLines={2} style={styles.cookbookCardTitle}>
-                            {item.title}
-                          </Text>
-                          <Text style={styles.cookbookCardDate}>
-                            {formatRecentDate(item.createdAt)}
-                          </Text>
-                        </View>
+                        <Text numberOfLines={2} style={styles.cookbookCardTitle}>
+                          {item.title}
+                        </Text>
                         <Text style={styles.cookbookCardMeta}>
                           {item.baseCuisine} + {item.fusionCuisine}
+                        </Text>
+                        <Text style={styles.cookbookCardDate}>
+                          {formatRecentDate(item.createdAt)}
                         </Text>
                         <View style={styles.cookbookFlagRow}>
                           {isSaved ? (
@@ -214,6 +212,7 @@ export function RecentFusionsScreen({
                         onPress={() => void handleRecentAction(item, "save")}
                         style={({ pressed }) => [
                           styles.recentFusionActionButton,
+                          styles.recentFusionSaveButton,
                           isSaved && styles.recentFusionActionButtonActive,
                           pressed && styles.resultActionPressed,
                         ]}
