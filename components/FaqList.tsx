@@ -6,7 +6,7 @@ import { BodyText } from "@/components/PublicSite";
 type FaqItem = {
   id: string;
   question: string;
-  answer: string;
+  answer: string | readonly string[];
 };
 
 type SupportFaqItem = FaqItem & {
@@ -46,9 +46,40 @@ export function FaqList({
       }
     }
 
+    function resetNormalFaqLink(event: MouseEvent) {
+      const target = event.target instanceof Element ? event.target.closest("a") : null;
+      if (!(target instanceof HTMLAnchorElement)) {
+        return;
+      }
+
+      const nextUrl = new URL(target.href);
+      if (
+        nextUrl.origin === window.location.origin &&
+        nextUrl.pathname === "/faq" &&
+        !nextUrl.search &&
+        !nextUrl.hash
+      ) {
+        if (window.location.pathname === "/faq" && (window.location.search || window.location.hash)) {
+          event.preventDefault();
+          window.history.pushState(null, "", "/faq");
+        }
+        setActiveSupportKey("");
+        setOpenId(defaultId);
+        window.setTimeout(syncWithHash, 0);
+      }
+    }
+
     syncWithHash();
+    document.addEventListener("click", resetNormalFaqLink, true);
     window.addEventListener("hashchange", syncWithHash);
-    return () => window.removeEventListener("hashchange", syncWithHash);
+    window.addEventListener("popstate", syncWithHash);
+    window.addEventListener("faq:navigate", syncWithHash);
+    return () => {
+      document.removeEventListener("click", resetNormalFaqLink, true);
+      window.removeEventListener("hashchange", syncWithHash);
+      window.removeEventListener("popstate", syncWithHash);
+      window.removeEventListener("faq:navigate", syncWithHash);
+    };
   }, [defaultId, items, supportItems]);
 
   const activeSupportItem =
@@ -78,7 +109,15 @@ export function FaqList({
               {item.question}
               <span className="text-2xl leading-none text-emerald-700 transition group-open:rotate-45">+</span>
             </summary>
-            <BodyText className="mt-3 max-w-3xl">{item.answer}</BodyText>
+            {Array.isArray(item.answer) ? (
+              <ul className="mt-3 max-w-3xl list-disc space-y-2 pl-5 leading-8 text-zinc-700 marker:text-emerald-500">
+                {item.answer.map((point) => (
+                  <li key={point}>{point}</li>
+                ))}
+              </ul>
+            ) : (
+              <BodyText className="mt-3 max-w-3xl">{item.answer}</BodyText>
+            )}
           </details>
         );
       })}

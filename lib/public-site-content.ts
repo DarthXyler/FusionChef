@@ -78,8 +78,12 @@ export const supportFaqItems = [
     supportKey: "recipe-photo-import",
     id: "support-recipe-photo-import",
     question: "Recipe photo import support",
-    answer:
-      "Use this guide when importing a recipe photo does not work as expected. Make sure the photo is clear, well lit, and includes the full recipe text. If extraction looks incomplete, try cropping out unrelated content and refresh the extracted text before generating. If you contact support, include whether the image came from camera or library, whether text extraction started, any error message you saw, your device model, and a screenshot of the photo/import screen.",
+    answer: [
+      "Use this guide when importing a recipe photo does not work as expected.",
+      "Make sure the photo is clear, well lit, and includes the full recipe text.",
+      "If extraction looks incomplete, crop out unrelated content and refresh the extracted text before generating.",
+      "If you contact support, include whether the image came from camera or library, whether text extraction started, any error message, your device model, and a screenshot of the photo/import screen.",
+    ],
   },
 ] as const;
 
