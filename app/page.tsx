@@ -88,9 +88,8 @@ export default function Home() {
             </div>
             <div className="hero-copy hero-copy-delay-3 w-full max-w-[560px] space-y-4">
               <div className="grid gap-3 sm:grid-cols-[1.55fr_1fr] sm:gap-4">
-                <Link
-                  href="/pricing"
-                  className="inline-flex min-h-14 w-full min-w-0 items-center justify-center gap-3 rounded-xl bg-emerald-700 px-5 text-base font-extrabold text-white shadow-[0_12px_28px_rgba(25,128,56,0.24)] transition hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 sm:min-h-[68px] sm:px-7 sm:text-lg"
+                <div
+                  className="inline-flex min-h-14 w-full min-w-0 items-center justify-center gap-3 rounded-xl bg-emerald-700 px-5 text-base font-extrabold text-white shadow-[0_12px_28px_rgba(25,128,56,0.24)] sm:min-h-[68px] sm:px-7 sm:text-lg"
                 >
                   <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/35">
                     <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none">
@@ -99,7 +98,7 @@ export default function Home() {
                     </svg>
                   </span>
                   Coming soon on iPhone
-                </Link>
+                </div>
                 <Link
                   href="/pricing"
                   className="inline-flex min-h-14 w-full min-w-0 items-center justify-center gap-3 rounded-xl border-2 border-emerald-700 bg-white px-5 text-base font-extrabold text-emerald-800 transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 sm:min-h-[68px] sm:px-7 sm:text-lg"
