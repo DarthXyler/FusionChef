@@ -1,4 +1,5 @@
 import { BlurView } from "expo-blur";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import * as Sharing from "expo-sharing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -898,7 +899,7 @@ export function RecipeWorkspaceScreen({
                 onPress={handleOpenActionsMenu}
                 style={({ pressed }) => [styles.menuButton, pressed && styles.menuButtonPressed]}
               >
-                <Text style={styles.menuDots}>{"\u22EE"}</Text>
+                <MaterialIcons color="#111827" name="ios-share" size={23} />
               </Pressable>
 
               {Platform.OS !== "ios" && isActionsMenuOpen ? (
