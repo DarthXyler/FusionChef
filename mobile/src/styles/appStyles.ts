@@ -843,27 +843,43 @@ export const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "900",
   },
-  profileAuthButtonGroup: {
-    alignItems: "flex-start",
-    gap: 8,
+  profileAuthProviderList: {
+    gap: 12,
+    marginTop: 18,
   },
-  profileAppleSignInButton: {
+  profileAuthProviderButton: {
     alignItems: "center",
-    alignSelf: "flex-start",
-    backgroundColor: "#09090b",
-    borderColor: "#09090b",
-    borderRadius: 999,
+    backgroundColor: "#ffffff",
+    borderColor: "#d1fae5",
+    borderRadius: 18,
     borderWidth: 1,
     flexDirection: "row",
-    gap: 6,
-    minHeight: 34,
-    justifyContent: "center",
-    paddingHorizontal: 14,
+    gap: 12,
+    minHeight: 58,
+    paddingHorizontal: 16,
   },
-  profileAppleSignInButtonText: {
-    color: "#ffffff",
-    fontSize: 13,
+  profileAuthProviderIcon: {
+    alignItems: "center",
+    backgroundColor: "#ecfdf5",
+    borderRadius: 999,
+    height: 34,
+    justifyContent: "center",
+    width: 34,
+  },
+  profileAuthGoogleIconImage: {
+    height: 20,
+    width: 20,
+  },
+  profileAuthProviderText: {
+    color: "#111827",
+    flex: 1,
+    fontSize: 16,
     fontWeight: "900",
+  },
+  profileAuthSheetLoading: {
+    alignItems: "center",
+    gap: 8,
+    marginTop: 16,
   },
   profileSectionHeader: {
     alignItems: "center",

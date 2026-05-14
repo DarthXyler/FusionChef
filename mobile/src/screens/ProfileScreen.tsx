@@ -42,6 +42,7 @@ import {
 } from "../services/profile";
 import { signOutAndResetMobileSession } from "../services/mobileSession";
 import { styles } from "../styles/appStyles";
+import googleGLogo from "../../assets/google-g-logo.png";
 
 const SUPPORT_URL = "https://flavor-fusion-chef.vercel.app/support";
 const FAQ_URL = "https://flavor-fusion-chef.vercel.app/faq";
@@ -168,6 +169,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   const [selectedCreditPackId, setSelectedCreditPackId] = useState("");
   const [creditPurchaseMessage, setCreditPurchaseMessage] = useState("");
   const [isCreditInfoExpanded, setIsCreditInfoExpanded] = useState(false);
+  const [isAuthSheetOpen, setIsAuthSheetOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftPhotoUri, setDraftPhotoUri] = useState("");
@@ -293,6 +295,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       const didLogin = await loginWithGoogleForMobile();
       if (didLogin) {
         await loadProfile();
+        setIsAuthSheetOpen(false);
       }
     } catch (error) {
       const message =
@@ -311,6 +314,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       const didLogin = await loginWithAppleForMobile();
       if (didLogin) {
         await loadProfile();
+        setIsAuthSheetOpen(false);
       }
     } catch (error) {
       const message =
@@ -555,15 +559,15 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   const accountRows = useMemo(
     () => (
       <>
-        <ProfileLinkRow icon="manage-accounts" label="Manage profile" onPress={handleOpenEdit} />
-        <ProfileLinkRow
-          icon="delete-outline"
-          label="Delete account"
-          onPress={handleDeleteAccount}
-          tone="danger"
-        />
         {isSignedIn ? (
           <>
+            <ProfileLinkRow icon="manage-accounts" label="Manage profile" onPress={handleOpenEdit} />
+            <ProfileLinkRow
+              icon="delete-outline"
+              label="Delete account"
+              onPress={handleDeleteAccount}
+              tone="danger"
+            />
             <ProfileLinkRow
               icon="restore"
               label="Purchase support"
@@ -572,10 +576,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
             <ProfileLinkRow icon="logout" label="Sign out" onPress={handleSignOut} />
           </>
         ) : (
-          <>
-            <ProfileLinkRow icon="apple" label="Sign in with Apple" onPress={handleSignInWithApple} />
-            <ProfileLinkRow icon="login" label="Sign in with Google" onPress={handleSignInWithGoogle} />
-          </>
+          <ProfileLinkRow icon="login" label="Sign in" onPress={() => setIsAuthSheetOpen(true)} />
         )}
       </>
     ),
@@ -583,8 +584,6 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       handleDeleteAccount,
       handleOpenEdit,
       handleRestorePurchases,
-      handleSignInWithApple,
-      handleSignInWithGoogle,
       handleSignOut,
       isSignedIn,
     ],
@@ -637,37 +636,17 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
                     <Text style={styles.profileEditButtonText}>Edit Profile</Text>
                   </Pressable>
                 ) : (
-                  <View style={styles.profileAuthButtonGroup}>
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={isSigningIn}
-                      onPress={handleSignInWithApple}
-                      style={({ pressed }) => [
-                        styles.profileAppleSignInButton,
-                        pressed && styles.profileRowPressed,
-                      ]}
-                    >
-                      {isSigningIn ? (
-                        <ActivityIndicator color="#ffffff" size="small" />
-                      ) : (
-                        <>
-                          <MaterialIcons color="#ffffff" name="apple" size={17} />
-                          <Text style={styles.profileAppleSignInButtonText}>Continue with Apple</Text>
-                        </>
-                      )}
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={isSigningIn}
-                      onPress={handleSignInWithGoogle}
-                      style={({ pressed }) => [
-                        styles.profileEditButton,
-                        pressed && styles.profileRowPressed,
-                      ]}
-                    >
-                      <Text style={styles.profileEditButtonText}>Continue with Google</Text>
-                    </Pressable>
-                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={isSigningIn}
+                    onPress={() => setIsAuthSheetOpen(true)}
+                    style={({ pressed }) => [
+                      styles.profileEditButton,
+                      pressed && styles.profileRowPressed,
+                    ]}
+                  >
+                    <Text style={styles.profileEditButtonText}>Sign in</Text>
+                  </Pressable>
                 )}
               </View>
             </View>
@@ -823,6 +802,72 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
 
           <Text style={styles.profileVersionText}>App version {appVersion}</Text>
         </ScrollView>
+
+        <Modal animationType="slide" transparent visible={isAuthSheetOpen}>
+          <View style={styles.profileModalBackdrop}>
+            <View style={styles.profileEditSheet}>
+              <View style={styles.profileEditTopRow}>
+                <View>
+                  <Text style={styles.profileEditTitle}>Sign in</Text>
+                  <Text style={styles.profileCreditSheetSubtitle}>
+                    Sync your cookbook, credits, and purchases.
+                  </Text>
+                </View>
+                <Pressable
+                  accessibilityLabel="Close sign in"
+                  accessibilityRole="button"
+                  disabled={isSigningIn}
+                  onPress={() => setIsAuthSheetOpen(false)}
+                  style={({ pressed }) => [
+                    styles.profileEditCloseButton,
+                    pressed && styles.profileRowPressed,
+                  ]}
+                >
+                  <MaterialIcons color="#374151" name="close" size={22} />
+                </Pressable>
+              </View>
+
+              <View style={styles.profileAuthProviderList}>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isSigningIn}
+                  onPress={handleSignInWithApple}
+                  style={({ pressed }) => [
+                    styles.profileAuthProviderButton,
+                    pressed && styles.profileRowPressed,
+                  ]}
+                >
+                  <View style={styles.profileAuthProviderIcon}>
+                    <MaterialIcons color="#047857" name="apple" size={23} />
+                  </View>
+                  <Text style={styles.profileAuthProviderText}>Continue with Apple</Text>
+                </Pressable>
+
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isSigningIn}
+                  onPress={handleSignInWithGoogle}
+                  style={({ pressed }) => [
+                    styles.profileAuthProviderButton,
+                    pressed && styles.profileRowPressed,
+                  ]}
+                >
+                  <View style={styles.profileAuthProviderIcon}>
+                    <Image source={googleGLogo} style={styles.profileAuthGoogleIconImage} />
+                  </View>
+                  <Text style={styles.profileAuthProviderText}>Continue with Google</Text>
+                </Pressable>
+              </View>
+
+              {isSigningIn ? (
+                <View style={styles.profileAuthSheetLoading}>
+                  <ActivityIndicator color="#10b981" />
+                  <Text style={styles.profileCreditSheetSubtitle}>Opening sign in...</Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        </Modal>
 
         <Modal animationType="slide" transparent visible={isEditOpen}>
           <View style={styles.profileModalBackdrop}>
