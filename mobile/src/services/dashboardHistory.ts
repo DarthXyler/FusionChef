@@ -1,7 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { CookbookRecipeSummary, GeneratedRecipeRecord } from "../types/recipe";
+import { getMobileAuthSession } from "./auth";
 
 const DASHBOARD_HISTORY_KEY = "flavor_fusion_dashboard_history_v1";
+const DASHBOARD_HISTORY_ACCOUNT_PREFIX = "flavor_fusion_dashboard_history_v2:";
 const MAX_DASHBOARD_HISTORY_ITEMS = 12;
 
 // Local safety net for recipes the user generated but may not have saved yet.
@@ -42,9 +44,19 @@ function sortHistory(items: DashboardFusionSummary[]) {
   return [...items].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
 }
 
+async function getDashboardHistoryKeyForCurrentAccount() {
+  const session = await getMobileAuthSession();
+  const userId = session?.userId?.trim() ?? "";
+  return userId ? `${DASHBOARD_HISTORY_ACCOUNT_PREFIX}${userId}` : null;
+}
+
 export async function readDashboardFusionHistory() {
   try {
-    const raw = await AsyncStorage.getItem(DASHBOARD_HISTORY_KEY);
+    const key = await getDashboardHistoryKeyForCurrentAccount();
+    if (!key) {
+      return [];
+    }
+    const raw = await AsyncStorage.getItem(key);
     if (!raw) {
       return [];
     }
@@ -59,13 +71,23 @@ export async function readDashboardFusionHistory() {
 }
 
 export async function saveDashboardFusionHistory(items: DashboardFusionSummary[]) {
+  const key = await getDashboardHistoryKeyForCurrentAccount();
+  if (!key) {
+    return [];
+  }
   const next = sortHistory(items).slice(0, MAX_DASHBOARD_HISTORY_ITEMS);
-  await AsyncStorage.setItem(DASHBOARD_HISTORY_KEY, JSON.stringify(next));
+  await AsyncStorage.setItem(key, JSON.stringify(next));
   return next;
 }
 
 export async function clearDashboardFusionHistory() {
-  await AsyncStorage.removeItem(DASHBOARD_HISTORY_KEY);
+  const allKeys = await AsyncStorage.getAllKeys();
+  const historyKeys = allKeys.filter(
+    (key) => key === DASHBOARD_HISTORY_KEY || key.startsWith(DASHBOARD_HISTORY_ACCOUNT_PREFIX),
+  );
+  if (historyKeys.length > 0) {
+    await AsyncStorage.multiRemove(historyKeys);
+  }
 }
 
 export async function upsertDashboardFusionHistory(record: GeneratedRecipeRecord) {

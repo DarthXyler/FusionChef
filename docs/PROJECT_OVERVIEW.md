@@ -114,6 +114,7 @@ FAQ has normal short answers for direct visitors. Support-page links can reveal 
 
 ## Safety Notes
 
+- Before creating the next iOS build, confirm the native display name is exactly `Flavor Fusion Chef`. The OAuth prompt is controlled by iOS, so a branded app name and branded login domain are important for user trust.
 - Do not delete old identity tables just because they look anonymous; they help map old records into account-based records.
 - Do not manually edit credit balances without using ledger/grant functions; the ledger is the audit trail.
 - Do not assume Recent Fusions are saved recipes. Only Cookbook entries are persisted as saved recipes in Turso.

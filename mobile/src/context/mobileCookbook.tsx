@@ -11,6 +11,7 @@ import {
   saveCookbookRecipe,
   updateCookbookRecipeFlags,
 } from "../services/cookbook";
+import { getMobileAuthToken } from "../services/auth";
 import type { CookbookRecipeRecord, CookbookRecipeSummary, GeneratedRecipeRecord } from "../types/recipe";
 import type { MobileCookbookContextValue } from "../navigation/types";
 
@@ -73,20 +74,37 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const mergeFirstPageIntoSummaries = useCallback((incoming: CookbookRecipeSummary[]) => {
-    setCookbookSummaries((current) => {
-      const next =
-        current.length === 0 ? incoming : mergeCookbookSummaries(current, incoming);
-      void cacheCookbookSummaries(next);
-      return next;
+  const replaceSummariesWithFirstPage = useCallback((incoming: CookbookRecipeSummary[]) => {
+    setCookbookSummaries(() => {
+      void cacheCookbookSummaries(incoming);
+      return incoming;
     });
+  }, []);
+
+  const resetLocalState = useCallback(() => {
+    setCookbookSummaries([]);
+    setCookbookRecordCache({});
+    setIsCookbookLoading(false);
+    setIsCookbookRefreshing(false);
+    setIsCookbookLoadingMore(false);
+    setHasLoadedCookbook(false);
+    setHasMoreCookbook(false);
+    setNextCookbookCursor(null);
+    setIsShowingCachedSummaries(false);
+    setSummarySyncError("");
   }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     // Show cached cookbook entries quickly while the network request catches up.
-    void readCachedCookbookSummaries().then((cachedSummaries) => {
+    void (async () => {
+      const authToken = await getMobileAuthToken();
+      if (!authToken) {
+        return [];
+      }
+      return readCachedCookbookSummaries();
+    })().then((cachedSummaries) => {
       if (cancelled || cachedSummaries.length === 0) {
         return;
       }
@@ -118,8 +136,14 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
   const loadSummaries = useCallback(async () => {
     setIsCookbookLoading(true);
     try {
+      const authToken = await getMobileAuthToken();
+      if (!authToken) {
+        resetLocalState();
+        setHasLoadedCookbook(true);
+        return;
+      }
       const page = await fetchCookbookSummaries();
-      mergeFirstPageIntoSummaries(page.recipes);
+      replaceSummariesWithFirstPage(page.recipes);
       setHasLoadedCookbook(true);
       setHasMoreCookbook(page.hasMore);
       setNextCookbookCursor(page.nextCursor);
@@ -135,13 +159,19 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsCookbookLoading(false);
     }
-  }, [mergeFirstPageIntoSummaries]);
+  }, [replaceSummariesWithFirstPage, resetLocalState]);
 
   const refreshSummaries = useCallback(async () => {
     setIsCookbookRefreshing(true);
     try {
+      const authToken = await getMobileAuthToken();
+      if (!authToken) {
+        resetLocalState();
+        setHasLoadedCookbook(true);
+        return;
+      }
       const page = await fetchCookbookSummaries();
-      mergeFirstPageIntoSummaries(page.recipes);
+      replaceSummariesWithFirstPage(page.recipes);
       setHasLoadedCookbook(true);
       setHasMoreCookbook(page.hasMore);
       setNextCookbookCursor(page.nextCursor);
@@ -157,7 +187,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsCookbookRefreshing(false);
     }
-  }, [mergeFirstPageIntoSummaries]);
+  }, [replaceSummariesWithFirstPage, resetLocalState]);
 
   const loadMoreSummaries = useCallback(async () => {
     if (!hasLoadedCookbook || !hasMoreCookbook || !nextCookbookCursor || isCookbookLoadingMore) {
@@ -276,19 +306,6 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
     },
     [cookbookRecordCache, refreshSummaries, upsertCookbookRecordState],
   );
-
-  const resetLocalState = useCallback(() => {
-    setCookbookSummaries([]);
-    setCookbookRecordCache({});
-    setIsCookbookLoading(false);
-    setIsCookbookRefreshing(false);
-    setIsCookbookLoadingMore(false);
-    setHasLoadedCookbook(false);
-    setHasMoreCookbook(false);
-    setNextCookbookCursor(null);
-    setIsShowingCachedSummaries(false);
-    setSummarySyncError("");
-  }, []);
 
   const value = useMemo<MobileCookbookContextValue>(
     () => ({

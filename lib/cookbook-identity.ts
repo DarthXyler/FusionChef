@@ -121,6 +121,11 @@ async function belongsToDifferentAuthUser(canonicalAnonUserId: string, authUserI
   return ownerIds.length > 0 && !ownerIds.includes(authUserId);
 }
 
+async function belongsToAnyAuthUser(canonicalAnonUserId: string) {
+  const ownerIds = await readAuthUserIdsForCanonical(canonicalAnonUserId);
+  return ownerIds.length > 0;
+}
+
 async function upsertCanonicalIdForDevice(deviceKey: string, canonicalAnonUserId: string) {
   await executeTurso({
     sql: `INSERT INTO mobile_identity_links (
@@ -267,6 +272,17 @@ async function filterCandidatesForAuthUser(candidateIds: string[], authUserId: s
   return safeCandidates;
 }
 
+async function filterCandidatesForSignedOutUser(candidateIds: string[]) {
+  const safeCandidates: string[] = [];
+  for (const candidateId of candidateIds) {
+    if (await belongsToAnyAuthUser(candidateId)) {
+      continue;
+    }
+    safeCandidates.push(candidateId);
+  }
+  return safeCandidates;
+}
+
 export async function resolveCookbookIdentity(request: NextRequest): Promise<CookbookIdentity> {
   const baseIdentity = getAnonymousIdentity(request);
   const rawDeviceKey = request.headers.get(MOBILE_DEVICE_KEY_HEADER)?.trim();
@@ -292,7 +308,7 @@ export async function resolveCookbookIdentity(request: NextRequest): Promise<Coo
     ]);
     const candidateIds = authUserId
       ? await filterCandidatesForAuthUser(rawCandidateIds, authUserId)
-      : rawCandidateIds;
+      : await filterCandidatesForSignedOutUser(rawCandidateIds);
     const safeCandidateIds =
       candidateIds.length > 0 ? candidateIds : uniqueValidIds([authCanonical, randomUUID()]);
     // A signed-in account must keep its own owner ID. Shared phones can still send

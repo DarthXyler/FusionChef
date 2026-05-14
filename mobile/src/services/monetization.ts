@@ -117,6 +117,28 @@ type PurchaseAppleCreditsOptions = {
   onStatus?: (message: string) => void;
 };
 
+function buildSignedOutAccountSnapshot(): MonetizationAccountSnapshot {
+  return {
+    authenticated: false,
+    enabled: false,
+    enforcementMode: "off",
+    actionCosts: {
+      fuse: 2,
+      reroll: 1,
+    },
+    balance: {
+      availableCredits: 0,
+      pendingCredits: 0,
+    },
+    freeRemaining: {
+      fuse: 0,
+      reroll: 0,
+    },
+    products: [],
+    pricingPackages: [],
+  };
+}
+
 async function getExpoIapModule() {
   if (cachedExpoIapModule !== undefined) {
     return cachedExpoIapModule;
@@ -262,25 +284,7 @@ export function invalidateMonetizationAccountSnapshotCache() {
 }
 
 export function resetMonetizationAccountSnapshotForSignedOutSession() {
-  const snapshot: MonetizationAccountSnapshot = {
-    authenticated: false,
-    enabled: false,
-    enforcementMode: "off",
-    actionCosts: {
-      fuse: 2,
-      reroll: 1,
-    },
-    balance: {
-      availableCredits: 0,
-      pendingCredits: 0,
-    },
-    freeRemaining: {
-      fuse: 0,
-      reroll: 0,
-    },
-    products: [],
-    pricingPackages: [],
-  };
+  const snapshot = buildSignedOutAccountSnapshot();
   cachedAccountSnapshot = {
     value: snapshot,
     fetchedAtMs: Date.now(),
@@ -317,6 +321,12 @@ export async function fetchMonetizationAccountSnapshot(options?: {
     now - cachedAccountSnapshot.fetchedAtMs <= ACCOUNT_SNAPSHOT_CACHE_TTL_MS
   ) {
     return cachedAccountSnapshot.value;
+  }
+
+  const authToken = await getMobileAuthToken();
+  if (!authToken) {
+    resetMonetizationAccountSnapshotForSignedOutSession();
+    return cachedAccountSnapshot?.value ?? buildSignedOutAccountSnapshot();
   }
 
   const identityHeaders = await withIdentityHeaders();
