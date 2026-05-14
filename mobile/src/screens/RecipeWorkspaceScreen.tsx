@@ -899,7 +899,7 @@ export function RecipeWorkspaceScreen({
                 onPress={handleOpenActionsMenu}
                 style={({ pressed }) => [styles.menuButton, pressed && styles.menuButtonPressed]}
               >
-                <MaterialIcons color="#111827" name="ios-share" size={23} />
+                <MaterialIcons color="#047857" name="ios-share" size={23} />
               </Pressable>
 
               {Platform.OS !== "ios" && isActionsMenuOpen ? (
