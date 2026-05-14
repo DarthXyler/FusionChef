@@ -119,3 +119,17 @@ FAQ has normal short answers for direct visitors. Support-page links can reveal 
 - Do not manually edit credit balances without using ledger/grant functions; the ledger is the audit trail.
 - Do not assume Recent Fusions are saved recipes. Only Cookbook entries are persisted as saved recipes in Turso.
 - Do not hard-code pricing copy in multiple places unless the app store product configuration also changes.
+
+## Production Bug Lessons
+
+The May 2026 sign-out bug showed that account fixes must be verified across every data surface, not only the visible auth button.
+
+When fixing sign-in, sign-out, identity, credits, or cookbook behavior:
+
+- Check the auth token, durable device identity, anonymous ID, backend identity merge rules, local caches, in-memory context state, and visible UI widgets.
+- Verify signed-out behavior on Profile, Home credit header, Recent Fusions, Cookbook list, Cookbook detail, and any purchase/credit gate.
+- Treat "profile says signed out" as insufficient proof. Credits, saved recipes, recent fusions, favorites, and to-try counters must also reset or switch to the correct account.
+- Check old-account to new-account switching on the same device. Shared-device behavior is the risky path.
+- First-page server refreshes should replace account-owned lists after identity changes; merging can preserve stale rows from the previous account.
+- Local recovery features must be scoped by account when the data can reveal user history.
+- Do not claim a production identity/account bug is fixed until the affected UI surfaces and server paths have been rechecked after the first patch.
