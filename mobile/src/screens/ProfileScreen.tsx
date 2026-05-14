@@ -12,6 +12,7 @@ import {
   Linking,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   Text,
   TextInput,
@@ -157,7 +158,7 @@ function ProfileAvatar({
 }
 
 export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, "Profile">) {
-  const { resetLocalState, stats } = useMobileCookbook();
+  const { resetLocalState, refreshSummaries, stats } = useMobileCookbook();
   const [session, setSession] = useState<MobileAuthSession | null>(null);
   const [profileOverrides, setProfileOverrides] = useState<MobileProfileOverrides>({
     displayName: "",
@@ -168,6 +169,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isLoadingCreditPacks, setIsLoadingCreditPacks] = useState(false);
   const [isPurchasingCredits, setIsPurchasingCredits] = useState(false);
+  const [isRefreshingProfile, setIsRefreshingProfile] = useState(false);
   const [isCreditSheetOpen, setIsCreditSheetOpen] = useState(false);
   const [creditPackOptions, setCreditPackOptions] = useState<CreditPackOption[]>([]);
   const [selectedCreditPackId, setSelectedCreditPackId] = useState("");
@@ -229,6 +231,21 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       setFailedPhotoUri(profilePhotoUri);
     }
   }, [profilePhotoUri]);
+
+  const handleRefreshProfile = useCallback(async () => {
+    setIsRefreshingProfile(true);
+    try {
+      await Promise.all([loadProfile(), refreshSummaries()]);
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Could not refresh profile right now.";
+      Alert.alert("Refresh failed", message);
+    } finally {
+      setIsRefreshingProfile(false);
+    }
+  }, [loadProfile, refreshSummaries]);
 
   useEffect(() => {
     void loadProfile();
@@ -622,7 +639,17 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.profileContent}>
+        <ScrollView
+          contentContainerStyle={styles.profileContent}
+          refreshControl={
+            <RefreshControl
+              colors={["#10b981"]}
+              refreshing={isRefreshingProfile}
+              tintColor="#10b981"
+              onRefresh={() => void handleRefreshProfile()}
+            />
+          }
+        >
           <View style={styles.profileTopBar}>
             <BrandHeader compact />
             <CreditPill credits={availableCredits} onPress={handleOpenCreditSheet} />
