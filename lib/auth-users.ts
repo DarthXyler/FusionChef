@@ -123,14 +123,17 @@ export async function upsertOAuthUser(params: {
   const avatarUrl = normalizeAvatarUrl(params.avatarUrl ?? "");
 
   const existing = await executeTurso({
-    sql: `SELECT id
+    sql: `SELECT id, avatar_url
           FROM auth_users
           WHERE provider = ? AND provider_subject = ?
           LIMIT 1`,
     args: [params.provider, providerSubject],
   });
   const existingId = existing.rows[0]?.id;
+  const existingAvatarUrl =
+    typeof existing.rows[0]?.avatar_url === "string" ? existing.rows[0].avatar_url.trim() : "";
   const userId = typeof existingId === "string" && existingId.trim().length > 0 ? existingId : randomUUID();
+  const nextAvatarUrl = avatarUrl || existingAvatarUrl;
 
   await executeTurso({
     sql: `INSERT INTO auth_users (
@@ -158,7 +161,7 @@ export async function upsertOAuthUser(params: {
       params.email.trim(),
       normalizedEmail,
       name,
-      avatarUrl,
+      nextAvatarUrl,
       params.provider,
       providerSubject,
       params.role,
@@ -171,7 +174,7 @@ export async function upsertOAuthUser(params: {
     id: userId,
     email: params.email.trim(),
     name,
-    avatarUrl,
+    avatarUrl: nextAvatarUrl,
     provider: params.provider,
     providerSubject,
     role: params.role,

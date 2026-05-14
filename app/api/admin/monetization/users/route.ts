@@ -3,6 +3,7 @@
  * Admin-only logged-in user listing, CSV-export support, and batch credit grant workflow.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { createHmac, randomUUID } from "crypto";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
 import { grantCredits } from "@/lib/monetization-ledger";
@@ -34,6 +35,7 @@ type ResolvedUser = {
   normalizedEmail: string;
   name: string;
   role: string;
+  provider: string;
   canonicalAnonUserId: string;
   availableCredits: number;
   pendingCredits: number;
@@ -274,6 +276,30 @@ async function ensureAdminUserSchemas() {
       PRIMARY KEY (anon_user_id, day_key)
     )`,
   );
+  await executeTurso(
+    `CREATE TABLE IF NOT EXISTS account_deletion_events (
+      deletion_id TEXT PRIMARY KEY,
+      auth_user_id TEXT NOT NULL,
+      canonical_anon_user_id TEXT NOT NULL,
+      email_hash TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      role TEXT NOT NULL,
+      requested_by TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      counts_json TEXT NOT NULL,
+      purchase_transactions_preserved INTEGER NOT NULL DEFAULT 0,
+      idempotency_key TEXT NOT NULL,
+      deleted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )`,
+  );
+  await executeTurso(
+    `CREATE INDEX IF NOT EXISTS idx_account_deletion_events_deleted_at
+     ON account_deletion_events (deleted_at DESC)`,
+  );
+  await executeTurso(
+    `CREATE INDEX IF NOT EXISTS idx_account_deletion_events_email_hash
+     ON account_deletion_events (email_hash)`,
+  );
 }
 
 function rowToResolvedUser(row: Record<string, unknown>): ResolvedUser {
@@ -283,6 +309,7 @@ function rowToResolvedUser(row: Record<string, unknown>): ResolvedUser {
     normalizedEmail: asString(row.normalized_email),
     name: asString(row.name),
     role: asString(row.role),
+    provider: asString(row.provider),
     canonicalAnonUserId: asString(row.canonical_anon_user_id),
     availableCredits: asInteger(row.available_credits),
     pendingCredits: asInteger(row.pending_credits),
@@ -298,6 +325,7 @@ function buildUserSelectSql(whereSql: string) {
       u.normalized_email,
       u.name,
       u.role,
+      u.provider,
       u.last_login_at,
       u.created_at,
       ail.canonical_anon_user_id,
@@ -318,6 +346,21 @@ function buildUserSelectSql(whereSql: string) {
     LEFT JOIN auth_identity_links ail ON ail.auth_user_id = u.id
     LEFT JOIN credit_balances cb ON cb.anon_user_id = ail.canonical_anon_user_id
     ${whereSql}`;
+}
+
+function getDeletionAuditHashSecret() {
+  return (
+    process.env.AUTH_SESSION_SECRET?.trim() ||
+    process.env.INTERNAL_API_TOKEN?.trim() ||
+    process.env.MONETIZATION_ADMIN_TOKEN?.trim() ||
+    "local-account-deletion-audit"
+  );
+}
+
+function hashDeletedEmail(email: string) {
+  return createHmac("sha256", getDeletionAuditHashSecret())
+    .update(normalizeEmail(email))
+    .digest("base64url");
 }
 
 export async function GET(request: NextRequest) {
@@ -883,7 +926,36 @@ async function deleteReadyAccounts(params: {
     const authUserIds = [...new Set(canonicalTargets.map((target) => target.user.authUserId))];
     const authPlaceholders = authUserIds.map(() => "?").join(", ");
     const deletedPurchaseOwner = `deleted:${primaryAuthUserId}`;
+    const deletionEventStatements = canonicalTargets.map((target) => ({
+      sql: `INSERT INTO account_deletion_events (
+              deletion_id,
+              auth_user_id,
+              canonical_anon_user_id,
+              email_hash,
+              provider,
+              role,
+              requested_by,
+              reason,
+              counts_json,
+              purchase_transactions_preserved,
+              idempotency_key
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        randomUUID(),
+        target.user.authUserId,
+        canonical,
+        hashDeletedEmail(target.user.email),
+        target.user.provider || "unknown",
+        target.user.role || "user",
+        params.actor,
+        params.reason,
+        JSON.stringify(target.counts),
+        target.counts.purchaseTransactionsPreserved,
+        params.batchId,
+      ],
+    }));
     await executeTursoBatch([
+      ...deletionEventStatements,
       {
         sql: `UPDATE credit_purchase_transactions
               SET anon_user_id = ?, payload_json = '{}', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')

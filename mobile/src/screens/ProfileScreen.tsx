@@ -128,11 +128,13 @@ function ProfileAvatar({
   displayName,
   email,
   photoUri,
+  onPhotoError,
   size = "large",
 }: {
   displayName: string;
   email: string;
   photoUri: string;
+  onPhotoError?: () => void;
   size?: "large" | "medium";
 }) {
   const isLarge = size === "large";
@@ -141,6 +143,7 @@ function ProfileAvatar({
       {photoUri ? (
         <Image
           accessibilityIgnoresInvertColors
+          onError={onPhotoError}
           source={{ uri: photoUri }}
           style={[styles.profileAvatarImage, !isLarge && styles.profileAvatarImageMedium]}
         />
@@ -174,10 +177,17 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftPhotoUri, setDraftPhotoUri] = useState("");
+  const [failedPhotoUri, setFailedPhotoUri] = useState("");
 
   const displayName = profileOverrides.displayName || session?.name || "Welcome, Chef";
   const email = session?.email ?? "";
-  const profilePhotoUri = profileOverrides.photoUri || session?.avatarUrl || "";
+  const overridePhotoUri =
+    profileOverrides.photoUri && profileOverrides.photoUri !== failedPhotoUri
+      ? profileOverrides.photoUri
+      : "";
+  const sessionPhotoUri =
+    session?.avatarUrl && session.avatarUrl !== failedPhotoUri ? session.avatarUrl : "";
+  const profilePhotoUri = overridePhotoUri || sessionPhotoUri;
   const isSignedIn = session !== null;
   const availableCredits = accountSnapshot?.balance.availableCredits ?? 0;
   const freeFuseRemaining = accountSnapshot?.freeRemaining.fuse ?? 0;
@@ -198,6 +208,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       ]);
       setSession(nextSession);
       setProfileOverrides(nextOverrides);
+      setFailedPhotoUri("");
       if (nextSession) {
         try {
           const snapshot = await fetchMonetizationAccountSnapshot({ preferCache: true });
@@ -212,6 +223,12 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       setIsLoading(false);
     }
   }, []);
+
+  const handleProfilePhotoError = useCallback(() => {
+    if (profilePhotoUri) {
+      setFailedPhotoUri(profilePhotoUri);
+    }
+  }, [profilePhotoUri]);
 
   useEffect(() => {
     void loadProfile();
@@ -626,6 +643,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
                 <ProfileAvatar
                   displayName={displayName}
                   email={email}
+                  onPhotoError={handleProfilePhotoError}
                   photoUri={profilePhotoUri}
                 />
                 <View style={styles.profileAvatarEditButton}>
@@ -910,6 +928,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
                   <ProfileAvatar
                     displayName={draftName || displayName}
                     email={email}
+                    onPhotoError={handleProfilePhotoError}
                     photoUri={draftPhotoUri}
                     size="large"
                   />
