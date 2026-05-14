@@ -7,6 +7,8 @@ import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
+import { buildInactiveAuthResponse } from "@/lib/auth-api";
+import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import {
   deleteCookbookRecordAndReturnImageUrl,
   getCookbookRecord,
@@ -70,6 +72,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return limited;
     }
 
+    const authValidation = await getActiveAuthSessionFromRequest(request);
+    const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
+    if (inactiveAuthResponse) {
+      return inactiveAuthResponse;
+    }
+
     const recipeId = await getRecipeId(context);
     if (!recipeId) {
       return NextResponse.json({ error: "Recipe id is required." }, { status: 400 });
@@ -115,6 +123,12 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return limited;
     }
 
+    const authValidation = await getActiveAuthSessionFromRequest(request);
+    const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
+    if (inactiveAuthResponse) {
+      return inactiveAuthResponse;
+    }
+
     const recipeId = await getRecipeId(context);
     if (!recipeId) {
       return NextResponse.json({ error: "Recipe id is required." }, { status: 400 });
@@ -158,6 +172,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     });
     if (limited) {
       return limited;
+    }
+
+    const authValidation = await getActiveAuthSessionFromRequest(request);
+    const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
+    if (inactiveAuthResponse) {
+      return inactiveAuthResponse;
     }
 
     const recipeId = await getRecipeId(context);

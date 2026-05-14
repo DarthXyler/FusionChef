@@ -8,6 +8,7 @@ import type {
 } from "../types/recipe";
 import { getMobileAuthToken } from "./auth";
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
+import { clearInvalidMobileSession, isInvalidAuthPayload } from "./sessionInvalidation";
 
 type FuseActionKind = "fuse" | "reroll";
 
@@ -85,6 +86,9 @@ function isRecipeFusion(value: unknown): value is RecipeFusion {
 async function readErrorMessage(response: Response) {
   try {
     const payload = (await response.json()) as FuseErrorPayload;
+    if (response.status === 401 && isInvalidAuthPayload(payload)) {
+      await clearInvalidMobileSession();
+    }
     return new FuseRequestError(response.status, payload, "The live recipe request failed.");
   } catch {
     return new FuseRequestError(response.status, {}, "The live recipe request failed.");

@@ -107,6 +107,24 @@ export async function getOAuthUserByProviderSubject(params: {
   return rowToAuthUserRecord(result.rows[0] ?? {});
 }
 
+export async function getAuthUserById(userId: string) {
+  await ensureAuthSchema();
+  const normalizedUserId = userId.trim();
+  if (!normalizedUserId) {
+    return null;
+  }
+
+  const result = await executeTurso({
+    sql: `SELECT id, email, name, avatar_url, provider, provider_subject, role
+          FROM auth_users
+          WHERE id = ?
+          LIMIT 1`,
+    args: [normalizedUserId],
+  });
+
+  return rowToAuthUserRecord(result.rows[0] ?? {});
+}
+
 export async function upsertOAuthUser(params: {
   provider: OAuthProvider;
   providerSubject: string;

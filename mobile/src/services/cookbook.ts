@@ -9,6 +9,7 @@ import type {
 } from "../types/recipe";
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
 import { getMobileAuthToken } from "./auth";
+import { clearInvalidMobileSession, isInvalidAuthPayload } from "./sessionInvalidation";
 
 const COOKBOOK_SUMMARY_CACHE_VERSION = "v1";
 const COOKBOOK_DETAIL_CACHE_VERSION = "v1";
@@ -223,7 +224,10 @@ async function removeCookbookDetailCache(recipeId: string) {
 
 async function readErrorMessage(response: Response, fallback: string) {
   try {
-    const payload = (await response.json()) as { error?: unknown };
+    const payload = (await response.json()) as { error?: unknown; reason?: unknown };
+    if (response.status === 401 && isInvalidAuthPayload(payload)) {
+      await clearInvalidMobileSession();
+    }
     return typeof payload.error === "string" && payload.error.trim().length > 0
       ? payload.error
       : fallback;

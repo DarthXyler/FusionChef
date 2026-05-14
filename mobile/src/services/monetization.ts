@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import { getApiBaseUrl } from "../config/api";
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
 import { getMobileAuthToken } from "./auth";
+import { clearInvalidMobileSession, isInvalidAuthPayload } from "./sessionInvalidation";
 
 type IapResponse = {
   responseCode: number;
@@ -197,6 +198,14 @@ function extractErrorMessage(payload: Record<string, unknown>, fallback: string)
   return fallback;
 }
 
+async function handleInvalidAuthResponse(response: Response, payload: unknown) {
+  if (response.status !== 401 || !isInvalidAuthPayload(payload)) {
+    return;
+  }
+  await clearInvalidMobileSession();
+  resetMonetizationAccountSnapshotForSignedOutSession();
+}
+
 async function withIdentityHeaders() {
   const [mobileAnonId, mobileDeviceKey] = await Promise.all([
     getMobileAnonymousId(),
@@ -344,6 +353,7 @@ export async function fetchMonetizationAccountSnapshot(options?: {
   }
   const payload = (await response.json()) as MonetizationAccountPayload;
   if (!response.ok) {
+    await handleInvalidAuthResponse(response, payload);
     const message = extractErrorMessage(
       payload as Record<string, unknown>,
       "Could not load monetization account.",
@@ -411,6 +421,7 @@ async function verifyApplePurchase(params: {
 
   const payload = (await response.json()) as VerifyPurchasePayload;
   if (!response.ok) {
+    await handleInvalidAuthResponse(response, payload);
     throw new Error(
       extractErrorMessage(payload as Record<string, unknown>, "Purchase verification failed."),
     );

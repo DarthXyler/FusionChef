@@ -7,6 +7,8 @@ import type { NextRequest } from "next/server";
 import type { FuseRequest, RecipeFusion } from "@/lib/types";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
+import { buildInactiveAuthResponse } from "@/lib/auth-api";
+import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
 import {
@@ -725,6 +727,12 @@ export async function POST(request: NextRequest) {
         { error: "Request is too large." },
         413,
       );
+    }
+
+    const authValidation = await getActiveAuthSessionFromRequest(request);
+    const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
+    if (inactiveAuthResponse) {
+      return inactiveAuthResponse;
     }
 
     const body = (await request.json()) as unknown;

@@ -5,7 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
-import { getAuthSessionFromRequest } from "@/lib/auth-session";
+import { buildInactiveAuthResponse } from "@/lib/auth-api";
+import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
 import { getMonetizationCreditCatalog } from "@/lib/monetization-credit-packs";
@@ -35,7 +36,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const authSession = getAuthSessionFromRequest(request);
+    const authValidation = await getActiveAuthSessionFromRequest(request);
+    const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
+    if (inactiveAuthResponse) {
+      noStore(inactiveAuthResponse);
+      return inactiveAuthResponse;
+    }
+    const authSession = authValidation.session;
     const identity = await resolveCookbookIdentity(request);
     const [runtimeConfig, balance, todayUsage] = await Promise.all([
       getMonetizationRuntimeConfig(),

@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthSessionFromRequest } from "@/lib/auth-session";
+import { buildInactiveAuthResponse } from "@/lib/auth-api";
+import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 
 export async function GET(request: NextRequest) {
-  const session = getAuthSessionFromRequest(request);
+  const authValidation = await getActiveAuthSessionFromRequest(request);
+  const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
+  if (inactiveAuthResponse) {
+    return inactiveAuthResponse;
+  }
+  const session = authValidation.session;
   if (!session) {
     return NextResponse.json({
       authenticated: false,
@@ -20,4 +26,3 @@ export async function GET(request: NextRequest) {
     },
   });
 }
-

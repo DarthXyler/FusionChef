@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { randomUUID } from "crypto";
 import { getAnonymousIdentity } from "@/lib/anon-user";
-import { getAuthSessionFromRequest } from "@/lib/auth-session";
+import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import { mergeCookbookAnonymousUsers } from "@/lib/cookbook-db";
 import { executeTurso } from "@/lib/turso";
 
@@ -287,7 +287,7 @@ export async function resolveCookbookIdentity(request: NextRequest): Promise<Coo
   const baseIdentity = getAnonymousIdentity(request);
   const rawDeviceKey = request.headers.get(MOBILE_DEVICE_KEY_HEADER)?.trim();
   const deviceKey = isValidUuid(rawDeviceKey) ? rawDeviceKey : null;
-  const authSession = getAuthSessionFromRequest(request);
+  const { session: authSession } = await getActiveAuthSessionFromRequest(request);
   const authUserId = authSession?.userId?.trim() ?? "";
   if (!deviceKey && !authUserId) {
     return baseIdentity;

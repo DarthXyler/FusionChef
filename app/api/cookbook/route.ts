@@ -10,6 +10,8 @@ import type { FuseRequest, RecipeFusion } from "@/lib/types";
 import { isFuseRequest, isRecipeFusion } from "@/lib/validation";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
+import { buildInactiveAuthResponse } from "@/lib/auth-api";
+import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import { getCookbookStats, listCookbookRecipeSummaries, upsertCookbookRecord } from "@/lib/cookbook-db";
 import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import {
@@ -112,6 +114,12 @@ export async function GET(request: NextRequest) {
       return limited;
     }
 
+    const authValidation = await getActiveAuthSessionFromRequest(request);
+    const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
+    if (inactiveAuthResponse) {
+      return inactiveAuthResponse;
+    }
+
     const identity = await resolveCookbookIdentity(request);
     const cursor = request.nextUrl.searchParams.get("cursor")?.trim() || undefined;
     const pageSize = Math.min(
@@ -170,6 +178,12 @@ export async function POST(request: NextRequest) {
 
     if (isRequestBodyTooLarge(request, MAX_COOKBOOK_BODY_BYTES)) {
       return NextResponse.json({ error: "Request is too large." }, { status: 413 });
+    }
+
+    const authValidation = await getActiveAuthSessionFromRequest(request);
+    const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
+    if (inactiveAuthResponse) {
+      return inactiveAuthResponse;
     }
 
     const body = (await request.json()) as unknown;

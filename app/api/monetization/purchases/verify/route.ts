@@ -5,7 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
-import { getAuthSessionFromRequest } from "@/lib/auth-session";
+import { buildInactiveAuthResponse } from "@/lib/auth-api";
+import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import {
   beginIdempotentRequest,
@@ -110,7 +111,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Request is too large." }, { status: 413 });
     }
 
-    const authSession = getAuthSessionFromRequest(request);
+    const authValidation = await getActiveAuthSessionFromRequest(request);
+    const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
+    if (inactiveAuthResponse) {
+      return inactiveAuthResponse;
+    }
+    const authSession = authValidation.session;
     if (!authSession) {
       return NextResponse.json(
         { error: "Login is required before purchasing credits.", reason: "login_required" },

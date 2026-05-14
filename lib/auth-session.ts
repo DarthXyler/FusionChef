@@ -11,6 +11,7 @@ import {
   getSessionMaxAgeSeconds,
   getSessionSecret,
 } from "@/lib/auth-config";
+import { getAuthUserById } from "@/lib/auth-users";
 
 export type AuthRole = "user" | "admin";
 export type AuthSessionChannel = "web" | "mobile";
@@ -24,6 +25,14 @@ export type AuthSession = {
   channel: AuthSessionChannel;
   iat: number;
   exp: number;
+};
+
+export type AuthSessionInvalidReason = "invalid" | "deleted";
+
+export type ActiveAuthSessionResult = {
+  session: AuthSession | null;
+  hadToken: boolean;
+  invalidReason: AuthSessionInvalidReason | null;
 };
 
 export const AUTH_SESSION_COOKIE = "ffc_auth_session";
@@ -210,4 +219,41 @@ export function getAuthSessionFromRequest(request: NextRequest) {
     return null;
   }
   return verifyAuthSessionToken(cookieToken);
+}
+
+function refreshSessionFromUser(session: AuthSession, user: NonNullable<Awaited<ReturnType<typeof getAuthUserById>>>) {
+  return {
+    ...session,
+    email: user.email,
+    name: user.name,
+    avatarUrl: user.avatarUrl,
+    role: user.role,
+  } satisfies AuthSession;
+}
+
+export async function getActiveAuthSessionFromRequest(
+  request: NextRequest,
+): Promise<ActiveAuthSessionResult> {
+  const bearerToken = getBearerToken(request);
+  const cookieToken = request.cookies.get(AUTH_SESSION_COOKIE)?.value?.trim() ?? "";
+  const token = bearerToken || cookieToken;
+  if (!token) {
+    return { session: null, hadToken: false, invalidReason: null };
+  }
+
+  const parsedSession = verifyAuthSessionToken(token);
+  if (!parsedSession) {
+    return { session: null, hadToken: true, invalidReason: "invalid" };
+  }
+
+  const user = await getAuthUserById(parsedSession.userId);
+  if (!user) {
+    return { session: null, hadToken: true, invalidReason: "deleted" };
+  }
+
+  return {
+    session: refreshSessionFromUser(parsedSession, user),
+    hadToken: true,
+    invalidReason: null,
+  };
 }
