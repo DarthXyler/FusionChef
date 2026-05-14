@@ -30,7 +30,7 @@ import {
 import { useResponsiveFlags } from "../hooks/useResponsiveFlags";
 import type { HomeStackParamList } from "../navigation/types";
 import { sampleGeneratedRecipeRecord } from "../data/sampleGeneratedRecipe";
-import { clearMobileAuthToken, loginWithGoogleForMobile } from "../services/auth";
+import { loginWithGoogleForMobile } from "../services/auth";
 import {
   fetchMonetizationAccountSnapshot,
   getAvailableAppleProductIds,
@@ -38,6 +38,7 @@ import {
   purchaseAppleCredits,
 } from "../services/monetization";
 import { fetchOcrExtractedText } from "../services/ocr";
+import { signOutAndResetMobileSession } from "../services/mobileSession";
 import type { ImportedRecipePhoto } from "../types/importedRecipePhoto";
 import type { DietaryStyle, FuseRequest, MealType, SpiceLevel } from "../types/recipe";
 import { styles } from "../styles/appStyles";
@@ -786,7 +787,7 @@ export function HomeScreen({
     if (isCreditGateBusy) {
       return;
     }
-    await clearMobileAuthToken();
+    await signOutAndResetMobileSession();
     setCreditGateAuthState("unauthenticated");
     setCreditGateMessage("Logged out. Login to continue with paid credits.");
   }

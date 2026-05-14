@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { randomUUID } from "crypto";
 import { getAnonymousIdentity } from "@/lib/anon-user";
 import { getAuthSessionFromRequest } from "@/lib/auth-session";
 import { mergeCookbookAnonymousUsers } from "@/lib/cookbook-db";
@@ -100,6 +101,24 @@ async function readCanonicalIdForAuthUser(authUserId: string) {
 
   const normalized = value.trim();
   return isValidUuid(normalized) ? normalized : null;
+}
+
+async function readAuthUserIdsForCanonical(canonicalAnonUserId: string) {
+  const result = await executeTurso({
+    sql: `SELECT auth_user_id
+          FROM auth_identity_links
+          WHERE canonical_anon_user_id = ?`,
+    args: [canonicalAnonUserId],
+  });
+
+  return result.rows
+    .map((row) => (typeof row.auth_user_id === "string" ? row.auth_user_id.trim() : ""))
+    .filter((value) => value.length > 0);
+}
+
+async function belongsToDifferentAuthUser(canonicalAnonUserId: string, authUserId: string) {
+  const ownerIds = await readAuthUserIdsForCanonical(canonicalAnonUserId);
+  return ownerIds.length > 0 && !ownerIds.includes(authUserId);
 }
 
 async function upsertCanonicalIdForDevice(deviceKey: string, canonicalAnonUserId: string) {
@@ -237,6 +256,17 @@ async function pickCanonicalAnonId(candidateIds: string[], preferredId: string |
   return sorted[0];
 }
 
+async function filterCandidatesForAuthUser(candidateIds: string[], authUserId: string) {
+  const safeCandidates: string[] = [];
+  for (const candidateId of candidateIds) {
+    if (await belongsToDifferentAuthUser(candidateId, authUserId)) {
+      continue;
+    }
+    safeCandidates.push(candidateId);
+  }
+  return safeCandidates;
+}
+
 export async function resolveCookbookIdentity(request: NextRequest): Promise<CookbookIdentity> {
   const baseIdentity = getAnonymousIdentity(request);
   const rawDeviceKey = request.headers.get(MOBILE_DEVICE_KEY_HEADER)?.trim();
@@ -254,18 +284,24 @@ export async function resolveCookbookIdentity(request: NextRequest): Promise<Coo
     const linkedCanonical = deviceKey ? await readCanonicalIdForDevice(deviceKey) : null;
     const authCanonical = authUserId ? await readCanonicalIdForAuthUser(authUserId) : null;
     const aliasCanonical = await resolveAliasCanonicalId(baseIdentity.anonUserId);
-    const candidateIds = uniqueValidIds([
+    const rawCandidateIds = uniqueValidIds([
       linkedCanonical,
       authCanonical,
       aliasCanonical,
       baseIdentity.anonUserId,
     ]);
-    const canonicalAnonUserId = await pickCanonicalAnonId(
-      candidateIds,
-      authCanonical ?? linkedCanonical,
-    );
+    const candidateIds = authUserId
+      ? await filterCandidatesForAuthUser(rawCandidateIds, authUserId)
+      : rawCandidateIds;
+    const safeCandidateIds =
+      candidateIds.length > 0 ? candidateIds : uniqueValidIds([authCanonical, randomUUID()]);
+    // A signed-in account must keep its own owner ID. Shared phones can still send
+    // an old device key, but that key must not pull another account's cookbook/credits.
+    const canonicalAnonUserId = authCanonical
+      ? authCanonical
+      : await pickCanonicalAnonId(safeCandidateIds, linkedCanonical);
 
-    for (const candidateId of candidateIds) {
+    for (const candidateId of safeCandidateIds) {
       if (candidateId === canonicalAnonUserId) {
         continue;
       }

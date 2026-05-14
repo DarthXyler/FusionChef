@@ -64,6 +64,10 @@ export async function saveDashboardFusionHistory(items: DashboardFusionSummary[]
   return next;
 }
 
+export async function clearDashboardFusionHistory() {
+  await AsyncStorage.removeItem(DASHBOARD_HISTORY_KEY);
+}
+
 export async function upsertDashboardFusionHistory(record: GeneratedRecipeRecord) {
   const current = await readDashboardFusionHistory();
   // Store the full generated record so the user can reopen and save it later.

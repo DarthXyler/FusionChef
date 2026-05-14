@@ -277,6 +277,19 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
     [cookbookRecordCache, refreshSummaries, upsertCookbookRecordState],
   );
 
+  const resetLocalState = useCallback(() => {
+    setCookbookSummaries([]);
+    setCookbookRecordCache({});
+    setIsCookbookLoading(false);
+    setIsCookbookRefreshing(false);
+    setIsCookbookLoadingMore(false);
+    setHasLoadedCookbook(false);
+    setHasMoreCookbook(false);
+    setNextCookbookCursor(null);
+    setIsShowingCachedSummaries(false);
+    setSummarySyncError("");
+  }, []);
+
   const value = useMemo<MobileCookbookContextValue>(
     () => ({
       summaries: cookbookSummaries,
@@ -296,6 +309,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       refreshRecord,
       updateRecipeFlags,
       deleteRecord,
+      resetLocalState,
     }),
     [
       cookbookRecordCache,
@@ -312,6 +326,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       loadSummaries,
       refreshRecord,
       refreshSummaries,
+      resetLocalState,
       saveRecord,
       summarySyncError,
       updateRecipeFlags,

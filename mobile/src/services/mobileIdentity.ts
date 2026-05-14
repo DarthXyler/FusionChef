@@ -161,6 +161,22 @@ async function persistDeviceKey(id: string) {
   await writeSecureDeviceKey(id);
 }
 
+async function removeCookbookCachesForAllMobileIdentities() {
+  try {
+    const allKeys = await AsyncStorage.getAllKeys();
+    const cookbookCacheKeys = allKeys.filter(
+      (key) =>
+        key.startsWith(COOKBOOK_SUMMARY_CACHE_PREFIX) ||
+        key.startsWith(COOKBOOK_DETAIL_CACHE_PREFIX),
+    );
+    if (cookbookCacheKeys.length > 0) {
+      await AsyncStorage.multiRemove(cookbookCacheKeys);
+    }
+  } catch {
+    // Cache cleanup is best effort. A fresh identity is still written below.
+  }
+}
+
 async function resolveMobileDeviceKey() {
   const storedPrimary = (await AsyncStorage.getItem(MOBILE_DEVICE_KEY))?.trim();
   if (isValidAnonymousId(storedPrimary)) {
@@ -232,4 +248,22 @@ export async function getMobileDeviceKey() {
   }
 
   return resolvingMobileDeviceKey;
+}
+
+export async function resetMobileIdentityForSignOut() {
+  const nextAnonId = generateUuidV4();
+  const nextDeviceKey = generateUuidV4();
+
+  await removeCookbookCachesForAllMobileIdentities();
+  await Promise.all([persistAnonymousId(nextAnonId), persistDeviceKey(nextDeviceKey)]);
+
+  resolvedMobileAnonymousId = nextAnonId;
+  resolvingMobileAnonymousId = null;
+  resolvedMobileDeviceKey = nextDeviceKey;
+  resolvingMobileDeviceKey = null;
+
+  return {
+    anonymousId: nextAnonId,
+    deviceKey: nextDeviceKey,
+  };
 }

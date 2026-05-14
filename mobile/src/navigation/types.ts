@@ -70,4 +70,5 @@ export type MobileCookbookContextValue = {
     flags: { isFavorite?: boolean; isToTry?: boolean },
   ) => Promise<CookbookRecipeRecord>;
   deleteRecord: (recipeId: string) => Promise<void>;
+  resetLocalState: () => void;
 };

@@ -22,7 +22,6 @@ import { CreditPill } from "../components/CreditPill";
 import { useMobileCookbook } from "../context/mobileCookbook";
 import type { RootTabParamList } from "../navigation/types";
 import {
-  clearMobileAuthToken,
   getMobileAuthSession,
   loginWithGoogleForMobile,
   type MobileAuthSession,
@@ -40,6 +39,7 @@ import {
   saveMobileProfileOverrides,
   type MobileProfileOverrides,
 } from "../services/profile";
+import { signOutAndResetMobileSession } from "../services/mobileSession";
 import { styles } from "../styles/appStyles";
 
 const SUPPORT_URL = "https://flavor-fusion-chef.vercel.app/support";
@@ -151,7 +151,7 @@ function ProfileAvatar({
 }
 
 export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, "Profile">) {
-  const { summaries } = useMobileCookbook();
+  const { resetLocalState, summaries } = useMobileCookbook();
   const [session, setSession] = useState<MobileAuthSession | null>(null);
   const [profileOverrides, setProfileOverrides] = useState<MobileProfileOverrides>({
     displayName: "",
@@ -415,14 +415,24 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
         text: "Sign Out",
         style: "destructive",
         onPress: () => {
-          void clearMobileAuthToken().then(() => {
-            setSession(null);
-            setAccountSnapshot(null);
-          });
+          void signOutAndResetMobileSession()
+            .then(() => {
+              resetLocalState();
+              setSession(null);
+              setProfileOverrides({ displayName: "", photoUri: "" });
+              setAccountSnapshot(null);
+              setCreditPackOptions([]);
+              setSelectedCreditPackId("");
+              setCreditPurchaseMessage("");
+              setIsCreditSheetOpen(false);
+            })
+            .catch(() => {
+              Alert.alert("Sign out failed", "Could not fully reset this device session.");
+            });
         },
       },
     ]);
-  }, []);
+  }, [resetLocalState]);
 
   const handleDeleteAccount = useCallback(() => {
     Alert.alert(

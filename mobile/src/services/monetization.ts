@@ -261,6 +261,33 @@ export function invalidateMonetizationAccountSnapshotCache() {
   cachedAccountSnapshot = null;
 }
 
+export function resetMonetizationAccountSnapshotForSignedOutSession() {
+  const snapshot: MonetizationAccountSnapshot = {
+    authenticated: false,
+    enabled: false,
+    enforcementMode: "off",
+    actionCosts: {
+      fuse: 2,
+      reroll: 1,
+    },
+    balance: {
+      availableCredits: 0,
+      pendingCredits: 0,
+    },
+    freeRemaining: {
+      fuse: 0,
+      reroll: 0,
+    },
+    products: [],
+    pricingPackages: [],
+  };
+  cachedAccountSnapshot = {
+    value: snapshot,
+    fetchedAtMs: Date.now(),
+  };
+  notifyAccountSnapshotListeners(snapshot);
+}
+
 export function subscribeToMonetizationAccountSnapshot(
   listener: (snapshot: MonetizationAccountSnapshot) => void,
 ) {
