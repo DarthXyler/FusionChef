@@ -4,6 +4,8 @@ import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
+import { AppState } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { MobileCookbookProvider } from "./src/context/mobileCookbook";
 import type {
@@ -18,10 +20,36 @@ import { RecipeWorkspaceScreen } from "./src/screens/RecipeWorkspaceScreen";
 import { CookbookListScreen } from "./src/screens/CookbookListScreen";
 import { CookbookDetailScreen } from "./src/screens/CookbookDetailScreen";
 import { ProfileScreen } from "./src/screens/ProfileScreen";
+import { fetchMonetizationAccountSnapshot } from "./src/services/monetization";
 
 const HomeStack = createNativeStackNavigator<HomeStackParamList>();
 const CookbookStack = createNativeStackNavigator<CookbookStackParamList>();
 const RootTab = createBottomTabNavigator<RootTabParamList>();
+
+function AccountSnapshotRefreshBridge() {
+  useEffect(() => {
+    const refreshAccountSnapshot = () => {
+      void fetchMonetizationAccountSnapshot({ forceRefresh: true }).catch(() => {
+        // Normal screens show their own error states when the account snapshot is needed.
+      });
+    };
+
+    refreshAccountSnapshot();
+    const interval = setInterval(refreshAccountSnapshot, 15 * 60 * 1000);
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        refreshAccountSnapshot();
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, []);
+
+  return null;
+}
 
 function CookbookStackNavigator() {
   return (
@@ -86,6 +114,7 @@ export default function App() {
     <SafeAreaProvider>
       <MobileCookbookProvider>
         <NavigationContainer>
+          <AccountSnapshotRefreshBridge />
           <StatusBar style="dark" />
           <RootTab.Navigator
             screenOptions={{

@@ -1,6 +1,7 @@
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
+import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
 import Constants from "expo-constants";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -556,6 +557,18 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     setIsEditOpen(false);
   }, [draftName, draftPhotoUri]);
 
+  const handleCopyEmail = useCallback(async () => {
+    if (!email) {
+      return;
+    }
+    try {
+      await Clipboard.setStringAsync(email);
+      Alert.alert("Email copied", "The account email was copied.");
+    } catch {
+      Alert.alert("Copy failed", "Could not copy the email right now.");
+    }
+  }, [email]);
+
   const accountRows = useMemo(
     () => (
       <>
@@ -919,6 +932,19 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
               <Text style={styles.profileFieldLabel}>Email</Text>
               <View style={styles.profileReadonlyField}>
                 <Text style={styles.profileReadonlyFieldText}>{email || "Not signed in"}</Text>
+                {email ? (
+                  <Pressable
+                    accessibilityLabel="Copy email"
+                    accessibilityRole="button"
+                    onPress={handleCopyEmail}
+                    style={({ pressed }) => [
+                      styles.profileCopyEmailButton,
+                      pressed && styles.profileRowPressed,
+                    ]}
+                  >
+                    <MaterialIcons color="#047857" name="content-copy" size={20} />
+                  </Pressable>
+                ) : null}
               </View>
 
               <View style={styles.profileRowsCard}>
