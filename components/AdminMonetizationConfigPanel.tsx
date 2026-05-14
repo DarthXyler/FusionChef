@@ -143,6 +143,52 @@ type BatchGrantResult = {
   previewTruncated: boolean;
 };
 
+type AccountDeletionCounts = {
+  authUsers: number;
+  identityLinks: number;
+  mobileDeviceLinks: number;
+  mobileAliases: number;
+  cookbookRecipes: number;
+  creditBalanceRows: number;
+  creditReservations: number;
+  creditLedgerEntries: number;
+  dailyUsageRows: number;
+  purchaseTransactionsPreserved: number;
+};
+
+type AccountDeleteTarget = {
+  input: string;
+  status:
+    | "ready"
+    | "missing"
+    | "ambiguous"
+    | "duplicate_input"
+    | "duplicate_target"
+    | "blocked_shared_identity";
+  message: string;
+  user: AdminUserRow | null;
+  linkedAuthUsers: Array<{ authUserId: string; email: string }>;
+  counts: AccountDeletionCounts;
+};
+
+type AccountDeleteResult = {
+  operation: "account_delete";
+  mode: "dry_run" | "commit";
+  summary: {
+    totalInputs: number;
+    ready: number;
+    missing: number;
+    ambiguous: number;
+    blockedSharedIdentity: number;
+    duplicateInputs: number;
+    duplicateTargets: number;
+    deleted: number;
+    counts: AccountDeletionCounts;
+  };
+  targets: AccountDeleteTarget[];
+  previewTruncated: boolean;
+};
+
 type PanelKey =
   | "adminAccess"
   | "quickPresets"
@@ -527,6 +573,22 @@ function isBatchGrantResult(value: unknown): value is BatchGrantResult {
   );
 }
 
+function isAccountDeleteResult(value: unknown): value is AccountDeleteResult {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  const summary = candidate.summary;
+  return (
+    candidate.operation === "account_delete" &&
+    (candidate.mode === "dry_run" || candidate.mode === "commit") &&
+    typeof summary === "object" &&
+    summary !== null &&
+    !Array.isArray(summary) &&
+    Array.isArray(candidate.targets)
+  );
+}
+
 function toIsoLabel(value: string) {
   if (!value) {
     return "N/A";
@@ -750,6 +812,12 @@ export function AdminMonetizationConfigPanel({
   const [grantDryRun, setGrantDryRun] = useState<BatchGrantResult | null>(null);
   const [isRunningGrantDryRun, setIsRunningGrantDryRun] = useState(false);
   const [isCommittingGrantBatch, setIsCommittingGrantBatch] = useState(false);
+  const [deleteIdentifiersText, setDeleteIdentifiersText] = useState("");
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteDryRun, setDeleteDryRun] = useState<AccountDeleteResult | null>(null);
+  const [isRunningDeleteDryRun, setIsRunningDeleteDryRun] = useState(false);
+  const [isCommittingDelete, setIsCommittingDelete] = useState(false);
   const [panelNotices, setPanelNotices] =
     useState<Record<PanelKey, PanelNoticeState>>(DEFAULT_PANEL_NOTICES);
   const [hasHydratedClientState, setHasHydratedClientState] = useState(false);
@@ -1011,6 +1079,59 @@ export function AdminMonetizationConfigPanel({
     } finally {
       setIsRunningGrantDryRun(false);
       setIsCommittingGrantBatch(false);
+    }
+  }
+
+  async function runAccountDelete(mode: "dry_run" | "commit") {
+    if (mode === "dry_run") {
+      setIsRunningDeleteDryRun(true);
+    } else {
+      setIsCommittingDelete(true);
+    }
+    clearPanelNotice("users");
+    try {
+      const response = await fetch("/api/admin/monetization/users", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...buildAdminHeaders({ includeActor: true }),
+          ...(mode === "commit" ? { "idempotency-key": generateIdempotencyKey("account-delete") } : {}),
+        },
+        body: JSON.stringify({
+          operation: "account_delete",
+          mode,
+          identifiersText: deleteIdentifiersText,
+          reason: deleteReason,
+          confirmation: deleteConfirmation,
+        }),
+      });
+      const payload = (await response.json()) as unknown;
+      if (!response.ok) {
+        throw new Error(
+          isObjectRecord(payload) && typeof payload.error === "string"
+            ? payload.error
+            : "Could not run account deletion.",
+        );
+      }
+      if (!isAccountDeleteResult(payload)) {
+        throw new Error("Account deletion response format was invalid.");
+      }
+      setDeleteDryRun(payload);
+      setPanelSuccess(
+        "users",
+        mode === "commit"
+          ? `Deleted ${payload.summary.deleted} account(s). Purchase transaction rows were preserved for audit.`
+          : `Dry run ready: ${payload.summary.ready} account(s), blocked: ${payload.summary.blockedSharedIdentity}.`,
+      );
+      if (mode === "commit") {
+        setDeleteConfirmation("");
+        void loadUsers();
+      }
+    } catch (error) {
+      setPanelError("users", error instanceof Error ? error.message : "Could not run account deletion.");
+    } finally {
+      setIsRunningDeleteDryRun(false);
+      setIsCommittingDelete(false);
     }
   }
 
@@ -2155,6 +2276,108 @@ export function AdminMonetizationConfigPanel({
                     </span>{" "}
                     {target.message}
                   </p>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-red-900">Account Deletion</h3>
+          <p className="mt-1 text-sm text-zinc-700">
+            Paste email, auth id, or credit id from the user search results. Dry run first. Commit removes account,
+            cookbook, credits, usage, identity links, and device links. Purchase transaction rows are anonymized and
+            preserved for financial audit.
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[1.4fr_0.6fr]">
+            <label className="space-y-1 text-sm font-semibold text-red-900">
+              Users to delete
+              <textarea
+                value={deleteIdentifiersText}
+                onChange={(event) => setDeleteIdentifiersText(event.target.value)}
+                rows={6}
+                className="w-full rounded-2xl border border-red-200 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-red-500"
+                placeholder="one email or user id per line"
+              />
+            </label>
+            <div className="space-y-3">
+              <label className="space-y-1 text-sm font-semibold text-red-900">
+                Reason
+                <input
+                  type="text"
+                  value={deleteReason}
+                  onChange={(event) => setDeleteReason(event.target.value)}
+                  className="w-full rounded-2xl border border-red-200 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-red-500"
+                  placeholder="user requested deletion"
+                />
+              </label>
+              <label className="space-y-1 text-sm font-semibold text-red-900">
+                Commit confirmation
+                <input
+                  type="text"
+                  value={deleteConfirmation}
+                  onChange={(event) => setDeleteConfirmation(event.target.value)}
+                  className="w-full rounded-2xl border border-red-200 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-red-500"
+                  placeholder="type DELETE"
+                />
+              </label>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void runAccountDelete("dry_run")}
+              disabled={isRunningDeleteDryRun || isCommittingDelete}
+              className="cursor-pointer rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isRunningDeleteDryRun ? "Checking..." : "Dry Run Delete"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void runAccountDelete("commit")}
+              disabled={
+                isCommittingDelete ||
+                deleteConfirmation !== "DELETE" ||
+                !deleteDryRun ||
+                deleteDryRun.summary.ready < 1 ||
+                deleteDryRun.summary.blockedSharedIdentity > 0
+              }
+              className="cursor-pointer rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isCommittingDelete ? "Deleting..." : "Commit Delete"}
+            </button>
+          </div>
+          {deleteDryRun ? (
+            <div className="mt-4 rounded-xl border border-red-100 bg-white p-3 text-sm text-zinc-700">
+              <p>
+                Ready: <span className="font-semibold text-zinc-950">{deleteDryRun.summary.ready}</span>
+                {" | "}Missing: {deleteDryRun.summary.missing}
+                {" | "}Ambiguous: {deleteDryRun.summary.ambiguous}
+                {" | "}Blocked shared: {deleteDryRun.summary.blockedSharedIdentity}
+                {" | "}Deleted: {deleteDryRun.summary.deleted}
+              </p>
+              <p className="mt-2 text-xs text-zinc-600">
+                Deletes {deleteDryRun.summary.counts.cookbookRecipes} cookbook row(s),{" "}
+                {deleteDryRun.summary.counts.creditLedgerEntries} ledger row(s),{" "}
+                {deleteDryRun.summary.counts.dailyUsageRows} daily usage row(s), and preserves{" "}
+                {deleteDryRun.summary.counts.purchaseTransactionsPreserved} anonymized purchase transaction row(s).
+              </p>
+              <div className="mt-3 max-h-52 overflow-auto">
+                {deleteDryRun.targets.slice(0, 50).map((target) => (
+                  <div key={`${target.input}-${target.status}`} className="border-t border-zinc-100 py-2 text-xs">
+                    <p>
+                      <span className="font-mono">{target.input}</span> -{" "}
+                      <span className={target.status === "ready" ? "text-emerald-700" : "text-red-700"}>
+                        {target.status}
+                      </span>{" "}
+                      {target.message}
+                    </p>
+                    {target.linkedAuthUsers.length > 1 ? (
+                      <p className="mt-1 text-red-700">
+                        Linked accounts: {target.linkedAuthUsers.map((linked) => linked.email).join(", ")}
+                      </p>
+                    ) : null}
+                  </div>
                 ))}
               </div>
             </div>

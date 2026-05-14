@@ -18,7 +18,7 @@ import {
   getIdempotencyKeyFromHeaders,
   type IdempotencyContext,
 } from "@/lib/idempotency";
-import { executeTurso } from "@/lib/turso";
+import { executeTurso, executeTursoBatch } from "@/lib/turso";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -46,6 +46,34 @@ type BatchGrantTarget = {
   status: "ready" | "missing" | "ambiguous" | "duplicate_input" | "duplicate_target";
   message: string;
   user: ResolvedUser | null;
+};
+
+type DeleteTarget = {
+  input: string;
+  status:
+    | "ready"
+    | "missing"
+    | "ambiguous"
+    | "duplicate_input"
+    | "duplicate_target"
+    | "blocked_shared_identity";
+  message: string;
+  user: ResolvedUser | null;
+  linkedAuthUsers: Array<{ authUserId: string; email: string }>;
+  counts: AccountDeletionCounts;
+};
+
+type AccountDeletionCounts = {
+  authUsers: number;
+  identityLinks: number;
+  mobileDeviceLinks: number;
+  mobileAliases: number;
+  cookbookRecipes: number;
+  creditBalanceRows: number;
+  creditReservations: number;
+  creditLedgerEntries: number;
+  dailyUsageRows: number;
+  purchaseTransactionsPreserved: number;
 };
 
 class RequestValidationError extends Error {}
@@ -185,6 +213,66 @@ async function ensureAdminUserSchemas() {
   await executeTurso(
     `CREATE INDEX IF NOT EXISTS idx_cookbook_user_saved
      ON cookbook_recipes (anon_user_id, saved_at DESC)`,
+  );
+  await executeTurso(
+    `CREATE TABLE IF NOT EXISTS mobile_identity_links (
+      device_key TEXT PRIMARY KEY,
+      canonical_anon_user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )`,
+  );
+  await executeTurso(
+    `CREATE TABLE IF NOT EXISTS mobile_identity_aliases (
+      anon_user_id TEXT PRIMARY KEY,
+      canonical_anon_user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )`,
+  );
+  await executeTurso(
+    `CREATE TABLE IF NOT EXISTS credit_reservations (
+      reservation_id TEXT PRIMARY KEY,
+      anon_user_id TEXT NOT NULL,
+      action_kind TEXT NOT NULL CHECK(action_kind IN ('fuse','reroll')),
+      amount INTEGER NOT NULL CHECK(amount > 0),
+      status TEXT NOT NULL CHECK(status IN ('reserved','committed','released')),
+      idempotency_scope TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      expires_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )`,
+  );
+  await executeTurso(
+    `CREATE TABLE IF NOT EXISTS credit_ledger_entries (
+      entry_id TEXT PRIMARY KEY,
+      anon_user_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      action_kind TEXT,
+      amount INTEGER NOT NULL,
+      balance_available_after INTEGER NOT NULL,
+      balance_pending_after INTEGER NOT NULL,
+      reservation_id TEXT,
+      actor TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      idempotency_scope TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )`,
+  );
+  await executeTurso(
+    `CREATE TABLE IF NOT EXISTS credit_daily_usage (
+      anon_user_id TEXT NOT NULL,
+      day_key TEXT NOT NULL,
+      timezone TEXT NOT NULL,
+      fuse_count INTEGER NOT NULL DEFAULT 0 CHECK(fuse_count >= 0),
+      reroll_count INTEGER NOT NULL DEFAULT 0 CHECK(reroll_count >= 0),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      PRIMARY KEY (anon_user_id, day_key)
+    )`,
   );
 }
 
@@ -403,6 +491,36 @@ function parseBatchPayload(body: unknown) {
   return { mode, amount, reason, batchLabel, identifiers };
 }
 
+function parseDeletePayload(body: unknown) {
+  if (!isObjectRecord(body)) {
+    throw new RequestValidationError("Invalid request body.");
+  }
+  const mode: "dry_run" | "commit" | "" =
+    body.mode === "commit" ? "commit" : body.mode === "dry_run" ? "dry_run" : "";
+  if (!mode) {
+    throw new RequestValidationError("mode must be dry_run or commit.");
+  }
+  const reason = asString(body.reason).trim().slice(0, 500);
+  if (mode === "commit" && !reason) {
+    throw new RequestValidationError("reason is required before deleting an account.");
+  }
+  const confirmation = asString(body.confirmation).trim();
+  if (mode === "commit" && confirmation !== "DELETE") {
+    throw new RequestValidationError("confirmation must be DELETE.");
+  }
+  const rawIdentifiers = Array.isArray(body.identifiers)
+    ? body.identifiers.map((value) => asString(value))
+    : asString(body.identifiersText).split(/[\n,;\t ]+/);
+  const identifiers = rawIdentifiers.map((value) => value.trim()).filter(Boolean);
+  if (identifiers.length < 1) {
+    throw new RequestValidationError("At least one email or user id is required.");
+  }
+  if (identifiers.length > MAX_BATCH_IDENTIFIERS) {
+    throw new RequestValidationError(`Batch cannot exceed ${MAX_BATCH_IDENTIFIERS} identifiers.`);
+  }
+  return { mode, reason, confirmation, identifiers };
+}
+
 async function fetchResolvedUsers(column: "normalized_email" | "id" | "canonical", values: string[]) {
   const output = new Map<string, ResolvedUser[]>();
   for (let index = 0; index < values.length; index += RESOLVE_CHUNK_SIZE) {
@@ -524,6 +642,131 @@ async function resolveBatchTargets(identifiers: string[]) {
   return targets;
 }
 
+async function getLinkedAuthUsers(canonicalAnonUserId: string) {
+  if (!canonicalAnonUserId) {
+    return [] as Array<{ authUserId: string; email: string }>;
+  }
+  const result = await executeTurso({
+    sql: `SELECT u.id AS auth_user_id, u.email
+          FROM auth_identity_links ail
+          JOIN auth_users u ON u.id = ail.auth_user_id
+          WHERE ail.canonical_anon_user_id = ?
+          ORDER BY u.email ASC`,
+    args: [canonicalAnonUserId],
+  });
+  return result.rows.map((row) => ({
+    authUserId: asString((row as Record<string, unknown>).auth_user_id),
+    email: asString((row as Record<string, unknown>).email),
+  }));
+}
+
+async function getAccountDeletionCounts(user: ResolvedUser): Promise<AccountDeletionCounts> {
+  const canonical = user.canonicalAnonUserId;
+  const authUserId = user.authUserId;
+  const result = await executeTurso({
+    sql: `SELECT
+            (SELECT COUNT(*) FROM auth_users WHERE id = ?) AS auth_users,
+            (SELECT COUNT(*) FROM auth_identity_links WHERE auth_user_id = ? OR canonical_anon_user_id = ?) AS identity_links,
+            (SELECT COUNT(*) FROM mobile_identity_links WHERE canonical_anon_user_id = ?) AS mobile_device_links,
+            (SELECT COUNT(*) FROM mobile_identity_aliases WHERE anon_user_id = ? OR canonical_anon_user_id = ?) AS mobile_aliases,
+            (SELECT COUNT(*) FROM cookbook_recipes WHERE anon_user_id = ?) AS cookbook_recipes,
+            (SELECT COUNT(*) FROM credit_balances WHERE anon_user_id = ?) AS credit_balance_rows,
+            (SELECT COUNT(*) FROM credit_reservations WHERE anon_user_id = ?) AS credit_reservations,
+            (SELECT COUNT(*) FROM credit_ledger_entries WHERE anon_user_id = ?) AS credit_ledger_entries,
+            (SELECT COUNT(*) FROM credit_daily_usage WHERE anon_user_id = ?) AS daily_usage_rows,
+            (SELECT COUNT(*) FROM credit_purchase_transactions WHERE anon_user_id = ?) AS purchase_transactions_preserved`,
+    args: [
+      authUserId,
+      authUserId,
+      canonical,
+      canonical,
+      canonical,
+      canonical,
+      canonical,
+      canonical,
+      canonical,
+      canonical,
+      canonical,
+      canonical,
+    ],
+  });
+  const row = (result.rows[0] ?? {}) as Record<string, unknown>;
+  return {
+    authUsers: asInteger(row.auth_users),
+    identityLinks: asInteger(row.identity_links),
+    mobileDeviceLinks: asInteger(row.mobile_device_links),
+    mobileAliases: asInteger(row.mobile_aliases),
+    cookbookRecipes: asInteger(row.cookbook_recipes),
+    creditBalanceRows: asInteger(row.credit_balance_rows),
+    creditReservations: asInteger(row.credit_reservations),
+    creditLedgerEntries: asInteger(row.credit_ledger_entries),
+    dailyUsageRows: asInteger(row.daily_usage_rows),
+    purchaseTransactionsPreserved: asInteger(row.purchase_transactions_preserved),
+  };
+}
+
+async function resolveDeleteTargets(identifiers: string[]) {
+  const baseTargets = await resolveBatchTargets(identifiers);
+  const readyAuthIds = new Set(
+    baseTargets
+      .filter((target) => (target.status === "ready" || target.status === "duplicate_target") && target.user)
+      .map((target) => target.user?.authUserId ?? ""),
+  );
+  const output: DeleteTarget[] = [];
+  for (const target of baseTargets) {
+    const emptyCounts: AccountDeletionCounts = {
+      authUsers: 0,
+      identityLinks: 0,
+      mobileDeviceLinks: 0,
+      mobileAliases: 0,
+      cookbookRecipes: 0,
+      creditBalanceRows: 0,
+      creditReservations: 0,
+      creditLedgerEntries: 0,
+      dailyUsageRows: 0,
+      purchaseTransactionsPreserved: 0,
+    };
+    const canEvaluateDeletion =
+      (target.status === "ready" || target.status === "duplicate_target") && target.user;
+    if (!canEvaluateDeletion || !target.user) {
+      output.push({
+        ...target,
+        status: target.status,
+        linkedAuthUsers: [],
+        counts: emptyCounts,
+      });
+      continue;
+    }
+
+    const [linkedAuthUsers, counts] = await Promise.all([
+      getLinkedAuthUsers(target.user.canonicalAnonUserId),
+      getAccountDeletionCounts(target.user),
+    ]);
+    const unselectedLinkedUsers = linkedAuthUsers.filter((linked) => !readyAuthIds.has(linked.authUserId));
+    if (unselectedLinkedUsers.length > 0) {
+      output.push({
+        input: target.input,
+        status: "blocked_shared_identity",
+        message: "This account shares cookbook/credits with another signed-in account. Include all linked accounts or separate them first.",
+        user: target.user,
+        linkedAuthUsers,
+        counts,
+      });
+      continue;
+    }
+
+    output.push({
+      input: target.input,
+      status: "ready",
+      message: "Ready to delete.",
+      user: target.user,
+      linkedAuthUsers,
+      counts,
+    });
+  }
+  return output;
+}
+
 function buildBatchResponse(params: {
   mode: "dry_run" | "commit";
   amount: number;
@@ -554,6 +797,128 @@ function buildBatchResponse(params: {
   };
 }
 
+function sumDeletionCounts(targets: DeleteTarget[]) {
+  const countedCanonicals = new Set<string>();
+  return targets
+    .filter((target) => {
+      if (target.status !== "ready" || !target.user?.canonicalAnonUserId) {
+        return false;
+      }
+      if (countedCanonicals.has(target.user.canonicalAnonUserId)) {
+        return false;
+      }
+      countedCanonicals.add(target.user.canonicalAnonUserId);
+      return true;
+    })
+    .reduce<AccountDeletionCounts>(
+      (total, target) => ({
+        authUsers: total.authUsers + target.counts.authUsers,
+        identityLinks: total.identityLinks + target.counts.identityLinks,
+        mobileDeviceLinks: total.mobileDeviceLinks + target.counts.mobileDeviceLinks,
+        mobileAliases: total.mobileAliases + target.counts.mobileAliases,
+        cookbookRecipes: total.cookbookRecipes + target.counts.cookbookRecipes,
+        creditBalanceRows: total.creditBalanceRows + target.counts.creditBalanceRows,
+        creditReservations: total.creditReservations + target.counts.creditReservations,
+        creditLedgerEntries: total.creditLedgerEntries + target.counts.creditLedgerEntries,
+        dailyUsageRows: total.dailyUsageRows + target.counts.dailyUsageRows,
+        purchaseTransactionsPreserved:
+          total.purchaseTransactionsPreserved + target.counts.purchaseTransactionsPreserved,
+      }),
+      {
+        authUsers: 0,
+        identityLinks: 0,
+        mobileDeviceLinks: 0,
+        mobileAliases: 0,
+        cookbookRecipes: 0,
+        creditBalanceRows: 0,
+        creditReservations: 0,
+        creditLedgerEntries: 0,
+        dailyUsageRows: 0,
+        purchaseTransactionsPreserved: 0,
+      },
+    );
+}
+
+function buildDeleteResponse(params: {
+  mode: "dry_run" | "commit";
+  targets: DeleteTarget[];
+  deleted?: Array<{ authUserId: string; email: string; canonicalAnonUserId: string }>;
+}) {
+  return {
+    operation: "account_delete",
+    mode: params.mode,
+    summary: {
+      totalInputs: params.targets.length,
+      ready: params.targets.filter((target) => target.status === "ready").length,
+      missing: params.targets.filter((target) => target.status === "missing").length,
+      ambiguous: params.targets.filter((target) => target.status === "ambiguous").length,
+      blockedSharedIdentity: params.targets.filter((target) => target.status === "blocked_shared_identity").length,
+      duplicateInputs: params.targets.filter((target) => target.status === "duplicate_input").length,
+      duplicateTargets: params.targets.filter((target) => target.status === "duplicate_target").length,
+      deleted: params.deleted?.length ?? 0,
+      counts: sumDeletionCounts(params.targets),
+    },
+    targets: params.targets.slice(0, 500),
+    previewTruncated: params.targets.length > 500,
+    deleted: params.deleted ?? [],
+  };
+}
+
+async function deleteReadyAccounts(params: {
+  targets: Array<DeleteTarget & { user: ResolvedUser }>;
+  actor: string;
+  reason: string;
+  batchId: string;
+}) {
+  const deleted: Array<{ authUserId: string; email: string; canonicalAnonUserId: string }> = [];
+  const targetsByCanonical = new Map<string, Array<DeleteTarget & { user: ResolvedUser }>>();
+  for (const target of params.targets) {
+    const existing = targetsByCanonical.get(target.user.canonicalAnonUserId) ?? [];
+    existing.push(target);
+    targetsByCanonical.set(target.user.canonicalAnonUserId, existing);
+  }
+
+  for (const [canonical, canonicalTargets] of targetsByCanonical.entries()) {
+    const primaryAuthUserId = canonicalTargets[0]?.user.authUserId ?? canonical;
+    const authUserIds = [...new Set(canonicalTargets.map((target) => target.user.authUserId))];
+    const authPlaceholders = authUserIds.map(() => "?").join(", ");
+    const deletedPurchaseOwner = `deleted:${primaryAuthUserId}`;
+    await executeTursoBatch([
+      {
+        sql: `UPDATE credit_purchase_transactions
+              SET anon_user_id = ?, payload_json = '{}', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+              WHERE anon_user_id = ?`,
+        args: [deletedPurchaseOwner, canonical],
+      },
+      { sql: `DELETE FROM cookbook_recipes WHERE anon_user_id = ?`, args: [canonical] },
+      { sql: `DELETE FROM credit_balances WHERE anon_user_id = ?`, args: [canonical] },
+      { sql: `DELETE FROM credit_reservations WHERE anon_user_id = ?`, args: [canonical] },
+      { sql: `DELETE FROM credit_ledger_entries WHERE anon_user_id = ?`, args: [canonical] },
+      { sql: `DELETE FROM credit_daily_usage WHERE anon_user_id = ?`, args: [canonical] },
+      { sql: `DELETE FROM mobile_identity_links WHERE canonical_anon_user_id = ?`, args: [canonical] },
+      {
+        sql: `DELETE FROM mobile_identity_aliases
+              WHERE anon_user_id = ? OR canonical_anon_user_id = ?`,
+        args: [canonical, canonical],
+      },
+      {
+        sql: `DELETE FROM auth_identity_links
+              WHERE auth_user_id IN (${authPlaceholders}) OR canonical_anon_user_id = ?`,
+        args: [...authUserIds, canonical],
+      },
+      { sql: `DELETE FROM auth_users WHERE id IN (${authPlaceholders})`, args: authUserIds },
+    ], 30_000);
+    canonicalTargets.forEach((target) => {
+      deleted.push({
+        authUserId: target.user.authUserId,
+        email: target.user.email,
+        canonicalAnonUserId: canonical,
+      });
+    });
+  }
+  return deleted;
+}
+
 export async function POST(request: NextRequest) {
   const admin = requireMonetizationAdmin(request, { requireActor: true });
   if (!admin.ok) {
@@ -575,7 +940,93 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Request is too large." }, { status: 413 });
     }
     await ensureAdminUserSchemas();
-    const payload = parseBatchPayload((await request.json()) as unknown);
+    const rawBody = (await request.json()) as unknown;
+    const operation = isObjectRecord(rawBody) && rawBody.operation === "account_delete" ? "account_delete" : "credit_grant";
+    if (operation === "account_delete") {
+      const payload = parseDeletePayload(rawBody);
+      const targets = await resolveDeleteTargets(payload.identifiers);
+
+      if (payload.mode === "dry_run") {
+        const response = NextResponse.json(buildDeleteResponse({ mode: payload.mode, targets }));
+        withNoStore(response);
+        return response;
+      }
+
+      const ready = targets.filter(
+        (target): target is DeleteTarget & { user: ResolvedUser } =>
+          target.status === "ready" && target.user !== null,
+      );
+      if (ready.length < 1) {
+        return NextResponse.json(
+          { error: "No accounts are ready to delete. Run dry-run and resolve blocked rows first." },
+          { status: 409 },
+        );
+      }
+      if (targets.some((target) => target.status === "blocked_shared_identity")) {
+        return NextResponse.json(
+          { error: "One or more accounts share cookbook/credits with another account. Resolve the dry-run blockers first." },
+          { status: 409 },
+        );
+      }
+
+      const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
+      if (!idempotencyKey) {
+        return NextResponse.json({ error: "idempotency-key header is required." }, { status: 400 });
+      }
+      const idempotency = await beginIdempotentRequest({
+        key: idempotencyKey,
+        scope: "admin-monetization-users:account-delete",
+        requestPayload: {
+          actor: admin.context.actor,
+          reason: payload.reason,
+          identifiers: payload.identifiers.map(normalizeIdentifier),
+        },
+      });
+      if (idempotency.state === "in_progress") {
+        return NextResponse.json({ error: "This delete request is already processing." }, { status: 409 });
+      }
+      if (idempotency.state === "conflict") {
+        return NextResponse.json(
+          { error: "Idempotency key was reused with a different delete request." },
+          { status: 409 },
+        );
+      }
+      if (idempotency.state === "replay") {
+        const response = NextResponse.json(idempotency.responseBody, {
+          status: idempotency.responseStatus,
+        });
+        response.headers.set("Idempotency-Status", "replayed");
+        withNoStore(response);
+        return response;
+      }
+      if (idempotency.state === "started") {
+        idempotencyContext = idempotency.context;
+      }
+
+      const deleted = await deleteReadyAccounts({
+        targets: ready,
+        actor: admin.context.actor,
+        reason: payload.reason,
+        batchId: idempotencyKey,
+      });
+      const responseBody = buildDeleteResponse({ mode: payload.mode, targets, deleted });
+      if (idempotencyContext) {
+        await completeIdempotentRequest(idempotencyContext, 200, responseBody);
+      }
+      logMonetizationAudit({
+        requestId: admin.context.requestId,
+        event: "account_delete_succeeded",
+        actor: admin.context.actor,
+        ip: admin.context.ip,
+        deleted: deleted.length,
+      });
+      const response = NextResponse.json(responseBody);
+      response.headers.set("Idempotency-Status", idempotencyContext ? "stored" : "disabled");
+      withNoStore(response);
+      return response;
+    }
+
+    const payload = parseBatchPayload(rawBody);
     const runtimeConfig = await getMonetizationRuntimeConfig();
     const targets = await resolveBatchTargets(payload.identifiers);
 
