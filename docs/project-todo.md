@@ -2,9 +2,8 @@
 
 ## App Store Release Blockers
 
-- Add Sign in with Apple alongside Google Sign-In before iOS App Store submission. Apple login must create/reuse `auth_users` records, map into `auth_identity_links`, and attach cookbook, credits, purchases, usage, favorites, and to-try data exactly like Google accounts.
 - Before App Store submission, run a same-device account-switching smoke test: sign in as Min, confirm credits/cookbook/recent fusions, sign out, confirm Profile/Home/Cookbook/Recent Fusions show signed-out or empty state, then sign in as Kevin and confirm no Min-owned credits, cookbook rows, favorites, to-try flags, or recent fusions appear.
-- Run final account-based regression: mobile login, cookbook list/detail, Favorite/To Try toggles, credit balance, Home/Profile credit refresh, recipe generation credit deduction, reroll credit deduction, Apple purchase verification, and sign-out/sign-in recovery.
+- Run final account-based regression: Apple login, Google login, cookbook list/detail, Favorite/To Try toggles, credit balance, Home/Profile credit refresh, recipe generation credit deduction, reroll credit deduction, Apple purchase verification, and sign-out/sign-in recovery.
 - Confirm `darthxyler@gmail.com` remains the canonical main testnet user with expected cookbook count, credits, favorites, to-try flags, purchase history, and usage data after the final deployment.
 - Verify native iOS build metadata before the next build: display name must be exactly `Flavor Fusion Chef`, and OAuth prompt/domain trust should be reviewed if still using the Vercel domain.
 

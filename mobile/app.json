@@ -21,10 +21,12 @@
         }
       ],
       "expo-font",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-apple-authentication"
     ],
     "ios": {
       "bundleIdentifier": "com.flavorfusionchef.mobile",
+      "usesAppleSignIn": true,
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false

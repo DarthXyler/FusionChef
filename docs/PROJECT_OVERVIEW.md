@@ -4,7 +4,7 @@ This document explains the app in plain English. It is meant for anyone who need
 
 ## What The Product Does
 
-Flavor Fusion Chef is a mobile-first recipe app. A user enters a base recipe or imports a recipe photo, chooses a fusion cuisine and preferences, then receives a generated fusion recipe. The user can save recipes to a private cookbook, mark them as Favorite or To Try, and buy one-time credit packs for more recipe generation.
+Flavor Fusion Chef is a mobile-first recipe app. A user enters a base recipe or imports a recipe photo, chooses a fusion cuisine and preferences, then receives a generated fusion recipe. The user can sign in with Apple or Google, save recipes to a private cookbook, mark them as Favorite or To Try, and buy one-time credit packs for more recipe generation.
 
 The web app is mostly the public website, support pages, pricing, FAQ, legal pages, and admin tools. The mobile app is the main user product.
 
@@ -29,7 +29,7 @@ Important identity concepts:
 - `mobile device key`: a durable mobile-device ID used to keep the same user attached across app launches.
 - `canonical_anon_user_id`: the one internal ID that old records are merged into.
 
-In practice, when a signed-in mobile user calls the API, the backend resolves all possible IDs and chooses one canonical record owner. If older records exist under another anonymous ID, they are merged into the canonical ID.
+In practice, when a signed-in mobile user calls the API, the backend resolves all possible IDs and chooses one canonical record owner. Apple and Google both create records in `auth_users`, then the backend maps that account through `auth_identity_links` into the same cookbook and credit owner model. If older records exist under another anonymous ID, they are merged into the canonical ID.
 
 ## Cookbook Data
 

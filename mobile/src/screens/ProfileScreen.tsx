@@ -23,6 +23,7 @@ import { useMobileCookbook } from "../context/mobileCookbook";
 import type { RootTabParamList } from "../navigation/types";
 import {
   getMobileAuthSession,
+  loginWithAppleForMobile,
   loginWithGoogleForMobile,
   type MobileAuthSession,
 } from "../services/auth";
@@ -286,10 +287,28 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     return baseOptions.filter((option) => availableSet.has(option.productId));
   }, []);
 
-  const handleSignIn = useCallback(async () => {
+  const handleSignInWithGoogle = useCallback(async () => {
     setIsSigningIn(true);
     try {
       const didLogin = await loginWithGoogleForMobile();
+      if (didLogin) {
+        await loadProfile();
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Could not sign in right now.";
+      Alert.alert("Sign in failed", message);
+    } finally {
+      setIsSigningIn(false);
+    }
+  }, [loadProfile]);
+
+  const handleSignInWithApple = useCallback(async () => {
+    setIsSigningIn(true);
+    try {
+      const didLogin = await loginWithAppleForMobile();
       if (didLogin) {
         await loadProfile();
       }
@@ -309,7 +328,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     if (!isSignedIn) {
       setIsSigningIn(true);
       try {
-        const didLogin = await loginWithGoogleForMobile();
+        const didLogin = await loginWithAppleForMobile();
         if (!didLogin) {
           setCreditPurchaseMessage("Sign in was cancelled. Sign in to purchase credits.");
           return;
@@ -410,7 +429,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   }, [creditPackOptions, isPurchasingCredits, selectedCreditPackId]);
 
   const handleSignOut = useCallback(() => {
-    Alert.alert("Sign out?", "You can sign back in any time with Google.", [
+    Alert.alert("Sign out?", "You can sign back in any time with Apple or Google.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Sign Out",
@@ -553,7 +572,10 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
             <ProfileLinkRow icon="logout" label="Sign out" onPress={handleSignOut} />
           </>
         ) : (
-          <ProfileLinkRow icon="login" label="Sign in with Google" onPress={handleSignIn} />
+          <>
+            <ProfileLinkRow icon="apple" label="Sign in with Apple" onPress={handleSignInWithApple} />
+            <ProfileLinkRow icon="login" label="Sign in with Google" onPress={handleSignInWithGoogle} />
+          </>
         )}
       </>
     ),
@@ -561,7 +583,8 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       handleDeleteAccount,
       handleOpenEdit,
       handleRestorePurchases,
-      handleSignIn,
+      handleSignInWithApple,
+      handleSignInWithGoogle,
       handleSignOut,
       isSignedIn,
     ],
@@ -602,22 +625,50 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
                 <Text style={styles.profileSubtitle}>
                   {email || "Sign in to sync your cookbook and credits."}
                 </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={isSignedIn ? handleOpenEdit : handleSignIn}
-                  style={({ pressed }) => [
-                    styles.profileEditButton,
-                    pressed && styles.profileRowPressed,
-                  ]}
-                >
-                  {isSigningIn ? (
-                    <ActivityIndicator color="#047857" size="small" />
-                  ) : (
-                    <Text style={styles.profileEditButtonText}>
-                      {isSignedIn ? "Edit Profile" : "Continue with Google"}
-                    </Text>
-                  )}
-                </Pressable>
+                {isSignedIn ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={handleOpenEdit}
+                    style={({ pressed }) => [
+                      styles.profileEditButton,
+                      pressed && styles.profileRowPressed,
+                    ]}
+                  >
+                    <Text style={styles.profileEditButtonText}>Edit Profile</Text>
+                  </Pressable>
+                ) : (
+                  <View style={styles.profileAuthButtonGroup}>
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={isSigningIn}
+                      onPress={handleSignInWithApple}
+                      style={({ pressed }) => [
+                        styles.profileAppleSignInButton,
+                        pressed && styles.profileRowPressed,
+                      ]}
+                    >
+                      {isSigningIn ? (
+                        <ActivityIndicator color="#ffffff" size="small" />
+                      ) : (
+                        <>
+                          <MaterialIcons color="#ffffff" name="apple" size={17} />
+                          <Text style={styles.profileAppleSignInButtonText}>Continue with Apple</Text>
+                        </>
+                      )}
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={isSigningIn}
+                      onPress={handleSignInWithGoogle}
+                      style={({ pressed }) => [
+                        styles.profileEditButton,
+                        pressed && styles.profileRowPressed,
+                      ]}
+                    >
+                      <Text style={styles.profileEditButtonText}>Continue with Google</Text>
+                    </Pressable>
+                  </View>
+                )}
               </View>
             </View>
           </View>

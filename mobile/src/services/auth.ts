@@ -1,3 +1,4 @@
+import * as AppleAuthentication from "expo-apple-authentication";
 import * as Linking from "expo-linking";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
@@ -115,6 +116,80 @@ export async function loginWithGoogleForMobile() {
   const token = typeof parsed.queryParams?.token === "string" ? parsed.queryParams.token.trim() : "";
   if (!token) {
     return false;
+  }
+
+  await SecureStore.setItemAsync(MOBILE_AUTH_TOKEN_KEY, token);
+  return true;
+}
+
+function normalizeAppleName(fullName: AppleAuthentication.AppleAuthenticationFullName | null) {
+  if (!fullName) {
+    return {};
+  }
+  return {
+    givenName: fullName.givenName ?? "",
+    middleName: fullName.middleName ?? "",
+    familyName: fullName.familyName ?? "",
+  };
+}
+
+function isAppleAuthCancelled(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ERR_REQUEST_CANCELED"
+  );
+}
+
+export async function loginWithAppleForMobile() {
+  const isAvailable = await AppleAuthentication.isAvailableAsync();
+  if (!isAvailable) {
+    throw new Error("Apple Sign in is only available on supported Apple devices.");
+  }
+
+  let credential: AppleAuthentication.AppleAuthenticationCredential;
+  try {
+    credential = await AppleAuthentication.signInAsync({
+      requestedScopes: [
+        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+      ],
+    });
+  } catch (error) {
+    if (isAppleAuthCancelled(error)) {
+      return false;
+    }
+    throw error;
+  }
+
+  const identityToken = credential.identityToken?.trim() ?? "";
+  if (!identityToken) {
+    throw new Error("Apple did not return a sign-in token. Please try again.");
+  }
+
+  const response = await fetch(`${getApiBaseUrl()}/api/auth/apple/mobile`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      identityToken,
+      fullName: normalizeAppleName(credential.fullName),
+    }),
+  });
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    const message =
+      typeof payload.error === "string" && payload.error.trim().length > 0
+        ? payload.error
+        : "Could not complete Apple login right now.";
+    throw new Error(message);
+  }
+
+  const token = typeof payload.token === "string" ? payload.token.trim() : "";
+  if (!token) {
+    throw new Error("Apple login response did not include a session token.");
   }
 
   await SecureStore.setItemAsync(MOBILE_AUTH_TOKEN_KEY, token);

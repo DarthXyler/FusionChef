@@ -5,7 +5,7 @@
 import { randomUUID } from "crypto";
 import { executeTurso } from "@/lib/turso";
 
-type OAuthProvider = "google";
+type OAuthProvider = "google" | "apple";
 
 export type AuthUserRecord = {
   id: string;
@@ -69,6 +69,42 @@ function normalizeAvatarUrl(value: string) {
 
 function normalizeSubject(value: string) {
   return value.trim().slice(0, 160);
+}
+
+function rowToAuthUserRecord(row: Record<string, unknown>): AuthUserRecord | null {
+  const id = typeof row.id === "string" ? row.id.trim() : "";
+  const email = typeof row.email === "string" ? row.email.trim() : "";
+  const name = typeof row.name === "string" ? row.name.trim() : "";
+  const avatarUrl = typeof row.avatar_url === "string" ? row.avatar_url.trim() : "";
+  const provider = row.provider === "apple" ? "apple" : row.provider === "google" ? "google" : null;
+  const providerSubject =
+    typeof row.provider_subject === "string" ? row.provider_subject.trim() : "";
+  const role = row.role === "admin" ? "admin" : row.role === "user" ? "user" : null;
+  if (!id || !email || !name || !provider || !providerSubject || !role) {
+    return null;
+  }
+  return { id, email, name, avatarUrl, provider, providerSubject, role };
+}
+
+export async function getOAuthUserByProviderSubject(params: {
+  provider: OAuthProvider;
+  providerSubject: string;
+}) {
+  await ensureAuthSchema();
+  const providerSubject = normalizeSubject(params.providerSubject);
+  if (!providerSubject) {
+    return null;
+  }
+
+  const result = await executeTurso({
+    sql: `SELECT id, email, name, avatar_url, provider, provider_subject, role
+          FROM auth_users
+          WHERE provider = ? AND provider_subject = ?
+          LIMIT 1`,
+    args: [params.provider, providerSubject],
+  });
+
+  return rowToAuthUserRecord(result.rows[0] ?? {});
 }
 
 export async function upsertOAuthUser(params: {
@@ -141,4 +177,3 @@ export async function upsertOAuthUser(params: {
     role: params.role,
   } satisfies AuthUserRecord;
 }
-

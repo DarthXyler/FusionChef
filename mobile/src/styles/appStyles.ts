@@ -843,6 +843,28 @@ export const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "900",
   },
+  profileAuthButtonGroup: {
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  profileAppleSignInButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "#09090b",
+    borderColor: "#09090b",
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
+    minHeight: 34,
+    justifyContent: "center",
+    paddingHorizontal: 14,
+  },
+  profileAppleSignInButtonText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
   profileSectionHeader: {
     alignItems: "center",
     flexDirection: "row",

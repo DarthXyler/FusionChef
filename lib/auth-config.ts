@@ -57,6 +57,14 @@ export function getGoogleOauthConfig() {
   };
 }
 
+export function getAppleSignInAudiences() {
+  const explicitAudiences = splitCsv(process.env.APPLE_SIGN_IN_AUDIENCES);
+  const singleAudience = process.env.APPLE_SIGN_IN_AUDIENCE?.trim() ?? "";
+  const bundleId = process.env.APPLE_BUNDLE_ID?.trim() ?? "";
+  const audiences = [...explicitAudiences, singleAudience, bundleId].filter(Boolean);
+  return [...new Set(audiences)];
+}
+
 export function getAllowedAdminEmails() {
   return splitCsv(process.env.ADMIN_AUTH_EMAIL_ALLOWLIST).map((email) =>
     email.toLowerCase(),

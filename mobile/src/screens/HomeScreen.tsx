@@ -30,7 +30,7 @@ import {
 import { useResponsiveFlags } from "../hooks/useResponsiveFlags";
 import type { HomeStackParamList } from "../navigation/types";
 import { sampleGeneratedRecipeRecord } from "../data/sampleGeneratedRecipe";
-import { loginWithGoogleForMobile } from "../services/auth";
+import { loginWithAppleForMobile, loginWithGoogleForMobile } from "../services/auth";
 import {
   fetchMonetizationAccountSnapshot,
   getAvailableAppleProductIds,
@@ -779,8 +779,35 @@ export function HomeScreen({
     }
   }
 
-  function handleCreditGateAppleLogin() {
-    setCreditGateMessage("Apple login will be enabled next.");
+  async function handleCreditGateAppleLogin() {
+    if (isCreditGateBusy) {
+      return;
+    }
+
+    setIsCreditGateBusy(true);
+    setCreditGateMessage("");
+    try {
+      const loggedIn = await loginWithAppleForMobile();
+      if (!loggedIn) {
+        setCreditGateMessage("Login was cancelled. Try again to continue.");
+        setCreditGateAuthState("unauthenticated");
+        return;
+      }
+      const account = await fetchMonetizationAccountSnapshot({ forceRefresh: true });
+      setCreditGateAuthState(account.authenticated ? "authenticated" : "unauthenticated");
+      if (!account.authenticated) {
+        setCreditGateMessage("Login succeeded, but account verification failed. Try again.");
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Could not complete Apple login right now.";
+      setCreditGateMessage(message);
+      setCreditGateAuthState("unauthenticated");
+    } finally {
+      setIsCreditGateBusy(false);
+    }
   }
 
   async function handleCreditGateLogout() {
@@ -1317,7 +1344,7 @@ export function HomeScreen({
                         <Pressable
                           accessibilityRole="button"
                           disabled={isCreditGateBusy}
-                          onPress={handleCreditGateAppleLogin}
+                          onPress={() => void handleCreditGateAppleLogin()}
                           style={({ pressed }) => [
                             styles.creditGateAppleButton,
                             isCompactScreen && styles.creditGateAuthButtonCompact,
