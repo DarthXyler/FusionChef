@@ -173,6 +173,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
 
   const displayName = profileOverrides.displayName || session?.name || "Welcome, Chef";
   const email = session?.email ?? "";
+  const profilePhotoUri = profileOverrides.photoUri || session?.avatarUrl || "";
   const isSignedIn = session !== null;
   const availableCredits = accountSnapshot?.balance.availableCredits ?? 0;
   const freeFuseRemaining = accountSnapshot?.freeRemaining.fuse ?? 0;
@@ -468,9 +469,9 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
 
   const handleOpenEdit = useCallback(() => {
     setDraftName(displayName === "Welcome, Chef" ? "" : displayName);
-    setDraftPhotoUri(profileOverrides.photoUri);
+    setDraftPhotoUri(profilePhotoUri);
     setIsEditOpen(true);
-  }, [displayName, profileOverrides.photoUri]);
+  }, [displayName, profilePhotoUri]);
 
   const handleChoosePhoto = useCallback(async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -590,7 +591,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
                 <ProfileAvatar
                   displayName={displayName}
                   email={email}
-                  photoUri={profileOverrides.photoUri}
+                  photoUri={profilePhotoUri}
                 />
                 <View style={styles.profileAvatarEditButton}>
                   <MaterialIcons color="#ffffff" name="photo-camera" size={17} />

@@ -1,6 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getMobileAuthSession } from "./auth";
 
 const MOBILE_PROFILE_OVERRIDES_KEY = "flavor_fusion_mobile_profile_overrides_v1";
+const MOBILE_PROFILE_OVERRIDES_ACCOUNT_PREFIX = "flavor_fusion_mobile_profile_overrides_v2:";
 
 export type MobileProfileOverrides = {
   displayName: string;
@@ -21,13 +23,37 @@ function normalizeProfileOverrides(value: unknown): MobileProfileOverrides {
   };
 }
 
+async function getProfileOverridesKeyForCurrentAccount() {
+  const session = await getMobileAuthSession();
+  const userId = session?.userId?.trim() ?? "";
+  return userId ? `${MOBILE_PROFILE_OVERRIDES_ACCOUNT_PREFIX}${userId}` : null;
+}
+
 export async function readMobileProfileOverrides() {
   try {
-    const raw = await AsyncStorage.getItem(MOBILE_PROFILE_OVERRIDES_KEY);
+    const accountKey = await getProfileOverridesKeyForCurrentAccount();
+    if (!accountKey) {
+      return { displayName: "", photoUri: "" };
+    }
+
+    const raw = await AsyncStorage.getItem(accountKey);
+    if (raw) {
+      return normalizeProfileOverrides(JSON.parse(raw));
+    }
+
+    const legacyRaw = await AsyncStorage.getItem(MOBILE_PROFILE_OVERRIDES_KEY);
+    if (legacyRaw) {
+      const legacy = normalizeProfileOverrides(JSON.parse(legacyRaw));
+      if (legacy.displayName || legacy.photoUri) {
+        await AsyncStorage.setItem(accountKey, JSON.stringify(legacy));
+      }
+      return legacy;
+    }
+
     if (!raw) {
       return { displayName: "", photoUri: "" };
     }
-    return normalizeProfileOverrides(JSON.parse(raw));
+    return { displayName: "", photoUri: "" };
   } catch {
     return { displayName: "", photoUri: "" };
   }
@@ -35,10 +61,38 @@ export async function readMobileProfileOverrides() {
 
 export async function saveMobileProfileOverrides(overrides: MobileProfileOverrides) {
   const normalized = normalizeProfileOverrides(overrides);
-  await AsyncStorage.setItem(MOBILE_PROFILE_OVERRIDES_KEY, JSON.stringify(normalized));
+  const accountKey = await getProfileOverridesKeyForCurrentAccount();
+  if (accountKey) {
+    await AsyncStorage.setItem(accountKey, JSON.stringify(normalized));
+  }
   return normalized;
 }
 
-export async function clearMobileProfileOverrides() {
+export async function migrateLegacyProfileOverridesToCurrentAccount() {
+  const accountKey = await getProfileOverridesKeyForCurrentAccount();
+  if (!accountKey) {
+    return { displayName: "", photoUri: "" };
+  }
+
+  const existingRaw = await AsyncStorage.getItem(accountKey);
+  if (existingRaw) {
+    await AsyncStorage.removeItem(MOBILE_PROFILE_OVERRIDES_KEY);
+    return normalizeProfileOverrides(JSON.parse(existingRaw));
+  }
+
+  const legacyRaw = await AsyncStorage.getItem(MOBILE_PROFILE_OVERRIDES_KEY);
+  if (!legacyRaw) {
+    return { displayName: "", photoUri: "" };
+  }
+
+  const legacy = normalizeProfileOverrides(JSON.parse(legacyRaw));
+  if (legacy.displayName || legacy.photoUri) {
+    await AsyncStorage.setItem(accountKey, JSON.stringify(legacy));
+  }
+  await AsyncStorage.removeItem(MOBILE_PROFILE_OVERRIDES_KEY);
+  return legacy;
+}
+
+export async function clearLegacyMobileProfileOverrides() {
   await AsyncStorage.removeItem(MOBILE_PROFILE_OVERRIDES_KEY);
 }

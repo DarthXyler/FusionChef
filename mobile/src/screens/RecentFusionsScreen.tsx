@@ -9,6 +9,7 @@ import { AppCreditHeader } from "../components/AppCreditHeader";
 import { useMobileCookbook } from "../context/mobileCookbook";
 import type { HomeStackParamList, RootTabParamList } from "../navigation/types";
 import {
+  cookbookSummaryToDashboardFusion,
   readDashboardFusionHistory,
   type DashboardFusionSummary,
 } from "../services/dashboardHistory";
@@ -38,6 +39,16 @@ export function RecentFusionsScreen({
     const map = new Map(summaries.map((summary) => [summary.recipeId, summary]));
     return map;
   }, [summaries]);
+
+  const recentFusionItems = useMemo(() => {
+    const byId = new Map<string, DashboardFusionSummary>();
+    for (const item of [...history, ...summaries.map(cookbookSummaryToDashboardFusion)]) {
+      byId.set(item.id, item);
+    }
+    return [...byId.values()]
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+      .slice(0, 12);
+  }, [history, summaries]);
 
   const loadHistory = useCallback(async () => {
     const nextHistory = await readDashboardFusionHistory();
@@ -138,8 +149,8 @@ export function RecentFusionsScreen({
           </View>
 
           <View style={styles.visibleCard}>
-            {history.length > 0 ? (
-              history.map((item) => {
+            {recentFusionItems.length > 0 ? (
+              recentFusionItems.map((item) => {
                 const savedSummary = savedById.get(item.id);
                 const busyAction = busyActionById[item.id];
                 const isSaved = Boolean(savedSummary);

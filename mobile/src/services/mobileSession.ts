@@ -1,15 +1,13 @@
 import { clearMobileAuthToken } from "./auth";
-import { clearDashboardFusionHistory } from "./dashboardHistory";
 import { resetMobileIdentityForSignOut } from "./mobileIdentity";
 import { resetMonetizationAccountSnapshotForSignedOutSession } from "./monetization";
-import { clearMobileProfileOverrides } from "./profile";
+import { migrateLegacyProfileOverridesToCurrentAccount } from "./profile";
 
 export async function signOutAndResetMobileSession() {
+  await migrateLegacyProfileOverridesToCurrentAccount();
   await clearMobileAuthToken();
   resetMonetizationAccountSnapshotForSignedOutSession();
   await Promise.all([
     resetMobileIdentityForSignOut(),
-    clearMobileProfileOverrides(),
-    clearDashboardFusionHistory(),
   ]);
 }

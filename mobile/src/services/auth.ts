@@ -9,6 +9,7 @@ export type MobileAuthSession = {
   userId: string;
   email: string;
   name: string;
+  avatarUrl?: string;
   role: "user" | "admin";
   channel: "web" | "mobile";
   iat: number;
@@ -32,6 +33,7 @@ function parseMobileAuthSessionPayload(payload: unknown): MobileAuthSession | nu
   const userId = typeof candidate.userId === "string" ? candidate.userId.trim() : "";
   const email = typeof candidate.email === "string" ? candidate.email.trim() : "";
   const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
+  const avatarUrl = typeof candidate.avatarUrl === "string" ? candidate.avatarUrl.trim() : "";
   const role = candidate.role === "admin" ? "admin" : candidate.role === "user" ? "user" : null;
   const channel =
     candidate.channel === "mobile" ? "mobile" : candidate.channel === "web" ? "web" : null;
@@ -46,7 +48,7 @@ function parseMobileAuthSessionPayload(payload: unknown): MobileAuthSession | nu
   if (!userId || !email || !name || !role || !channel || iat <= 0 || exp <= 0) {
     return null;
   }
-  return { userId, email, name, role, channel, iat, exp };
+  return { userId, email, name, avatarUrl, role, channel, iat, exp };
 }
 
 export function parseMobileAuthSessionToken(token: string) {

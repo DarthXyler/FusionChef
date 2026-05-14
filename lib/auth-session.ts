@@ -19,6 +19,7 @@ export type AuthSession = {
   userId: string;
   email: string;
   name: string;
+  avatarUrl?: string;
   role: AuthRole;
   channel: AuthSessionChannel;
   iat: number;
@@ -59,6 +60,7 @@ function parseTokenPayload(payload: unknown): AuthSession | null {
   const email = typeof candidate.email === "string" ? candidate.email.trim() : "";
   const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
   const role = candidate.role === "admin" ? "admin" : candidate.role === "user" ? "user" : null;
+  const avatarUrl = typeof candidate.avatarUrl === "string" ? candidate.avatarUrl.trim() : "";
   const channel =
     candidate.channel === "mobile"
       ? "mobile"
@@ -74,6 +76,7 @@ function parseTokenPayload(payload: unknown): AuthSession | null {
     userId,
     email,
     name,
+    avatarUrl,
     role,
     channel,
     iat,
@@ -97,6 +100,7 @@ export function createAuthSessionToken(claims: {
   userId: string;
   email: string;
   name: string;
+  avatarUrl?: string;
   role: AuthRole;
   channel: AuthSessionChannel;
 }) {
@@ -115,6 +119,7 @@ export function createAuthSessionToken(claims: {
       userId: claims.userId,
       email: claims.email,
       name: claims.name,
+      avatarUrl: claims.avatarUrl ?? "",
       role: claims.role,
       channel: claims.channel,
       iat: now,

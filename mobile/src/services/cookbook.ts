@@ -11,7 +11,7 @@ import { getMobileAuthToken } from "./auth";
 
 const COOKBOOK_SUMMARY_CACHE_VERSION = "v1";
 const COOKBOOK_DETAIL_CACHE_VERSION = "v1";
-const COOKBOOK_PAGE_SIZE = 15;
+const COOKBOOK_PAGE_SIZE = 100;
 
 export type CookbookSummaryPage = {
   recipes: CookbookRecipeSummary[];
