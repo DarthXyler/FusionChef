@@ -4,6 +4,7 @@ import {
   buildCookbookSummary,
   cacheCookbookSummaries,
   deleteCookbookRecipe,
+  EMPTY_COOKBOOK_STATS,
   fetchCookbookRecipe,
   fetchCookbookSummaries,
   readCachedCookbookRecipe,
@@ -12,7 +13,7 @@ import {
   updateCookbookRecipeFlags,
 } from "../services/cookbook";
 import { getMobileAuthToken } from "../services/auth";
-import type { CookbookRecipeRecord, CookbookRecipeSummary, GeneratedRecipeRecord } from "../types/recipe";
+import type { CookbookRecipeRecord, CookbookRecipeSummary, CookbookStats, GeneratedRecipeRecord } from "../types/recipe";
 import type { MobileCookbookContextValue } from "../navigation/types";
 
 const MobileCookbookContext = createContext<MobileCookbookContextValue | null>(null);
@@ -47,6 +48,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
   // This provider is the mobile app's single source of truth for saved recipes.
   // It keeps the UI responsive with local cache, but Turso remains the real storage.
   const [cookbookSummaries, setCookbookSummaries] = useState<CookbookRecipeSummary[]>([]);
+  const [cookbookStats, setCookbookStats] = useState<CookbookStats>(EMPTY_COOKBOOK_STATS);
   const [cookbookRecordCache, setCookbookRecordCache] = useState<Record<string, CookbookRecipeRecord>>(
     {},
   );
@@ -68,7 +70,20 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       [record.recipe.id]: record,
     }));
     setCookbookSummaries((current) => {
+      const didExist = current.some((entry) => entry.recipeId === nextSummary.recipeId);
+      const previousSummary = current.find((entry) => entry.recipeId === nextSummary.recipeId);
       const next = [nextSummary, ...current.filter((entry) => entry.recipeId !== nextSummary.recipeId)];
+      setCookbookStats((stats) => ({
+        totalRecipes: stats.totalRecipes + (didExist ? 0 : 1),
+        favoriteRecipes:
+          stats.favoriteRecipes +
+          (nextSummary.isFavorite && !(previousSummary?.isFavorite === true) ? 1 : 0) -
+          (!nextSummary.isFavorite && previousSummary?.isFavorite === true ? 1 : 0),
+        toTryRecipes:
+          stats.toTryRecipes +
+          (nextSummary.isToTry && !(previousSummary?.isToTry === true) ? 1 : 0) -
+          (!nextSummary.isToTry && previousSummary?.isToTry === true ? 1 : 0),
+      }));
       void cacheCookbookSummaries(next);
       return next.sort((left, right) => Date.parse(right.savedAt) - Date.parse(left.savedAt));
     });
@@ -83,6 +98,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
 
   const resetLocalState = useCallback(() => {
     setCookbookSummaries([]);
+    setCookbookStats(EMPTY_COOKBOOK_STATS);
     setCookbookRecordCache({});
     setIsCookbookLoading(false);
     setIsCookbookRefreshing(false);
@@ -144,6 +160,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       }
       const page = await fetchCookbookSummaries();
       replaceSummariesWithFirstPage(page.recipes);
+      setCookbookStats(page.stats);
       setHasLoadedCookbook(true);
       setHasMoreCookbook(page.hasMore);
       setNextCookbookCursor(page.nextCursor);
@@ -172,6 +189,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       }
       const page = await fetchCookbookSummaries();
       replaceSummariesWithFirstPage(page.recipes);
+      setCookbookStats(page.stats);
       setHasLoadedCookbook(true);
       setHasMoreCookbook(page.hasMore);
       setNextCookbookCursor(page.nextCursor);
@@ -202,6 +220,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
         void cacheCookbookSummaries(next);
         return next;
       });
+      setCookbookStats(page.stats);
       setHasMoreCookbook(page.hasMore);
       setNextCookbookCursor(page.nextCursor);
       setSummarySyncError("");
@@ -257,7 +276,15 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       return next;
     });
     setCookbookSummaries((current) => {
+      const removed = current.find((entry) => entry.recipeId === recipeId);
       const next = current.filter((entry) => entry.recipeId !== recipeId);
+      if (removed) {
+        setCookbookStats((stats) => ({
+          totalRecipes: Math.max(0, stats.totalRecipes - 1),
+          favoriteRecipes: Math.max(0, stats.favoriteRecipes - (removed.isFavorite ? 1 : 0)),
+          toTryRecipes: Math.max(0, stats.toTryRecipes - (removed.isToTry ? 1 : 0)),
+        }));
+      }
       void cacheCookbookSummaries(next);
       return next;
     });
@@ -310,6 +337,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
   const value = useMemo<MobileCookbookContextValue>(
     () => ({
       summaries: cookbookSummaries,
+      stats: cookbookStats,
       isLoading: isCookbookLoading,
       isRefreshing: isCookbookRefreshing,
       isLoadingMore: isCookbookLoadingMore,
@@ -330,6 +358,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
     }),
     [
       cookbookRecordCache,
+      cookbookStats,
       cookbookSummaries,
       deleteRecord,
       hasMoreCookbook,

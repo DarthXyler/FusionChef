@@ -39,6 +39,7 @@ export function CookbookListScreen({
   const { isCompactScreen, isVeryCompactScreen } = useResponsiveFlags();
   const {
     summaries,
+    stats,
     isLoading,
     isRefreshing,
     isLoadingMore,
@@ -246,9 +247,9 @@ export function CookbookListScreen({
 
               <View style={styles.cookbookFilterRow}>
                 {[
-                  ["all", "All", summaries.length],
-                  ["favorites", "Favorites", summaries.filter((summary) => summary.isFavorite).length],
-                  ["toTry", "To Try", summaries.filter((summary) => summary.isToTry).length],
+                  ["all", "All", stats.totalRecipes],
+                  ["favorites", "Favorites", stats.favoriteRecipes],
+                  ["toTry", "To Try", stats.toTryRecipes],
                 ].map(([value, label, count]) => {
                   const active = filterBy === value;
                   return (

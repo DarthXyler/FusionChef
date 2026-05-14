@@ -4,7 +4,7 @@
  */
 import { randomUUID } from "crypto";
 import type { InStatement } from "@libsql/client";
-import type { CookbookRecipeRecord, CookbookRecipeSummary } from "@/lib/types";
+import type { CookbookRecipeRecord, CookbookRecipeSummary, CookbookStats } from "@/lib/types";
 import { isFuseRequest, isRecipeFusion } from "@/lib/validation";
 import { executeTurso } from "@/lib/turso";
 
@@ -386,6 +386,28 @@ export async function listCookbookRecipeSummaries(
     hasMore,
     nextCursor,
     pageSize,
+  };
+}
+
+export async function getCookbookStats(anonUserId: string): Promise<CookbookStats> {
+  await ensureSchema();
+  const result = await executeTurso({
+    sql: `SELECT
+            COUNT(*) AS total_recipes,
+            COALESCE(SUM(CASE WHEN is_favorite = 1 THEN 1 ELSE 0 END), 0) AS favorite_recipes,
+            COALESCE(SUM(CASE WHEN is_to_try = 1 THEN 1 ELSE 0 END), 0) AS to_try_recipes
+          FROM cookbook_recipes
+          WHERE anon_user_id = ?`,
+    args: [anonUserId],
+  });
+  const row = result.rows[0] ?? {};
+  const totalRecipes = Number(row.total_recipes);
+  const favoriteRecipes = Number(row.favorite_recipes);
+  const toTryRecipes = Number(row.to_try_recipes);
+  return {
+    totalRecipes: Number.isFinite(totalRecipes) ? totalRecipes : 0,
+    favoriteRecipes: Number.isFinite(favoriteRecipes) ? favoriteRecipes : 0,
+    toTryRecipes: Number.isFinite(toTryRecipes) ? toTryRecipes : 0,
   };
 }
 

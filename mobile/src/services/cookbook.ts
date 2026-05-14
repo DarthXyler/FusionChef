@@ -3,6 +3,7 @@ import { getApiBaseUrl } from "../config/api";
 import type {
   CookbookRecipeRecord,
   CookbookRecipeSummary,
+  CookbookStats,
   GeneratedRecipeRecord,
   RecipeFusion,
 } from "../types/recipe";
@@ -11,10 +12,17 @@ import { getMobileAuthToken } from "./auth";
 
 const COOKBOOK_SUMMARY_CACHE_VERSION = "v1";
 const COOKBOOK_DETAIL_CACHE_VERSION = "v1";
-const COOKBOOK_PAGE_SIZE = 100;
+const COOKBOOK_PAGE_SIZE = 15;
+
+export const EMPTY_COOKBOOK_STATS: CookbookStats = {
+  totalRecipes: 0,
+  favoriteRecipes: 0,
+  toTryRecipes: 0,
+};
 
 export type CookbookSummaryPage = {
   recipes: CookbookRecipeSummary[];
+  stats: CookbookStats;
   hasMore: boolean;
   nextCursor: string | null;
   pageSize: number;
@@ -99,6 +107,26 @@ function isCookbookSummaryCachePayload(value: unknown): value is CookbookSummary
     Array.isArray(candidate.recipes) &&
     candidate.recipes.every(isCookbookRecipeSummary)
   );
+}
+
+function parseCookbookStats(value: unknown): CookbookStats {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return EMPTY_COOKBOOK_STATS;
+  }
+  const candidate = value as Record<string, unknown>;
+  const totalRecipes =
+    typeof candidate.totalRecipes === "number" && Number.isFinite(candidate.totalRecipes)
+      ? Math.max(0, Math.trunc(candidate.totalRecipes))
+      : 0;
+  const favoriteRecipes =
+    typeof candidate.favoriteRecipes === "number" && Number.isFinite(candidate.favoriteRecipes)
+      ? Math.max(0, Math.trunc(candidate.favoriteRecipes))
+      : 0;
+  const toTryRecipes =
+    typeof candidate.toTryRecipes === "number" && Number.isFinite(candidate.toTryRecipes)
+      ? Math.max(0, Math.trunc(candidate.toTryRecipes))
+      : 0;
+  return { totalRecipes, favoriteRecipes, toTryRecipes };
 }
 
 function isCookbookDetailCachePayload(value: unknown): value is CookbookDetailCachePayload {
@@ -309,6 +337,7 @@ export async function fetchCookbookSummaries(cursor?: string | null): Promise<Co
 
   const payload = (await response.json()) as {
     recipes?: unknown;
+    stats?: unknown;
     hasMore?: unknown;
     nextCursor?: unknown;
     pageSize?: unknown;
@@ -323,6 +352,7 @@ export async function fetchCookbookSummaries(cursor?: string | null): Promise<Co
   }
   return {
     recipes: summaries,
+    stats: parseCookbookStats(payload.stats),
     hasMore: payload.hasMore === true,
     nextCursor: typeof payload.nextCursor === "string" && payload.nextCursor.trim().length > 0
       ? payload.nextCursor

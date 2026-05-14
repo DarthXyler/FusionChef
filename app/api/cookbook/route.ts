@@ -10,7 +10,7 @@ import type { FuseRequest, RecipeFusion } from "@/lib/types";
 import { isFuseRequest, isRecipeFusion } from "@/lib/validation";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
-import { listCookbookRecipeSummaries, upsertCookbookRecord } from "@/lib/cookbook-db";
+import { getCookbookStats, listCookbookRecipeSummaries, upsertCookbookRecord } from "@/lib/cookbook-db";
 import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import {
   beginIdempotentRequest,
@@ -122,12 +122,16 @@ export async function GET(request: NextRequest) {
       MAX_COOKBOOK_PAGE_SIZE,
     );
 
-    const pageResult = await listCookbookRecipeSummaries(identity.anonUserId, {
-      cursor,
-      pageSize,
-    });
+    const [pageResult, stats] = await Promise.all([
+      listCookbookRecipeSummaries(identity.anonUserId, {
+        cursor,
+        pageSize,
+      }),
+      getCookbookStats(identity.anonUserId),
+    ]);
     const responseBody = {
       recipes: pageResult.recipes,
+      stats,
       pageSize: pageResult.pageSize,
       hasMore: pageResult.hasMore,
       nextCursor: pageResult.nextCursor,

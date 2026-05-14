@@ -45,7 +45,7 @@ function getRecipeFallbackIcon(index: number) {
 export function DashboardHomeScreen({
   navigation,
 }: NativeStackScreenProps<HomeStackParamList, "DashboardHome">) {
-  const { summaries, loadSummaries, hasLoaded } = useMobileCookbook();
+  const { summaries, stats, loadSummaries, hasLoaded } = useMobileCookbook();
   const [displayName, setDisplayName] = useState("Chef");
   const [recentFusions, setRecentFusions] = useState<DashboardFusionSummary[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -99,8 +99,6 @@ export function DashboardHomeScreen({
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
       .slice(0, 2);
   }, [recentFusions, summaries]);
-  const favoriteCount = summaries.filter((summary) => summary.isFavorite).length;
-  const toTryCount = summaries.filter((summary) => summary.isToTry).length;
 
   function openCreate(params?: { importPhoto?: boolean }) {
     const parentNavigation = navigation.getParent<NavigationProp<RootTabParamList>>();
@@ -330,7 +328,7 @@ export function DashboardHomeScreen({
             >
               <MaterialCommunityIcons color="#047857" name="book-open-variant" size={25} />
               <Text style={styles.dashboardCookbookTileTitle}>All Recipes</Text>
-              <Text style={styles.dashboardCookbookTileMeta}>{summaries.length} recipes</Text>
+              <Text style={styles.dashboardCookbookTileMeta}>{stats.totalRecipes} recipes</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -342,7 +340,7 @@ export function DashboardHomeScreen({
             >
               <MaterialIcons color="#ef4444" name="favorite-border" size={27} />
               <Text style={styles.dashboardCookbookTileTitle}>Favorites</Text>
-              <Text style={styles.dashboardCookbookTileMeta}>{favoriteCount} recipes</Text>
+              <Text style={styles.dashboardCookbookTileMeta}>{stats.favoriteRecipes} recipes</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -354,7 +352,7 @@ export function DashboardHomeScreen({
             >
               <MaterialCommunityIcons color="#b45309" name="silverware-fork-knife" size={25} />
               <Text style={styles.dashboardCookbookTileTitle}>To Try</Text>
-              <Text style={styles.dashboardCookbookTileMeta}>{toTryCount} recipes</Text>
+              <Text style={styles.dashboardCookbookTileMeta}>{stats.toTryRecipes} recipes</Text>
             </Pressable>
           </View>
         </ScrollView>

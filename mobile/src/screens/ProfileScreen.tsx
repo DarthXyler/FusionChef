@@ -151,7 +151,7 @@ function ProfileAvatar({
 }
 
 export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, "Profile">) {
-  const { resetLocalState, summaries } = useMobileCookbook();
+  const { resetLocalState, stats } = useMobileCookbook();
   const [session, setSession] = useState<MobileAuthSession | null>(null);
   const [profileOverrides, setProfileOverrides] = useState<MobileProfileOverrides>({
     displayName: "",
@@ -734,7 +734,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
 
           <View style={styles.profileStatsShadow}>
             <View style={styles.profileStatsCard}>
-              <Text style={styles.profileStatsValue}>{summaries.length}</Text>
+              <Text style={styles.profileStatsValue}>{stats.totalRecipes}</Text>
               <View style={styles.profileStatsTextWrap}>
                 <Text style={styles.profileStatsTitle}>Saved recipes</Text>
                 <Text style={styles.profileStatsCopy}>Favorites and to-try stats can join this row later.</Text>

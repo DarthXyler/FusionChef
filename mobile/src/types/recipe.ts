@@ -78,3 +78,9 @@ export type CookbookRecipeSummary = {
   isFavorite?: boolean;
   isToTry?: boolean;
 };
+
+export type CookbookStats = {
+  totalRecipes: number;
+  favoriteRecipes: number;
+  toTryRecipes: number;
+};

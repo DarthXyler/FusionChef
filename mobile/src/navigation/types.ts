@@ -2,6 +2,7 @@ import type { NavigatorScreenParams } from "@react-navigation/native";
 import type {
   CookbookRecipeRecord,
   CookbookRecipeSummary,
+  CookbookStats,
   FuseRequest,
   GeneratedRecipeRecord,
 } from "../types/recipe";
@@ -51,6 +52,7 @@ export type CookbookStackParamList = {
 
 export type MobileCookbookContextValue = {
   summaries: CookbookRecipeSummary[];
+  stats: CookbookStats;
   isLoading: boolean;
   isRefreshing: boolean;
   isLoadingMore: boolean;
