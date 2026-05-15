@@ -52,8 +52,8 @@ import googleGLogo from "../../assets/google-g-logo.png";
  * - navigates to RecipeWorkspace with a pending fuse request
  */
 const DEFAULT_MOBILE_FUSION_CUISINE = CUISINE_OPTIONS[0] ?? "Japanese";
-const PRIVACY_POLICY_URL = "https://flavor-fusion-chef.vercel.app/privacy";
-const SUPPORT_URL = "https://flavor-fusion-chef.vercel.app/support";
+const PRIVACY_POLICY_URL = "https://www.flavorfusionchef.com/privacy";
+const SUPPORT_URL = "https://www.flavorfusionchef.com/support";
 const MAX_OCR_IMAGE_DATA_URL_CHARS = 3_700_000;
 const OCR_IMAGE_VARIANTS_BALANCED = [
   { maxDimension: 1600, compress: 0.65 },

@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getMobileAuthSession } from "./auth";
+import { getApiBaseUrl } from "../config/api";
+import { getMobileAuthSession, getMobileAuthToken } from "./auth";
 
 const MOBILE_PROFILE_OVERRIDES_KEY = "flavor_fusion_mobile_profile_overrides_v1";
 const MOBILE_PROFILE_OVERRIDES_ACCOUNT_PREFIX = "flavor_fusion_mobile_profile_overrides_v2:";
@@ -7,6 +8,13 @@ const MOBILE_PROFILE_OVERRIDES_ACCOUNT_PREFIX = "flavor_fusion_mobile_profile_ov
 export type MobileProfileOverrides = {
   displayName: string;
   photoUri: string;
+};
+
+type ServerProfilePayload = {
+  profile?: {
+    name?: unknown;
+    avatarUrl?: unknown;
+  };
 };
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -59,6 +67,44 @@ export async function readMobileProfileOverrides() {
   }
 }
 
+async function readServerProfileOverrides() {
+  const authToken = await getMobileAuthToken();
+  if (!authToken) {
+    return null;
+  }
+
+  const response = await fetch(`${getApiBaseUrl()}/api/auth/profile`, {
+    method: "GET",
+    headers: {
+      authorization: `Bearer ${authToken}`,
+    },
+  });
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json()) as ServerProfilePayload;
+  const profile = payload.profile;
+  if (!profile) {
+    return null;
+  }
+  return {
+    displayName: typeof profile.name === "string" ? profile.name.trim() : "",
+    photoUri: typeof profile.avatarUrl === "string" ? profile.avatarUrl.trim() : "",
+  } satisfies MobileProfileOverrides;
+}
+
+export async function readMobileProfile() {
+  const [localProfile, serverProfile] = await Promise.all([
+    readMobileProfileOverrides(),
+    readServerProfileOverrides(),
+  ]);
+  return {
+    displayName: localProfile.displayName || serverProfile?.displayName || "",
+    photoUri: localProfile.photoUri || serverProfile?.photoUri || "",
+  } satisfies MobileProfileOverrides;
+}
+
 export async function saveMobileProfileOverrides(overrides: MobileProfileOverrides) {
   const normalized = normalizeProfileOverrides(overrides);
   const accountKey = await getProfileOverridesKeyForCurrentAccount();
@@ -66,6 +112,46 @@ export async function saveMobileProfileOverrides(overrides: MobileProfileOverrid
     await AsyncStorage.setItem(accountKey, JSON.stringify(normalized));
   }
   return normalized;
+}
+
+export async function saveMobileProfile(overrides: MobileProfileOverrides) {
+  const normalized = await saveMobileProfileOverrides(overrides);
+  const authToken = await getMobileAuthToken();
+  if (!authToken) {
+    return normalized;
+  }
+
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/auth/profile`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        name: normalized.displayName,
+        avatarUrl: normalized.photoUri,
+      }),
+    });
+    if (!response.ok) {
+      return normalized;
+    }
+    const payload = (await response.json()) as ServerProfilePayload;
+    const serverProfile = payload.profile;
+    if (!serverProfile) {
+      return normalized;
+    }
+    return {
+      displayName:
+        typeof serverProfile.name === "string" ? serverProfile.name.trim() : normalized.displayName,
+      photoUri:
+        typeof serverProfile.avatarUrl === "string"
+          ? serverProfile.avatarUrl.trim()
+          : normalized.photoUri,
+    } satisfies MobileProfileOverrides;
+  } catch {
+    return normalized;
+  }
 }
 
 export async function migrateLegacyProfileOverridesToCurrentAccount() {

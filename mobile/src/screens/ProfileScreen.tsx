@@ -37,20 +37,21 @@ import {
   subscribeToMonetizationAccountSnapshot,
   type MonetizationAccountSnapshot,
 } from "../services/monetization";
+import { uploadProfilePhoto } from "../services/imageUpload";
 import {
-  readMobileProfileOverrides,
-  saveMobileProfileOverrides,
+  readMobileProfile,
+  saveMobileProfile,
   type MobileProfileOverrides,
 } from "../services/profile";
 import { signOutAndResetMobileSession } from "../services/mobileSession";
 import { styles } from "../styles/appStyles";
 import googleGLogo from "../../assets/google-g-logo.png";
 
-const SUPPORT_URL = "https://flavor-fusion-chef.vercel.app/support";
-const FAQ_URL = "https://flavor-fusion-chef.vercel.app/faq";
-const PRIVACY_POLICY_URL = "https://flavor-fusion-chef.vercel.app/privacy";
-const TERMS_URL = "https://flavor-fusion-chef.vercel.app/terms";
-const REFUND_POLICY_URL = "https://flavor-fusion-chef.vercel.app/refund-policy";
+const SUPPORT_URL = "https://www.flavorfusionchef.com/support";
+const FAQ_URL = "https://www.flavorfusionchef.com/faq";
+const PRIVACY_POLICY_URL = "https://www.flavorfusionchef.com/privacy";
+const TERMS_URL = "https://www.flavorfusionchef.com/terms";
+const REFUND_POLICY_URL = "https://www.flavorfusionchef.com/refund-policy";
 
 type ProfileLinkRowProps = {
   icon: keyof typeof MaterialIcons.glyphMap;
@@ -171,6 +172,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   const [isPurchasingCredits, setIsPurchasingCredits] = useState(false);
   const [isRefreshingProfile, setIsRefreshingProfile] = useState(false);
   const [isCreditSheetOpen, setIsCreditSheetOpen] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [creditPackOptions, setCreditPackOptions] = useState<CreditPackOption[]>([]);
   const [selectedCreditPackId, setSelectedCreditPackId] = useState("");
   const [creditPurchaseMessage, setCreditPurchaseMessage] = useState("");
@@ -206,7 +208,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     try {
       const [nextSession, nextOverrides] = await Promise.all([
         getMobileAuthSession(),
-        readMobileProfileOverrides(),
+        readMobileProfile(),
       ]);
       setSession(nextSession);
       setProfileOverrides(nextOverrides);
@@ -549,13 +551,22 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
         setDraftPhotoUri(nextPhotoUri);
         return;
       }
-      const nextOverrides = await saveMobileProfileOverrides({
-        ...profileOverrides,
-        photoUri: nextPhotoUri,
-      });
-      setProfileOverrides(nextOverrides);
+      try {
+        const uploadedPhotoUri = await uploadProfilePhoto(nextPhotoUri, `${displayName || "profile"} profile photo`);
+        const nextOverrides = await saveMobileProfile({
+          ...profileOverrides,
+          photoUri: uploadedPhotoUri,
+        });
+        setProfileOverrides(nextOverrides);
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "Could not save profile photo.";
+        Alert.alert("Photo not saved", message);
+      }
     }
-  }, [isEditOpen, profileOverrides]);
+  }, [displayName, isEditOpen, profileOverrides]);
 
   const handleTakePhoto = useCallback(async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -574,22 +585,51 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
         setDraftPhotoUri(nextPhotoUri);
         return;
       }
-      const nextOverrides = await saveMobileProfileOverrides({
-        ...profileOverrides,
+      try {
+        const uploadedPhotoUri = await uploadProfilePhoto(nextPhotoUri, `${displayName || "profile"} profile photo`);
+        const nextOverrides = await saveMobileProfile({
+          ...profileOverrides,
+          photoUri: uploadedPhotoUri,
+        });
+        setProfileOverrides(nextOverrides);
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "Could not save profile photo.";
+        Alert.alert("Photo not saved", message);
+      }
+    }
+  }, [displayName, isEditOpen, profileOverrides]);
+
+  const handleSaveProfile = useCallback(async () => {
+    if (isSavingProfile) {
+      return;
+    }
+    setIsSavingProfile(true);
+    try {
+      const trimmedName = draftName.trim();
+      const trimmedPhotoUri = draftPhotoUri.trim();
+      const nextPhotoUri =
+        trimmedPhotoUri && !trimmedPhotoUri.startsWith("http")
+          ? await uploadProfilePhoto(trimmedPhotoUri, `${trimmedName || displayName || "profile"} profile photo`)
+          : trimmedPhotoUri;
+      const nextOverrides = await saveMobileProfile({
+        displayName: trimmedName,
         photoUri: nextPhotoUri,
       });
       setProfileOverrides(nextOverrides);
+      setIsEditOpen(false);
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Could not save profile changes.";
+      Alert.alert("Profile not saved", message);
+    } finally {
+      setIsSavingProfile(false);
     }
-  }, [isEditOpen, profileOverrides]);
-
-  const handleSaveProfile = useCallback(async () => {
-    const nextOverrides = await saveMobileProfileOverrides({
-      displayName: draftName.trim(),
-      photoUri: draftPhotoUri.trim(),
-    });
-    setProfileOverrides(nextOverrides);
-    setIsEditOpen(false);
-  }, [draftName, draftPhotoUri]);
+  }, [displayName, draftName, draftPhotoUri, isSavingProfile]);
 
   const handleCopyEmail = useCallback(async () => {
     if (!email) {
@@ -1006,10 +1046,17 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
 
               <Pressable
                 accessibilityRole="button"
+                disabled={isSavingProfile}
                 onPress={handleSaveProfile}
-                style={({ pressed }) => [styles.profileSaveButton, pressed && styles.profileRowPressed]}
+                style={({ pressed }) => [
+                  styles.profileSaveButton,
+                  pressed && styles.profileRowPressed,
+                  isSavingProfile && styles.profileButtonDisabled,
+                ]}
               >
-                <Text style={styles.profileSaveButtonText}>Save Changes</Text>
+                <Text style={styles.profileSaveButtonText}>
+                  {isSavingProfile ? "Saving..." : "Save Changes"}
+                </Text>
               </Pressable>
             </View>
           </View>

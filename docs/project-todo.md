@@ -4,7 +4,7 @@
 
 - Completed by user testing: same-device account switching, final auth/account regression, Darth test account data check, credit deduction checks, and Apple/Google sign-in checks.
 - Verified locally: next native iOS build should use display name `Flavor Fusion Chef` from `mobile/app.json`.
-- Remaining domain note: Google/web auth prompts will still show the hosted domain while `mobile/src/config/api.ts` points to `https://flavor-fusion-chef.vercel.app`. Replace with a production custom domain later if we want the iOS trust prompt to show our own domain instead of Vercel.
+- Domain note: production website now uses `https://www.flavorfusionchef.com`; mobile links/API default should stay aligned with that domain for future builds.
 
 ## Data And Auth Follow-Up
 

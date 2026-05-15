@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
       userId: session.userId,
       email: session.email,
       name: session.name,
+      avatarUrl: session.avatarUrl ?? "",
       role: session.role,
       expiresAt: new Date(session.exp * 1000).toISOString(),
     },

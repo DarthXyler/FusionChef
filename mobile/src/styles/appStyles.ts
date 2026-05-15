@@ -1331,6 +1331,9 @@ export const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "900",
   },
+  profileButtonDisabled: {
+    opacity: 0.55,
+  },
   activityEmptyIcon: {
     alignItems: "center",
     backgroundColor: "#ecfdf5",

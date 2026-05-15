@@ -125,6 +125,44 @@ export async function getAuthUserById(userId: string) {
   return rowToAuthUserRecord(result.rows[0] ?? {});
 }
 
+export async function updateAuthUserProfile(params: {
+  userId: string;
+  name?: string;
+  avatarUrl?: string;
+}) {
+  await ensureAuthSchema();
+  const userId = params.userId.trim();
+  if (!userId) {
+    return null;
+  }
+
+  const existing = await getAuthUserById(userId);
+  if (!existing) {
+    return null;
+  }
+
+  const nextName =
+    typeof params.name === "string" ? normalizeName(params.name, existing.email) : existing.name;
+  const nextAvatarUrl =
+    typeof params.avatarUrl === "string" ? normalizeAvatarUrl(params.avatarUrl) : existing.avatarUrl;
+  const now = new Date().toISOString();
+
+  await executeTurso({
+    sql: `UPDATE auth_users
+          SET name = ?,
+              avatar_url = ?,
+              updated_at = ?
+          WHERE id = ?`,
+    args: [nextName, nextAvatarUrl, now, userId],
+  });
+
+  return {
+    ...existing,
+    name: nextName,
+    avatarUrl: nextAvatarUrl,
+  } satisfies AuthUserRecord;
+}
+
 export async function upsertOAuthUser(params: {
   provider: OAuthProvider;
   providerSubject: string;
