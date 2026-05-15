@@ -2,10 +2,9 @@
 
 ## App Store Release Blockers
 
-- Before App Store submission, run a same-device account-switching smoke test: sign in as Min, confirm credits/cookbook/recent fusions, sign out, confirm Profile/Home/Cookbook/Recent Fusions show signed-out or empty state, then sign in as Kevin and confirm no Min-owned credits, cookbook rows, favorites, to-try flags, or recent fusions appear.
-- Run final account-based regression: Apple login, Google login, cookbook list/detail, Favorite/To Try toggles, credit balance, Home/Profile credit refresh, recipe generation credit deduction, reroll credit deduction, Apple purchase verification, and sign-out/sign-in recovery.
-- Confirm `darthxyler@gmail.com` remains the canonical main testnet user with expected cookbook count, credits, favorites, to-try flags, purchase history, and usage data after the final deployment.
-- Verify native iOS build metadata before the next build: display name must be exactly `Flavor Fusion Chef`, and OAuth prompt/domain trust should be reviewed if still using the Vercel domain.
+- Completed by user testing: same-device account switching, final auth/account regression, Darth test account data check, credit deduction checks, and Apple/Google sign-in checks.
+- Verified locally: next native iOS build should use display name `Flavor Fusion Chef` from `mobile/app.json`.
+- Remaining domain note: Google/web auth prompts will still show the hosted domain while `mobile/src/config/api.ts` points to `https://flavor-fusion-chef.vercel.app`. Replace with a production custom domain later if we want the iOS trust prompt to show our own domain instead of Vercel.
 
 ## Data And Auth Follow-Up
 
@@ -15,6 +14,8 @@
 
 ## Mobile 2.0
 
+- Build Admin Analytics 2.0 from `docs/admin-analytics-2.0-plan.md`: user mix analytics, paid pack demand, OpenAI budget/burn tracking, Turso/Cloudflare capacity tracking, profit/loss estimates, manual expense entries, threshold alerts, and 15-minute admin refresh.
+- Rework current admin observe/paywall analytics wording into simple business language. Avoid labels like `Over Quota`, `Estimated Paywall Hits`, and `Paywall Hit %`; replace them with owner-friendly terms that explain what happened, why it matters, and what action to take.
 - Replace local mobile profile overrides with a server-backed profile endpoint after monetization is finalized. Scope: persist display name and profile photo URL per authenticated user, upload/store profile images, sync the mobile Profile screen from API state, and keep local AsyncStorage only as an offline/cache fallback.
 - Keep Activity hidden from the tab bar until there is a clear product role and backed data model for it.
 

@@ -1,4 +1,4 @@
-export const SUPPORT_EMAIL = "darthxyler@gmail.com";
+export const SUPPORT_EMAIL = "admin@flavorfusionchef.com";
 
 export const fallbackCreditPacks = [
   {
