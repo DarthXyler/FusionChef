@@ -29,6 +29,8 @@
       "usesAppleSignIn": true,
       "supportsTablet": true,
       "infoPlist": {
+        "CFBundleDisplayName": "Flavor Fusion Chef",
+        "CFBundleName": "Flavor Fusion Chef",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
