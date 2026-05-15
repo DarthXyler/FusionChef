@@ -4,7 +4,7 @@ export const fallbackCreditPacks = [
   {
     name: "Starter Pack",
     credits: 20,
-    price: "$2.99",
+    price: "$3.99",
     productId: "com.flavorfusion.credits.20",
     description: "A light pack for trying a few fusion ideas and saving your favorites.",
     featured: false,
@@ -12,7 +12,7 @@ export const fallbackCreditPacks = [
   {
     name: "Chef Pack",
     credits: 50,
-    price: "$6.99",
+    price: "$8.99",
     productId: "com.flavorfusion.credits.50",
     description: "A flexible pack for regular recipe experiments and rerolls.",
     featured: true,
@@ -20,7 +20,7 @@ export const fallbackCreditPacks = [
   {
     name: "Pro Pack",
     credits: 120,
-    price: "$14.99",
+    price: "$17.99",
     productId: "com.flavorfusion.credits.120",
     description: "Best for frequent cooks who want a larger idea bank ready to go.",
     featured: false,
