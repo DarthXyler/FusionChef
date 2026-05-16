@@ -1110,8 +1110,11 @@ export function RecipeWorkspaceScreen({
                 <View style={styles.divider} />
 
                 <SectionHeader iconName="inventory-2" title="Ingredients" />
-                {activeRecipe.ingredients.map((ingredient) => (
-                  <View key={`${ingredient.item}-${ingredient.quantity}`} style={styles.listRow}>
+                {activeRecipe.ingredients.map((ingredient, index) => (
+                  <View
+                    key={`ingredient-${index}-${ingredient.item}-${ingredient.quantity}`}
+                    style={styles.listRow}
+                  >
                     <Text style={styles.listPrimary}>
                       {ingredient.quantity} {toTitleCase(ingredient.item)}
                     </Text>
@@ -1133,8 +1136,11 @@ export function RecipeWorkspaceScreen({
 
                 <SectionHeader iconName="autorenew" title="Ingredient Swaps" />
                 {activeRecipe.swaps.length > 0 ? (
-                  activeRecipe.swaps.map((swap) => (
-                    <View key={`${swap.original}-${swap.replacement}`} style={styles.swapCard}>
+                  activeRecipe.swaps.map((swap, index) => (
+                    <View
+                      key={`swap-${index}-${swap.original}-${swap.replacement}`}
+                      style={styles.swapCard}
+                    >
                       <Text style={styles.swapTitle}>
                         {toTitleCase(swap.original)} {"\u2192"} {toTitleCase(swap.replacement)}
                       </Text>
@@ -1157,7 +1163,7 @@ export function RecipeWorkspaceScreen({
 
                     return (
                       <Pressable
-                        key={`${item.category}-${item.item}-${item.quantity}`}
+                        key={shoppingKey}
                         onPress={() => handleToggleShoppingItem(shoppingKey)}
                         style={[styles.shoppingRow, checked && styles.shoppingRowChecked]}
                       >
@@ -1248,9 +1254,9 @@ export function RecipeWorkspaceScreen({
             <View style={styles.capturePanel}>
               <Text style={styles.capturePanelTitle}>What you&apos;ll need</Text>
               <View style={styles.captureTagGrid}>
-                {featuredIngredients.map((ingredient) => (
+                {featuredIngredients.map((ingredient, index) => (
                   <View
-                    key={`${ingredient.item}-${ingredient.quantity}-tag`}
+                    key={`featured-ingredient-${index}-${ingredient.item}-${ingredient.quantity}`}
                     style={styles.captureTag}
                   >
                     <Text style={styles.captureTagLabel}>
@@ -1265,8 +1271,11 @@ export function RecipeWorkspaceScreen({
 
             <View style={styles.capturePanel}>
               <Text style={styles.capturePanelTitle}>Ingredient highlights</Text>
-              {activeRecipe.ingredients.map((ingredient) => (
-                <View key={`${ingredient.item}-${ingredient.quantity}`} style={styles.listRow}>
+              {activeRecipe.ingredients.map((ingredient, index) => (
+                <View
+                  key={`capture-ingredient-${index}-${ingredient.item}-${ingredient.quantity}`}
+                  style={styles.listRow}
+                >
                   <Text style={styles.listPrimary}>
                     {ingredient.quantity} {toTitleCase(ingredient.item)}
                   </Text>
