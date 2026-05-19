@@ -2,7 +2,7 @@
   "expo": {
     "name": "Flavor Fusion Chef",
     "slug": "flavor-fusion-chef-ios-20260316",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "scheme": "flavorfusionchef",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
