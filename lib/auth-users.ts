@@ -163,6 +163,20 @@ export async function updateAuthUserProfile(params: {
   } satisfies AuthUserRecord;
 }
 
+export async function listAuthUserAvatarUrls() {
+  await ensureAuthSchema();
+  const result = await executeTurso({
+    sql: `SELECT avatar_url
+          FROM auth_users
+          WHERE avatar_url IS NOT NULL
+            AND TRIM(avatar_url) != ''`,
+  });
+
+  return result.rows
+    .map((row) => (typeof row.avatar_url === "string" ? row.avatar_url.trim() : ""))
+    .filter((avatarUrl) => avatarUrl.length > 0);
+}
+
 export async function upsertOAuthUser(params: {
   provider: OAuthProvider;
   providerSubject: string;

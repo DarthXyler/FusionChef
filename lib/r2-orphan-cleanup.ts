@@ -3,6 +3,7 @@
  * Scans objects, compares against DB-referenced image URLs, and deletes old unreferenced files.
  */
 import { DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { listAuthUserAvatarUrls } from "@/lib/auth-users";
 import { listCookbookImageUrls } from "@/lib/cookbook-db";
 import { getR2ObjectKeyFromPublicUrl, getR2StorageClient } from "@/lib/r2-storage";
 
@@ -41,8 +42,12 @@ export async function runR2OrphanCleanup(
   const prefix = options.prefix?.trim() || DEFAULT_R2_IMAGE_PREFIX;
   const cutoff = Date.now() - options.maxAgeMinutes * 60_000;
 
-  // Build lookup set of keys that are still referenced by cookbook entries.
-  const imageUrls = await listCookbookImageUrls();
+  // Build lookup set of keys that are still referenced by cookbook entries or active profiles.
+  const [cookbookImageUrls, authUserAvatarUrls] = await Promise.all([
+    listCookbookImageUrls(),
+    listAuthUserAvatarUrls(),
+  ]);
+  const imageUrls = [...cookbookImageUrls, ...authUserAvatarUrls];
   const referencedKeys = new Set(
     imageUrls
       .map((imageUrl) => getR2ObjectKeyFromPublicUrl(imageUrl))

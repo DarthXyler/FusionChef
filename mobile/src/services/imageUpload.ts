@@ -36,12 +36,13 @@ export async function uploadProfilePhoto(uri: string, title: string) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-idempotency-key": generateIdempotencyKey(),
+      "idempotency-key": generateIdempotencyKey(),
       ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
     },
     body: JSON.stringify({
       imageDataUrl: `data:image/jpeg;base64,${rendered.base64}`,
       title,
+      purpose: "profile_photo",
     }),
   });
 
