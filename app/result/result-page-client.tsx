@@ -264,6 +264,7 @@ export function ResultPageClient({ initialRecipeId = null }: ResultPageClientPro
           body: JSON.stringify({
             imageDataUrl: imageUrl,
             title: record.recipe.title,
+            purpose: "recipe_image",
           }),
         }, SAVE_REQUEST_TIMEOUT_MS);
         const data = (await response.json()) as { imageUrl?: string };

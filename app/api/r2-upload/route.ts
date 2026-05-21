@@ -18,7 +18,10 @@ import {
 type UploadRequest = {
   imageDataUrl: string;
   title: string;
+  purpose?: UploadPurpose;
 };
+
+type UploadPurpose = "recipe_image" | "profile_photo";
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
@@ -31,6 +34,11 @@ const MAX_DECODED_IMAGE_BYTES = 2_800_000;
 const MAX_TITLE_CHARS = 140;
 const STORED_IMAGE_SIZE = 768;
 const STORED_IMAGE_WEBP_QUALITY = 72;
+const DEFAULT_UPLOAD_PREFIX = "fusion-images/";
+const UPLOAD_PREFIX_BY_PURPOSE: Record<UploadPurpose, string> = {
+  recipe_image: "recipe-images/",
+  profile_photo: "profile-photos/",
+};
 
 function getR2Client() {
   // Builds the S3-compatible R2 client only when credentials are present.
@@ -48,14 +56,24 @@ function getR2Client() {
   });
 }
 
-function buildImageKey(title: string) {
+function buildImageKey(title: string, prefix: string) {
   // Stable readable path + unique suffix to avoid collisions.
   const slug = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "")
     .slice(0, 48);
-  return `fusion-images/${slug || "fusion-dish"}-${Date.now()}-${randomUUID().slice(0, 8)}.webp`;
+  return `${prefix}${slug || "fusion-dish"}-${Date.now()}-${randomUUID().slice(0, 8)}.webp`;
+}
+
+function parseUploadPurpose(value: unknown) {
+  if (typeof value === "undefined") {
+    return DEFAULT_UPLOAD_PREFIX;
+  }
+  if (value === "recipe_image" || value === "profile_photo") {
+    return UPLOAD_PREFIX_BY_PURPOSE[value];
+  }
+  return null;
 }
 
 function isUploadRequest(value: unknown): value is UploadRequest {
@@ -67,7 +85,8 @@ function isUploadRequest(value: unknown): value is UploadRequest {
     typeof candidate.imageDataUrl === "string" &&
     candidate.imageDataUrl.startsWith("data:image/") &&
     typeof candidate.title === "string" &&
-    candidate.title.trim().length > 0
+    candidate.title.trim().length > 0 &&
+    parseUploadPurpose(candidate.purpose) !== null
   );
 }
 
@@ -91,6 +110,10 @@ export async function POST(request: Request) {
     const body = (await request.json()) as unknown;
     if (!isUploadRequest(body)) {
       return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+    }
+    const uploadPrefix = parseUploadPurpose(body.purpose);
+    if (!uploadPrefix) {
+      return NextResponse.json({ error: "Invalid upload purpose." }, { status: 400 });
     }
     if (body.title.trim().length > MAX_TITLE_CHARS) {
       return NextResponse.json({ error: "Title is too long." }, { status: 400 });
@@ -150,7 +173,7 @@ export async function POST(request: Request) {
       .webp({ quality: STORED_IMAGE_WEBP_QUALITY })
       .toBuffer();
 
-    const key = buildImageKey(body.title);
+    const key = buildImageKey(body.title, uploadPrefix);
     await client.send(
       new PutObjectCommand({
         Bucket: R2_BUCKET,

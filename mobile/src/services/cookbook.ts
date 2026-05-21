@@ -236,6 +236,49 @@ async function readErrorMessage(response: Response, fallback: string) {
   }
 }
 
+async function uploadRecipeImageDataUrl(imageDataUrl: string, title: string, recipeId: string) {
+  const authToken = await getMobileAuthToken();
+  const response = await fetch(`${getApiBaseUrl()}/api/r2-upload`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "idempotency-key": `mobile-recipe-image-upload-${recipeId}`,
+      ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
+    },
+    body: JSON.stringify({
+      imageDataUrl,
+      title,
+      purpose: "recipe_image",
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, "Could not upload recipe image."));
+  }
+
+  const payload = (await response.json()) as { imageUrl?: unknown };
+  if (typeof payload.imageUrl !== "string" || payload.imageUrl.trim().length === 0) {
+    throw new Error("Recipe image upload response was not in the expected format.");
+  }
+  return payload.imageUrl.trim();
+}
+
+async function cleanupUploadedRecipeImage(imageUrl: string) {
+  try {
+    const authToken = await getMobileAuthToken();
+    await fetch(`${getApiBaseUrl()}/api/r2-delete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: JSON.stringify({ imageUrl }),
+    });
+  } catch {
+    // Best-effort cleanup after a failed cookbook save.
+  }
+}
+
 export function buildCookbookSummary(record: CookbookRecipeRecord): CookbookRecipeSummary {
   return {
     recipeId: record.recipe.id,
@@ -292,33 +335,56 @@ export async function readCachedCookbookRecipe(
 export async function saveCookbookRecipe(
   record: GeneratedRecipeRecord | CookbookRecipeRecord,
 ): Promise<CookbookRecipeRecord> {
-  // Saving is idempotent by recipe ID, so tapping Save twice should not create
-  // duplicate cookbook rows.
-  const response = await fetch(`${getApiBaseUrl()}/api/cookbook`, {
-    method: "POST",
-    headers: await buildCookbookHeaders({
-      "x-idempotency-key": `mobile-cookbook-save-${record.recipe.id}`,
-    }),
-    body: JSON.stringify({
-      recipe: record.recipe,
-      sourceInput: record.sourceInput,
-      savedAt: "savedAt" in record ? record.savedAt : new Date().toISOString(),
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response, "Could not save recipe."));
+  const originalImageUrl = record.recipe.imageUrl?.trim() ?? "";
+  let uploadedImageUrl: string | null = null;
+  const imageUrl = originalImageUrl.startsWith("data:image/")
+    ? await uploadRecipeImageDataUrl(originalImageUrl, record.recipe.title, record.recipe.id)
+    : originalImageUrl;
+  if (originalImageUrl.startsWith("data:image/")) {
+    uploadedImageUrl = imageUrl;
   }
-  await syncAnonymousIdFromResponse(response);
+  const recipe = {
+    ...record.recipe,
+    imageUrl: imageUrl || undefined,
+  };
 
-  const payload = (await response.json()) as { record?: unknown };
-  if (!isCookbookRecipeRecord(payload.record)) {
-    throw new Error("The saved recipe response was not in the expected format.");
+  let savedRecord: CookbookRecipeRecord;
+  try {
+    // Saving is idempotent by recipe ID, so tapping Save twice should not create
+    // duplicate cookbook rows.
+    const response = await fetch(`${getApiBaseUrl()}/api/cookbook`, {
+      method: "POST",
+      headers: await buildCookbookHeaders({
+        "idempotency-key": `mobile-cookbook-save-${record.recipe.id}`,
+      }),
+      body: JSON.stringify({
+        recipe,
+        sourceInput: record.sourceInput,
+        savedAt: "savedAt" in record ? record.savedAt : new Date().toISOString(),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, "Could not save recipe."));
+    }
+
+    const payload = (await response.json()) as { record?: unknown };
+    if (!isCookbookRecipeRecord(payload.record)) {
+      throw new Error("The saved recipe response was not in the expected format.");
+    }
+
+    await syncAnonymousIdFromResponse(response);
+    savedRecord = payload.record;
+  } catch (error) {
+    if (uploadedImageUrl) {
+      void cleanupUploadedRecipeImage(uploadedImageUrl);
+    }
+    throw error;
   }
 
-  await writeCookbookDetailCache(payload.record);
-  await upsertCookbookSummaryCache(buildCookbookSummary(payload.record));
-  return payload.record;
+  await writeCookbookDetailCache(savedRecord);
+  await upsertCookbookSummaryCache(buildCookbookSummary(savedRecord));
+  return savedRecord;
 }
 
 export async function fetchCookbookSummaries(cursor?: string | null): Promise<CookbookSummaryPage> {

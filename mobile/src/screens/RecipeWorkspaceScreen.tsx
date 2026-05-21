@@ -819,19 +819,22 @@ export function RecipeWorkspaceScreen({
               },
             }
           : activeRecord;
-      await saveRecord(recordToSave);
-      if (previewImageUrl && !activeRecord.recipe.imageUrl) {
+      const savedRecord = await saveRecord(recordToSave);
+      const savedGeneratedRecord = {
+        recipe: savedRecord.recipe,
+        sourceInput: savedRecord.sourceInput,
+        createdAt: activeRecord.createdAt,
+      };
+      void upsertDashboardFusionHistory(savedGeneratedRecord);
+      if (savedRecord.recipe.imageUrl) {
         setLiveRecipeRecord((current) =>
           current && current.recipe.id === activeRecord.recipe.id
             ? {
-                ...current,
-                recipe: {
-                  ...current.recipe,
-                  imageUrl: previewImageUrl,
-                },
+                ...savedGeneratedRecord,
               }
             : current,
         );
+        setPreviewImageUrl(savedRecord.recipe.imageUrl);
       }
       Alert.alert("Saved", "Recipe added to your cookbook.");
     } catch (error) {

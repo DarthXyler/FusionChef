@@ -143,18 +143,31 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return response;
     }
 
+    let imageDeleted = false;
+    let imageDeleteFailed = false;
+    let imageDeleteSkipped = true;
     if (result.imageUrl && getR2ObjectKeyFromPublicUrl(result.imageUrl)) {
+      imageDeleteSkipped = false;
       try {
         await deleteR2ImageByPublicUrl(result.imageUrl);
-      } catch {
-        return NextResponse.json(
-          { error: "Could not delete image from cloud storage." },
-          { status: 502 },
+        imageDeleted = true;
+      } catch (error) {
+        imageDeleteFailed = true;
+        const message = error instanceof Error ? error.message : "Unknown R2 delete failure";
+        console.warn(
+          "[api/cookbook/delete] R2 image cleanup failed",
+          JSON.stringify({ recipeId, message }),
         );
       }
     }
 
-    const response = NextResponse.json({ success: result.deleted });
+    const response = NextResponse.json({
+      success: result.deleted,
+      imageDeleted,
+      imageDeleteFailed,
+      imageDeleteSkipped,
+      warning: imageDeleteFailed ? "Recipe deleted, but image cleanup will be retried by orphan cleanup." : undefined,
+    });
     withCookbookIdentityHeader(response, identity.anonUserId);
     applyAnonymousIdentityCookie(response, identity);
     return response;
