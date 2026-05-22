@@ -13,6 +13,7 @@ import {
   updateCookbookRecipeFlags,
 } from "../services/cookbook";
 import { getMobileAuthToken } from "../services/auth";
+import { upsertDashboardFusionHistory } from "../services/dashboardHistory";
 import type { CookbookRecipeRecord, CookbookRecipeSummary, CookbookStats, GeneratedRecipeRecord } from "../types/recipe";
 import type { MobileCookbookContextValue } from "../navigation/types";
 
@@ -269,7 +270,15 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
   );
 
   const deleteRecord = useCallback(async (recipeId: string) => {
+    const deletedRecord = cookbookRecordCache[recipeId];
     await deleteCookbookRecipe(recipeId);
+    if (deletedRecord) {
+      void upsertDashboardFusionHistory({
+        recipe: deletedRecord.recipe,
+        sourceInput: deletedRecord.sourceInput,
+        createdAt: deletedRecord.savedAt,
+      });
+    }
     setCookbookRecordCache((current) => {
       const next = { ...current };
       delete next[recipeId];
@@ -289,7 +298,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       return next;
     });
     setSummarySyncError("");
-  }, []);
+  }, [cookbookRecordCache]);
 
   const updateRecipeFlags = useCallback(
     async (recipeId: string, flags: { isFavorite?: boolean; isToTry?: boolean }) => {
