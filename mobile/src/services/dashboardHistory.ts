@@ -44,6 +44,10 @@ function sortHistory(items: DashboardFusionSummary[]) {
   return [...items].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
 }
 
+function isLocalImageSnapshot(value: unknown) {
+  return typeof value === "string" && value.trim().startsWith("data:image/");
+}
+
 async function getDashboardHistoryKeyForCurrentAccount() {
   const session = await getMobileAuthSession();
   const userId = session?.userId?.trim() ?? "";
@@ -92,16 +96,29 @@ export async function clearDashboardFusionHistory() {
 
 export async function upsertDashboardFusionHistory(record: GeneratedRecipeRecord) {
   const current = await readDashboardFusionHistory();
+  const existing = current.find((item) => item.id === record.recipe.id);
+  const preservedImageUrl = isLocalImageSnapshot(existing?.record?.recipe.imageUrl)
+    ? existing?.record?.recipe.imageUrl
+    : isLocalImageSnapshot(existing?.imageUrl)
+      ? existing?.imageUrl
+      : record.recipe.imageUrl;
+  const nextRecord: GeneratedRecipeRecord = {
+    ...record,
+    recipe: {
+      ...record.recipe,
+      imageUrl: preservedImageUrl,
+    },
+  };
   // Store the full generated record so the user can reopen and save it later.
   // Older app versions stored only the small summary fields.
   const nextItem: DashboardFusionSummary = {
-    id: record.recipe.id,
-    title: record.recipe.title,
-    baseCuisine: record.recipe.baseCuisine,
-    fusionCuisine: record.recipe.fusionCuisine,
-    createdAt: record.createdAt,
-    imageUrl: record.recipe.imageUrl,
-    record,
+    id: nextRecord.recipe.id,
+    title: nextRecord.recipe.title,
+    baseCuisine: nextRecord.recipe.baseCuisine,
+    fusionCuisine: nextRecord.recipe.fusionCuisine,
+    createdAt: nextRecord.createdAt,
+    imageUrl: nextRecord.recipe.imageUrl,
+    record: nextRecord,
   };
   return saveDashboardFusionHistory([
     nextItem,
