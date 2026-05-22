@@ -43,6 +43,15 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function hashForIdempotency(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 function isRecipeFusion(value: unknown): value is RecipeFusion {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
@@ -238,11 +247,12 @@ async function readErrorMessage(response: Response, fallback: string) {
 
 async function uploadRecipeImageDataUrl(imageDataUrl: string, title: string, recipeId: string) {
   const authToken = await getMobileAuthToken();
+  const idempotencyKey = `mobile-recipe-image-upload-${recipeId}-${hashForIdempotency(imageDataUrl)}`;
   const response = await fetch(`${getApiBaseUrl()}/api/r2-upload`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "idempotency-key": `mobile-recipe-image-upload-${recipeId}`,
+      "idempotency-key": idempotencyKey,
       ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
     },
     body: JSON.stringify({
@@ -347,6 +357,14 @@ export async function saveCookbookRecipe(
     ...record.recipe,
     imageUrl: imageUrl || undefined,
   };
+  const savePayload = {
+    recipe,
+    sourceInput: record.sourceInput,
+    savedAt: "savedAt" in record ? record.savedAt : new Date().toISOString(),
+  };
+  const saveIdempotencyKey = `mobile-cookbook-save-${record.recipe.id}-${hashForIdempotency(
+    JSON.stringify(savePayload),
+  )}`;
 
   let savedRecord: CookbookRecipeRecord;
   try {
@@ -355,13 +373,9 @@ export async function saveCookbookRecipe(
     const response = await fetch(`${getApiBaseUrl()}/api/cookbook`, {
       method: "POST",
       headers: await buildCookbookHeaders({
-        "idempotency-key": `mobile-cookbook-save-${record.recipe.id}`,
+        "idempotency-key": saveIdempotencyKey,
       }),
-      body: JSON.stringify({
-        recipe,
-        sourceInput: record.sourceInput,
-        savedAt: "savedAt" in record ? record.savedAt : new Date().toISOString(),
-      }),
+      body: JSON.stringify(savePayload),
     });
 
     if (!response.ok) {
