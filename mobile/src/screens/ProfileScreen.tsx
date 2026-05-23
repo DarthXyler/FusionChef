@@ -252,6 +252,21 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     void loadProfile();
   }, [loadProfile]);
 
+  const syncAccountOwnedStateAfterLogin = useCallback(async () => {
+    resetLocalState();
+    const [profileResult, accountResult] = await Promise.allSettled([
+      loadProfile(),
+      fetchMonetizationAccountSnapshot({ forceRefresh: true }),
+    ]);
+    if (accountResult.status === "fulfilled") {
+      setAccountSnapshot(accountResult.value);
+    }
+    await refreshSummaries().catch(() => {});
+    if (profileResult.status === "rejected") {
+      await loadProfile().catch(() => {});
+    }
+  }, [loadProfile, refreshSummaries, resetLocalState]);
+
   useEffect(
     () =>
       subscribeToMonetizationAccountSnapshot((snapshot) => {
@@ -335,7 +350,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     try {
       const didLogin = await loginWithGoogleForMobile();
       if (didLogin) {
-        await loadProfile();
+        await syncAccountOwnedStateAfterLogin();
         setIsAuthSheetOpen(false);
       }
     } catch (error) {
@@ -347,14 +362,14 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     } finally {
       setIsSigningIn(false);
     }
-  }, [loadProfile]);
+  }, [syncAccountOwnedStateAfterLogin]);
 
   const handleSignInWithApple = useCallback(async () => {
     setIsSigningIn(true);
     try {
       const didLogin = await loginWithAppleForMobile();
       if (didLogin) {
-        await loadProfile();
+        await syncAccountOwnedStateAfterLogin();
         setIsAuthSheetOpen(false);
       }
     } catch (error) {
@@ -366,7 +381,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     } finally {
       setIsSigningIn(false);
     }
-  }, [loadProfile]);
+  }, [syncAccountOwnedStateAfterLogin]);
 
   const handleOpenCreditSheet = useCallback(async () => {
     setCreditPurchaseMessage("");
@@ -381,7 +396,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
           setCreditPurchaseMessage("Sign in was cancelled. Sign in to purchase credits.");
           return;
         }
-        await loadProfile();
+        await syncAccountOwnedStateAfterLogin();
       } catch (error) {
         const message =
           error instanceof Error && error.message.trim().length > 0
@@ -417,7 +432,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     } finally {
       setIsLoadingCreditPacks(false);
     }
-  }, [getCreditPackOptions, isSignedIn, loadProfile]);
+  }, [getCreditPackOptions, isSignedIn, syncAccountOwnedStateAfterLogin]);
 
   useEffect(() => {
     if (route.params?.openCreditSheetToken) {
