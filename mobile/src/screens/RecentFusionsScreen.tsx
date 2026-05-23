@@ -28,6 +28,16 @@ function formatRecentDate(value: string) {
   });
 }
 
+function getLocalImageSnapshot(item?: DashboardFusionSummary) {
+  const recordImageUrl = item?.record?.recipe.imageUrl?.trim() ?? "";
+  if (recordImageUrl.startsWith("data:image/")) {
+    return recordImageUrl;
+  }
+
+  const imageUrl = item?.imageUrl?.trim() ?? "";
+  return imageUrl.startsWith("data:image/") ? imageUrl : "";
+}
+
 export function RecentFusionsScreen({
   navigation,
 }: NativeStackScreenProps<HomeStackParamList, "RecentFusions">) {
@@ -42,8 +52,17 @@ export function RecentFusionsScreen({
 
   const recentFusionItems = useMemo(() => {
     const byId = new Map<string, DashboardFusionSummary>();
-    for (const item of [...history, ...summaries.map(cookbookSummaryToDashboardFusion)]) {
+    for (const item of history) {
       byId.set(item.id, item);
+    }
+    for (const item of summaries.map(cookbookSummaryToDashboardFusion)) {
+      const existing = byId.get(item.id);
+      const localImageSnapshot = getLocalImageSnapshot(existing);
+      byId.set(item.id, {
+        ...item,
+        imageUrl: localImageSnapshot || item.imageUrl,
+        record: existing?.record,
+      });
     }
     return [...byId.values()]
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
