@@ -245,9 +245,16 @@ async function readErrorMessage(response: Response, fallback: string) {
   }
 }
 
-async function uploadRecipeImageDataUrl(imageDataUrl: string, title: string, recipeId: string) {
+async function uploadRecipeImageDataUrl(
+  imageDataUrl: string,
+  title: string,
+  recipeId: string,
+  saveAttemptId: string,
+) {
   const authToken = await getMobileAuthToken();
-  const idempotencyKey = `mobile-recipe-image-upload-${recipeId}-${hashForIdempotency(imageDataUrl)}`;
+  const idempotencyKey = `mobile-recipe-image-upload-${recipeId}-${hashForIdempotency(
+    `${hashForIdempotency(imageDataUrl)}:${saveAttemptId}`,
+  )}`;
   const response = await fetch(`${getApiBaseUrl()}/api/r2-upload`, {
     method: "POST",
     headers: {
@@ -346,9 +353,10 @@ export async function saveCookbookRecipe(
   record: GeneratedRecipeRecord | CookbookRecipeRecord,
 ): Promise<CookbookRecipeRecord> {
   const originalImageUrl = record.recipe.imageUrl?.trim() ?? "";
+  const savedAt = "savedAt" in record ? record.savedAt : new Date().toISOString();
   let uploadedImageUrl: string | null = null;
   const imageUrl = originalImageUrl.startsWith("data:image/")
-    ? await uploadRecipeImageDataUrl(originalImageUrl, record.recipe.title, record.recipe.id)
+    ? await uploadRecipeImageDataUrl(originalImageUrl, record.recipe.title, record.recipe.id, savedAt)
     : originalImageUrl;
   if (originalImageUrl.startsWith("data:image/")) {
     uploadedImageUrl = imageUrl;
@@ -360,7 +368,7 @@ export async function saveCookbookRecipe(
   const savePayload = {
     recipe,
     sourceInput: record.sourceInput,
-    savedAt: "savedAt" in record ? record.savedAt : new Date().toISOString(),
+    savedAt,
   };
   const saveIdempotencyKey = `mobile-cookbook-save-${record.recipe.id}-${hashForIdempotency(
     JSON.stringify(savePayload),
