@@ -309,7 +309,7 @@ export default function Home() {
               Turn everyday meals into exciting fusion dishes with AI.
             </p>
           </div>
-          <div className="flex justify-center md:shrink-0 md:justify-end">
+          <div className="flex flex-col items-center gap-3 sm:flex-row md:shrink-0 md:justify-end">
             <Link
               href={appStoreUrl}
               target="_blank"
@@ -319,6 +319,20 @@ export default function Home() {
             >
               <AppStoreBadge className="app-store-badge-large" />
             </Link>
+            <div className="flex w-full flex-col gap-3 sm:w-auto">
+              <Link
+                href="/pricing"
+                className="inline-flex min-h-14 items-center justify-center rounded-xl bg-white px-6 text-base font-extrabold text-emerald-800 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"
+              >
+                View pricing
+              </Link>
+              <Link
+                href="/support"
+                className="inline-flex min-h-14 items-center justify-center rounded-xl border border-white/45 px-6 text-base font-extrabold text-white transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"
+              >
+                Contact support
+              </Link>
+            </div>
           </div>
         </div>
       </section>
