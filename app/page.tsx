@@ -291,7 +291,7 @@ export default function Home() {
       <section className="mobile-cta-scene relative -mx-4 -mb-6 overflow-hidden rounded-none border-y border-emerald-100 bg-emerald-700 px-5 py-10 text-white md:-mx-8 md:-mb-10 md:px-8 lg:-mx-12 lg:px-12">
         <div aria-hidden="true" className="mobile-cta-art" />
         <div aria-hidden="true" className="mobile-cta-overlay absolute inset-0" />
-        <div className="relative mx-auto flex max-w-6xl flex-col gap-7 md:flex-row md:items-center md:justify-between">
+        <div className="relative mx-auto flex max-w-6xl flex-col items-center gap-5 md:flex-row md:items-center md:justify-between md:gap-7">
           <div className="flex flex-col items-center gap-[30px] text-center md:flex-row md:text-left">
             <div>
               <p className="text-sm font-extrabold uppercase text-emerald-100">Mobile app</p>
@@ -312,7 +312,7 @@ export default function Home() {
               <AppStoreBadge className="app-store-badge-large" />
             </Link>
           </div>
-          <div className="flex w-full flex-col gap-3 sm:w-auto md:shrink-0">
+          <div className="flex w-[min(230px,100%)] flex-col gap-4 sm:w-auto md:shrink-0 md:gap-3">
             <Link
               href="/pricing"
               className="inline-flex min-h-14 items-center justify-center rounded-xl bg-white px-6 text-base font-extrabold text-emerald-800 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"

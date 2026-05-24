@@ -277,8 +277,8 @@ body {
 }
 
 .app-store-badge-large {
-  height: 76px;
-  width: 258px;
+  height: 68px;
+  width: 230px;
 }
 
 .app-store-badge-hero {
@@ -286,6 +286,13 @@ body {
   height: auto;
   min-height: 56px;
   width: 100%;
+}
+
+@media (min-width: 768px) {
+  .app-store-badge-large {
+    height: 76px;
+    width: 258px;
+  }
 }
 
 @keyframes pack-border-trace {
