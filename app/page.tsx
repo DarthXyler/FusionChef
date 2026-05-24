@@ -29,6 +29,26 @@ const steps = [
   },
 ] as const;
 
+const appStoreUrl = "https://apps.apple.com/us/app/flavor-fusion-chef/id6764818879";
+
+function AppStoreBadge({ className = "" }: { className?: string }) {
+  return (
+    <span className={`app-store-badge ${className}`}>
+      <svg aria-hidden="true" className="h-8 w-8 shrink-0 sm:h-9 sm:w-9" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M16.7 12.4c0-2 1.6-3 1.7-3.1-0.9-1.4-2.4-1.6-2.9-1.6-1.2-0.1-2.4 0.7-3 0.7s-1.6-0.7-2.6-0.7c-1.4 0-2.7 0.8-3.4 2-1.5 2.6-0.4 6.4 1.1 8.5 0.7 1 1.6 2.2 2.7 2.1 1.1 0 1.5-0.7 2.8-0.7s1.7 0.7 2.9 0.7c1.2 0 1.9-1 2.6-2.1 0.8-1.2 1.2-2.4 1.2-2.5 0 0-2.3-0.9-2.3-3.3ZM14.7 6.4c0.6-0.7 1-1.7 0.9-2.7-0.9 0-1.9 0.6-2.5 1.3-0.6 0.7-1 1.7-0.9 2.6 0.9 0.1 1.9-0.5 2.5-1.2Z" />
+      </svg>
+      <span className="leading-none">
+        <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-white/78 sm:text-[11px]">
+          Download on the
+        </span>
+        <span className="mt-1 block text-[22px] font-extrabold tracking-normal text-white sm:text-[25px]">
+          App Store
+        </span>
+      </span>
+    </span>
+  );
+}
+
 export default function Home() {
   const previewFaq = faqItems.slice(0, 3);
 
@@ -280,27 +300,24 @@ export default function Home() {
         <div aria-hidden="true" className="mobile-cta-art" />
         <div aria-hidden="true" className="mobile-cta-overlay absolute inset-0" />
         <div className="relative mx-auto flex max-w-6xl flex-col gap-7 md:flex-row md:items-center md:justify-between">
-          <div>
+          <div className="text-center md:text-left">
             <p className="text-sm font-extrabold uppercase text-emerald-100">Mobile app</p>
             <h2 className="mt-3 max-w-2xl text-[34px] font-extrabold leading-tight sm:text-[44px]">
-              Flavor Fusion Chef is coming to iPhone.
+              Now Available on iPhone
             </h2>
-            <p className="mt-4 max-w-xl text-lg leading-8 text-emerald-50">
-              A mobile-first cookbook for turning familiar recipes into cheerful fusion favorites.
+            <p className="mx-auto mt-4 max-w-xl text-lg leading-8 text-emerald-50 md:mx-0">
+              Turn everyday meals into exciting fusion dishes with AI.
             </p>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row md:shrink-0">
+          <div className="flex justify-center md:shrink-0 md:justify-end">
             <Link
-              href="/pricing"
-              className="inline-flex min-h-14 items-center justify-center rounded-xl bg-white px-6 text-base font-extrabold text-emerald-800 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"
+              href={appStoreUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Download Flavor Fusion Chef on the App Store"
+              className="mobile-cta-store-link"
             >
-              View pricing
-            </Link>
-            <Link
-              href="/support"
-              className="inline-flex min-h-14 items-center justify-center rounded-xl border border-white/45 px-6 text-base font-extrabold text-white transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"
-            >
-              Contact support
+              <AppStoreBadge className="app-store-badge-large" />
             </Link>
           </div>
         </div>

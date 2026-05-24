@@ -217,6 +217,55 @@ body {
     linear-gradient(90deg, rgba(4, 120, 87, 0.32) 0%, rgba(4, 120, 87, 0.76) 24%, rgba(4, 120, 87, 0.84) 60%, rgba(4, 120, 87, 0.36) 100%);
 }
 
+.mobile-cta-store-link {
+  display: inline-flex;
+  border-radius: 18px;
+  box-shadow:
+    0 24px 58px rgba(2, 44, 34, 0.22),
+    0 0 0 1px rgba(167, 243, 208, 0.48),
+    0 0 38px rgba(187, 247, 208, 0.26);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    filter 180ms ease;
+}
+
+.mobile-cta-store-link:hover {
+  filter: saturate(1.04);
+  transform: translateY(-2px);
+  box-shadow:
+    0 30px 70px rgba(2, 44, 34, 0.28),
+    0 0 0 1px rgba(209, 250, 229, 0.72),
+    0 0 46px rgba(187, 247, 208, 0.34);
+}
+
+.mobile-cta-store-link:focus-visible {
+  outline: 3px solid rgba(255, 255, 255, 0.92);
+  outline-offset: 5px;
+}
+
+.app-store-badge {
+  display: inline-flex;
+  min-height: 68px;
+  min-width: 204px;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(31, 41, 55, 0.98), #050505 72%),
+    #050505;
+  padding: 10px 18px 11px;
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.app-store-badge-large {
+  min-height: 78px;
+  min-width: min(260px, calc(100vw - 48px));
+  padding-inline: 24px;
+}
+
 @keyframes pack-border-trace {
   from {
     stroke-dashoffset: 0;
