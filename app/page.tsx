@@ -34,7 +34,7 @@ const appStoreUrl = "https://apps.apple.com/us/app/flavor-fusion-chef/id67648188
 function AppStoreBadge({ className = "" }: { className?: string }) {
   return (
     <Image
-      src="/landing/app-store-download-badge.jpg"
+      src="/landing/app-store-download-badge.png"
       alt="Download on the App Store"
       width={258}
       height={76}
