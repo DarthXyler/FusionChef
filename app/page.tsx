@@ -288,7 +288,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="mobile-cta-scene relative -mx-4 -mb-6 overflow-hidden rounded-none border-y border-emerald-100 bg-emerald-700 px-5 py-10 text-white md:-mx-8 md:-mb-10 md:px-8 lg:-mx-12 lg:px-12">
+      <section className="mobile-cta-scene relative -mx-4 -mt-6 -mb-6 overflow-hidden rounded-none border-y border-emerald-100 bg-emerald-700 px-5 py-10 text-white md:-mx-8 md:-mt-8 md:-mb-10 md:px-8 lg:-mx-12 lg:px-12">
         <div aria-hidden="true" className="mobile-cta-art" />
         <div aria-hidden="true" className="mobile-cta-overlay absolute inset-0" />
         <div className="relative mx-auto flex max-w-6xl flex-col items-center gap-5 md:flex-row md:items-center md:justify-between md:gap-7">
@@ -296,7 +296,7 @@ export default function Home() {
             <div>
               <p className="text-sm font-extrabold uppercase text-emerald-100">Mobile app</p>
               <h2 className="mt-3 max-w-2xl text-[34px] font-extrabold leading-tight sm:text-[44px]">
-                Now Available on iPhone
+                Now Available on the App Store
               </h2>
               <p className="mx-auto mt-4 max-w-xl text-lg leading-8 text-emerald-50 md:mx-0">
                 Turn everyday meals into exciting fusion dishes with AI.
