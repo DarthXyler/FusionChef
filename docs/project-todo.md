@@ -14,10 +14,14 @@
 
 ## Mobile 2.0
 
+- Use `docs/mobile-2.0-workflow-rulebook.md` as the shared operating rulebook for Codex Desktop planning/QA/architecture and VS Code Codex implementation.
+- Work through the broader follow-up audit in `docs/codebase-risk-audit.md`, prioritizing high-risk cleanup before new feature work.
 - Build Admin Analytics 2.0 from `docs/admin-analytics-2.0-plan.md`: user mix analytics, paid pack demand, OpenAI budget/burn tracking, Turso/Cloudflare capacity tracking, profit/loss estimates, manual expense entries, threshold alerts, and 15-minute admin refresh.
+- Fix image storage lifecycle from `docs/image-storage-lifecycle.md`: mobile recipe saves must upload generated `data:image/...` previews to R2 before cookbook save, Turso should store only stable image URLs, profile photos must use a protected R2 prefix or cleanup must include auth profile references, and existing base64 cookbook images need a migration/backfill plan.
 - Rework current admin observe/paywall analytics wording into simple business language. Avoid labels like `Over Quota`, `Estimated Paywall Hits`, and `Paywall Hit %`; replace them with owner-friendly terms that explain what happened, why it matters, and what action to take.
 - Replace local mobile profile overrides with a server-backed profile endpoint after monetization is finalized. Scope: persist display name and profile photo URL per authenticated user, upload/store profile images, sync the mobile Profile screen from API state, and keep local AsyncStorage only as an offline/cache fallback.
 - Keep Activity hidden from the tab bar until there is a clear product role and backed data model for it.
+- Website polish: make all landing hero phone-carousel screenshots load eagerly/with priority so mobile browsers do not show blank slides for later carousel images.
 
 ## Low Priority
 

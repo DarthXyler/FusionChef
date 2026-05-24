@@ -47,7 +47,7 @@ export type CookbookStackParamList = {
         initialFilter?: "all" | "favorites" | "toTry";
       }
     | undefined;
-  CookbookDetail: { recipeId: string };
+  CookbookDetail: { recipeId: string; initialSummary?: CookbookRecipeSummary };
 };
 
 export type MobileCookbookContextValue = {
