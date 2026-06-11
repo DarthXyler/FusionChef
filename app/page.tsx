@@ -69,7 +69,7 @@ function AppStoreBadge({ className = "" }: { className?: string }) {
 
 function SteamWisps() {
   return (
-    <span aria-hidden="true" className="pointer-events-none absolute left-1/2 top-[38%] z-10 hidden sm:block">
+    <span aria-hidden="true" className="pointer-events-none absolute left-1/2 top-[38%] z-10">
       <span className="steam-wisp" style={{ left: "-18px", animationDelay: "0s" }} />
       <span className="steam-wisp" style={{ left: "0px", animationDelay: "0.9s" }} />
       <span className="steam-wisp" style={{ left: "18px", animationDelay: "1.7s" }} />
