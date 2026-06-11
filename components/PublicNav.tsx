@@ -10,6 +10,7 @@ type NavItem = {
 };
 
 const navItems: NavItem[] = [
+  { href: "/#how-it-works", label: "How it works", exact: true },
   { href: "/#features", label: "Features", exact: true },
   { href: "/pricing", label: "Pricing" },
   { href: "/faq", label: "FAQ" },

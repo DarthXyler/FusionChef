@@ -1,7 +1,12 @@
 "use client";
 
+/**
+ * Swipeable phone mockup carousel for the hero.
+ * 2026 redesign: auto-rotate (paused on hover/focus/drag, disabled for
+ * reduced motion), gentle 3D tilt, and a warm appetite glow behind the device.
+ */
 import Image from "next/image";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const screens = [
   {
@@ -22,10 +27,13 @@ const screens = [
   },
 ] as const;
 
+const AUTO_ROTATE_MS = 4600;
+
 export function PhoneScreenCarousel() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [dragOffset, setDragOffset] = useState(0);
   const [isDraggingView, setIsDraggingView] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const dragStartX = useRef(0);
   const isDragging = useRef(false);
 
@@ -33,6 +41,21 @@ export function PhoneScreenCarousel() {
     setActiveIndex((index + screens.length) % screens.length);
     setDragOffset(0);
   }, []);
+
+  // Auto-rotate, paused while the user hovers, focuses, or drags.
+  useEffect(() => {
+    if (isPaused || isDraggingView) {
+      return;
+    }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setActiveIndex((current) => (current + 1) % screens.length);
+    }, AUTO_ROTATE_MS);
+    return () => window.clearInterval(timer);
+  }, [isPaused, isDraggingView]);
 
   const startDrag = useCallback((clientX: number) => {
     isDragging.current = true;
@@ -73,8 +96,15 @@ export function PhoneScreenCarousel() {
   const transformPercent = -activeIndex * 100;
 
   return (
-    <div className="hero-phone-float mx-auto w-full max-w-[220px] sm:max-w-[235px] lg:max-w-[240px]">
-      <div className="rounded-[2rem] border-[8px] border-zinc-950 bg-zinc-950 shadow-2xl">
+    <div
+      className="phone-stage hero-phone-float relative mx-auto w-full max-w-[220px] sm:max-w-[235px] lg:max-w-[240px]"
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      onFocus={() => setIsPaused(true)}
+      onBlur={() => setIsPaused(false)}
+    >
+      <div aria-hidden="true" className="phone-warm-glow absolute -inset-8 -z-10 rounded-full" />
+      <div className="phone-tilt rounded-[2rem] border-[8px] border-zinc-950 bg-zinc-950 shadow-2xl">
         <div className="relative overflow-hidden rounded-[1.35rem] bg-[#f4fbf7]">
           <div className="absolute left-1/2 top-0 z-20 h-5 w-24 -translate-x-1/2 rounded-b-2xl bg-zinc-950" />
           <div
@@ -126,6 +156,13 @@ export function PhoneScreenCarousel() {
                     sizes="(max-width: 768px) 62vw, 240px"
                     className="object-cover"
                     priority={screen.src.includes("home")}
+                    /*
+                     * Eager-load the non-priority screens too. They sit
+                     * horizontally clipped inside the carousel, so native
+                     * lazy loading may never trigger on mobile — which made
+                     * screens 3-4 render blank after swiping (prod bug).
+                     */
+                    loading="eager"
                     draggable={false}
                   />
                 </div>

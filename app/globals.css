@@ -9,6 +9,12 @@
   --font-sans: "Manrope", "Segoe UI", "Trebuchet MS", "Arial", sans-serif;
   --font-serif: "DM Serif Display", "Georgia", "Times New Roman", serif;
   --font-brand: "Manrope", "Segoe UI", "Trebuchet MS", "Arial", sans-serif;
+  /* 2026 redesign: warm "appetite" accents layered on top of the emerald brand anchor. */
+  --warm-chili: #b91c1c;
+  --warm-ember: #c2410c;
+  --warm-saffron: #f59e0b;
+  --warm-gold: #d97706;
+  --warm-cream: #fff8ed;
 }
 
 /* Global page styling (clean white background + default text style). */
@@ -352,4 +358,194 @@ body {
 select option:checked {
   background-color: #10b981;
   color: #ffffff;
+}
+
+/* ============================================================
+   2026 landing redesign
+   Emerald stays the brand anchor; warm saffron/chili accents
+   live around food photography. All motion respects
+   prefers-reduced-motion (see block at the bottom).
+   ============================================================ */
+
+/* --- Scroll reveal (driven by components/Reveal.tsx) --- */
+.reveal {
+  opacity: 0;
+  transform: translateY(26px);
+  transition:
+    opacity 700ms ease,
+    transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+.reveal-delay-1 { transition-delay: 90ms; }
+.reveal-delay-2 { transition-delay: 180ms; }
+.reveal-delay-3 { transition-delay: 270ms; }
+.reveal-delay-4 { transition-delay: 360ms; }
+
+/* --- Kinetic cuisine-pair swap in the hero headline --- */
+.kinetic-word {
+  display: inline-block;
+  animation: kinetic-word-in 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes kinetic-word-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.55em) rotate(2deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(0deg);
+  }
+}
+
+/* --- Warm hero wash layered over the existing emerald glow --- */
+.hero-warm-wash {
+  background:
+    radial-gradient(ellipse at 88% 12%, rgba(245, 158, 11, 0.16) 0 16%, transparent 42%),
+    radial-gradient(ellipse at 8% 88%, rgba(194, 65, 12, 0.1) 0 12%, transparent 36%);
+}
+
+/* --- Food cards: lift + warm simmer glow on hover --- */
+.food-card {
+  transition:
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 260ms ease;
+}
+
+.food-card:hover {
+  transform: translateY(-6px);
+  box-shadow:
+    0 22px 44px rgba(120, 53, 15, 0.16),
+    0 0 0 1px rgba(245, 158, 11, 0.25);
+}
+
+.food-card:hover .food-card-image {
+  transform: scale(1.045);
+}
+
+.food-card-image {
+  transition: transform 480ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* --- Steam wisps over dish imagery --- */
+.steam-wisp {
+  position: absolute;
+  bottom: 100%;
+  width: 7px;
+  height: 26px;
+  border-radius: 9999px;
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.65), transparent);
+  filter: blur(2px);
+  opacity: 0;
+  animation: steam-rise 2.8s ease-in-out infinite;
+}
+
+@keyframes steam-rise {
+  0% { opacity: 0; transform: translateY(8px) scaleY(0.7); }
+  35% { opacity: 0.85; }
+  100% { opacity: 0; transform: translateY(-22px) scaleY(1.25) translateX(4px); }
+}
+
+/* --- Ingredient icon wiggle --- */
+.wiggle-on-hover:hover .wiggle-target,
+.wiggle-on-hover:focus-visible .wiggle-target {
+  animation: ingredient-wiggle 480ms ease-in-out;
+}
+
+@keyframes ingredient-wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-9deg) scale(1.06); }
+  60% { transform: rotate(7deg); }
+}
+
+/* --- "Fusion collision" pulse used in How it works step 3 --- */
+.fusion-collide-left { animation: fusion-collide-left 3.4s ease-in-out infinite; }
+.fusion-collide-right { animation: fusion-collide-right 3.4s ease-in-out infinite; }
+.fusion-collide-burst { animation: fusion-collide-burst 3.4s ease-in-out infinite; }
+
+@keyframes fusion-collide-left {
+  0%, 100% { transform: translateX(-7px); }
+  46%, 58% { transform: translateX(1px); }
+}
+
+@keyframes fusion-collide-right {
+  0%, 100% { transform: translateX(7px); }
+  46%, 58% { transform: translateX(-1px); }
+}
+
+@keyframes fusion-collide-burst {
+  0%, 40%, 100% { opacity: 0; transform: scale(0.6); }
+  50% { opacity: 1; transform: scale(1.18); }
+  62% { opacity: 0.4; transform: scale(1); }
+}
+
+/* --- Phone showcase: warm glow + gentle 3D tilt --- */
+.phone-stage {
+  perspective: 1100px;
+}
+
+.phone-tilt {
+  transform: rotateY(-7deg) rotateX(2deg);
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.phone-stage:hover .phone-tilt,
+.phone-stage:focus-within .phone-tilt {
+  transform: rotateY(0deg) rotateX(0deg);
+}
+
+.phone-warm-glow {
+  background: radial-gradient(
+    ellipse at 50% 60%,
+    rgba(245, 158, 11, 0.28) 0 30%,
+    rgba(16, 185, 129, 0.14) 52%,
+    transparent 72%
+  );
+  filter: blur(8px);
+}
+
+/* --- Sticky header shadow once the page is scrolled --- */
+.site-header {
+  transition: box-shadow 260ms ease, padding 260ms ease;
+}
+
+.site-header.is-scrolled {
+  box-shadow: 0 10px 30px rgba(6, 78, 59, 0.1);
+}
+
+/* --- Section anchor offset below the sticky header --- */
+.anchor-section {
+  scroll-margin-top: 96px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .kinetic-word,
+  .steam-wisp,
+  .wiggle-on-hover:hover .wiggle-target,
+  .fusion-collide-left,
+  .fusion-collide-right,
+  .fusion-collide-burst {
+    animation: none;
+  }
+
+  .phone-tilt {
+    transform: none;
+    transition: none;
+  }
+
+  .food-card,
+  .food-card-image {
+    transition: none;
+  }
 }

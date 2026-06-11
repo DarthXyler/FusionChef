@@ -1,35 +1,59 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import {
-  BodyText,
-  TextLink,
-} from "@/components/PublicSite";
+import { BodyText, TextLink } from "@/components/PublicSite";
 import { PhoneScreenCarousel } from "@/components/PhoneScreenCarousel";
-import { faqItems, featureCards } from "@/lib/public-site-content";
+import { Reveal } from "@/components/Reveal";
+import { fallbackCreditPacks } from "@/lib/public-site-content";
+import { fusionFeatures, homeFaqItems, howItWorksSteps } from "@/lib/landing-content";
 
 export const metadata: Metadata = {
-  title: "Mobile Recipe Fusion App",
+  title: "Turn Any Recipe Into Wild Fusion Cuisine",
   description:
-    "Flavor Fusion Chef helps you turn familiar recipes into cheerful fusion favorites on iPhone.",
+    "Flavor Fusion Chef is the AI-powered iPhone app that smashes any recipe into a new cuisine — Sichuan Bolognese, Ramen Carbonara, Bulgogi Burritos. One-time credits, no subscription.",
+  alternates: {
+    canonical: "/",
+  },
 };
 
-const steps = [
-  {
-    title: "Add a recipe",
-    body: "Start with a recipe you already have.",
-  },
-  {
-    title: "Choose a cuisine",
-    body: "Pick the cuisine you want to blend into.",
-  },
-  {
-    title: "Create and save",
-    body: "Get a practical fusion version with steps, swaps, and a shopping list.",
-  },
-] as const;
-
 const appStoreUrl = "https://apps.apple.com/us/app/flavor-fusion-chef/id6764818879";
+
+/*
+ * Testimonials: real App Store reviews are not in yet, so the section is
+ * intentionally not rendered. Placeholder data lives in
+ * lib/landing-content.ts (placeholderTestimonials) ready to wire in
+ * between Features and Pricing when reviews arrive.
+ */
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "MobileApplication",
+      name: "Flavor Fusion Chef",
+      operatingSystem: "iOS",
+      applicationCategory: "FoodApplication",
+      description:
+        "AI-powered cooking app that turns any recipe into a practical fusion recipe with cuisine, spice, and dietary preferences.",
+      url: "https://www.flavorfusionchef.com/",
+      installUrl: appStoreUrl,
+      offers: fallbackCreditPacks.map((pack) => ({
+        "@type": "Offer",
+        name: pack.name,
+        price: pack.price.replace("$", ""),
+        priceCurrency: "USD",
+      })),
+    },
+    {
+      "@type": "FAQPage",
+      mainEntity: homeFaqItems.map((item) => ({
+        "@type": "Question",
+        name: item.question,
+        acceptedAnswer: { "@type": "Answer", text: item.answer },
+      })),
+    },
+  ],
+};
 
 function AppStoreBadge({ className = "" }: { className?: string }) {
   return (
@@ -43,17 +67,32 @@ function AppStoreBadge({ className = "" }: { className?: string }) {
   );
 }
 
-export default function Home() {
-  const previewFaq = faqItems.slice(0, 3);
-
+function SteamWisps() {
   return (
-    <div className="animate-rise-in space-y-12 lg:space-y-14">
+    <span aria-hidden="true" className="pointer-events-none absolute left-1/2 top-[38%] z-10 hidden sm:block">
+      <span className="steam-wisp" style={{ left: "-18px", animationDelay: "0s" }} />
+      <span className="steam-wisp" style={{ left: "0px", animationDelay: "0.9s" }} />
+      <span className="steam-wisp" style={{ left: "18px", animationDelay: "1.7s" }} />
+    </span>
+  );
+}
+
+export default function Home() {
+  return (
+    <div className="animate-rise-in space-y-12 lg:space-y-16">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
+
+      {/* ---------- Hero ---------- */}
       <section className="hero-scene relative -mx-4 -mt-6 overflow-hidden border-y border-emerald-100 bg-white md:-mx-8 md:-mt-10 lg:-mx-12">
         <div aria-hidden="true" className="hero-food-edge hero-food-left" />
         <div aria-hidden="true" className="hero-food-edge hero-food-right" />
         <div aria-hidden="true" className="hero-canvas-glow absolute inset-0" />
+        <div aria-hidden="true" className="hero-warm-wash absolute inset-0" />
         <div className="relative grid min-h-[580px] items-start gap-8 px-5 py-8 sm:px-8 lg:min-h-[560px] lg:grid-cols-[1fr_0.72fr] lg:gap-12 lg:px-24 lg:py-14 xl:px-32">
-          <div className="max-w-[650px] space-y-5">
+          <div className="max-w-[660px] space-y-5">
             <div className="hero-copy inline-flex items-center gap-2 rounded-full bg-emerald-50/95 py-1.5 pl-2 pr-4 text-sm font-extrabold uppercase tracking-[0.12em] text-emerald-700 ring-1 ring-emerald-100">
               <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-emerald-100">
                 <Image
@@ -67,20 +106,13 @@ export default function Home() {
               AI recipe fusion app
             </div>
             <div className="space-y-4">
-              <h1 className="hero-copy hero-copy-delay-1 relative max-w-[680px] text-[40px] font-extrabold leading-[1.08] text-zinc-950 sm:text-[54px] lg:text-[60px] lg:leading-[1.08] xl:text-[62px]">
-                <svg
-                  aria-hidden="true"
-                  className="hero-sparkle absolute right-4 top-1 hidden h-9 w-9 text-amber-400 sm:block"
-                  viewBox="0 0 32 32"
-                  fill="none"
-                >
-                  <path d="M16 3l2.8 9.2L28 15l-9.2 2.8L16 27l-2.8-9.2L4 15l9.2-2.8L16 3Z" fill="currentColor" />
-                </svg>
+              <h1 className="hero-copy hero-copy-delay-1 max-w-[680px] text-[40px] font-extrabold leading-[1.08] text-zinc-950 sm:text-[54px] lg:text-[60px] xl:text-[62px]">
                 <span className="block">Turn any recipe</span>
                 <span className="block">
                   into a{" "}
-                  <span className="relative inline-block text-emerald-700">
-                    new favorite
+                  <span className="relative inline-block">
+                    <span className="text-emerald-700">new</span>{" "}
+                    <span style={{ color: "var(--warm-ember)" }}>favorite</span>
                     <svg
                       aria-hidden="true"
                       className="hero-underline absolute -bottom-4 left-[-7%] h-8 w-[114%] text-amber-300"
@@ -95,9 +127,9 @@ export default function Home() {
                   .
                 </span>
               </h1>
-              <p className="hero-copy hero-copy-delay-2 max-w-[470px] text-lg leading-8 text-zinc-600 sm:text-[20px] sm:leading-9">
-                Fuse cuisines, import recipe photos, and save your best creations in one cheerful
-                mobile cookbook.
+              <p className="hero-copy hero-copy-delay-2 max-w-[490px] text-lg leading-8 text-zinc-600 sm:text-[20px] sm:leading-9">
+                The AI chef that smashes cuisines together — gloriously. Import any
+                recipe, pick a flavor world, and cook the mashup tonight.
               </p>
             </div>
             <div className="hero-copy hero-copy-delay-3 w-full max-w-[560px] space-y-4">
@@ -112,17 +144,17 @@ export default function Home() {
                   <AppStoreBadge className="app-store-badge-hero" />
                 </Link>
                 <Link
-                  href="/pricing"
+                  href="#pricing"
                   className="inline-flex min-h-14 w-full min-w-0 items-center justify-center gap-3 rounded-xl border-2 border-emerald-700 bg-white px-5 text-base font-extrabold text-emerald-800 transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 sm:min-h-[68px] sm:px-7 sm:text-lg"
                 >
-                  View pricing
+                  See pricing
                   <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none">
                     <path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </Link>
               </div>
               <div className="grid w-full min-w-0 gap-3 text-[13px] font-extrabold text-emerald-900 sm:grid-cols-3">
-                {["One-time credits", "No subscription", "Private cookbook"].map((chip, index) => (
+                {["Pay-as-you-go credits", "No subscription", "Private cookbook"].map((chip, index) => (
                   <span
                     key={chip}
                     className="inline-flex min-h-[54px] min-w-0 items-center justify-center gap-2 rounded-xl bg-emerald-50/95 px-2 text-center ring-1 ring-emerald-100"
@@ -161,147 +193,197 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="relative -mx-4 overflow-hidden bg-white px-4 py-4 text-center md:-mx-8 md:px-8 lg:-mx-12 lg:px-12">
-        <div>
-          <h2 className="text-[30px] font-extrabold leading-tight text-zinc-950 sm:text-[34px]">How it works</h2>
-          <p className="mt-2 text-zinc-600">Create fusion recipes in just a few simple steps.</p>
-        </div>
-        <div className="relative mx-auto mt-8 grid max-w-4xl gap-8 text-center md:grid-cols-3">
-          <div aria-hidden="true" className="absolute left-[18%] right-[18%] top-10 hidden border-t-2 border-dashed border-emerald-200 md:block" />
-          {steps.map((step, index) => (
-            <article key={step.title} className="relative">
-              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-50 ring-2 ring-emerald-100">
-                <svg aria-hidden="true" className="h-10 w-10 text-emerald-700" viewBox="0 0 48 48" fill="none">
-                  {index === 0 ? (
-                    <>
-                      <path d="M12 27h24v10H12z" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
-                      <path d="M16 27c0-6 4-10 8-10s8 4 8 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                      <path d="M17 34h14" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                    </>
-                  ) : null}
-                  {index === 1 ? (
-                    <>
-                      <path d="M14 18h20v20H14z" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
-                      <path d="M18 18v-4h12v4" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                      <path d="M20 27h8M20 33h12" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                    </>
-                  ) : null}
+      {/* ---------- How it works ---------- */}
+      <section id="how-it-works" className="anchor-section relative -mx-4 overflow-hidden bg-white px-4 py-6 md:-mx-8 md:px-8 lg:-mx-12 lg:px-12">
+        <Reveal className="text-center">
+          <p className="text-sm font-extrabold uppercase tracking-wide text-emerald-700">How it works</p>
+          <h2 className="mt-2 text-[32px] font-extrabold leading-tight text-zinc-950 sm:text-[38px]">
+            From &ldquo;same old dinner&rdquo; to fusion magic.
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-lg leading-8 text-zinc-600">
+            Four steps. One gloriously mashed-up meal.
+          </p>
+        </Reveal>
+        <div className="mx-auto mt-10 grid max-w-6xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {howItWorksSteps.map((step, index) => (
+            <Reveal key={step.title} delay={(index % 4) as 0 | 1 | 2 | 3}>
+              <article className="food-card group h-full overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
+                <div className="relative aspect-[4/3] overflow-hidden">
+                  {/* No steam on step 2 — raw ingredients, nothing hot. */}
+                  {index !== 1 ? <SteamWisps /> : null}
+                  <Image
+                    src={step.image}
+                    alt={step.imageAlt}
+                    fill
+                    sizes="(max-width: 640px) 92vw, (max-width: 1024px) 46vw, 280px"
+                    className="food-card-image object-cover"
+                  />
+                  <span className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-base font-extrabold text-emerald-800 shadow-sm ring-1 ring-emerald-100">
+                    {index + 1}
+                  </span>
                   {index === 2 ? (
-                    <>
-                      <path d="M24 11v26" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                      <path d="M14 18c7 0 10 4 10 10-7 0-10-4-10-10Z" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
-                      <path d="M34 18c-7 0-10 4-10 10 7 0 10-4 10-10Z" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
-                      <path d="M17 37h14" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                    </>
+                    <span aria-hidden="true" className="absolute bottom-3 right-3 z-10 flex items-center rounded-full bg-white/95 px-2.5 py-1.5 shadow-sm ring-1 ring-amber-200">
+                      <span className="fusion-collide-left text-sm">🍝</span>
+                      <span className="fusion-collide-burst mx-0.5 text-base text-amber-500">✦</span>
+                      <span className="fusion-collide-right text-sm">🌶️</span>
+                    </span>
                   ) : null}
-                </svg>
-              </div>
-              <h3 className="mt-4 text-xl font-extrabold leading-tight text-zinc-950">{step.title}</h3>
-              <p className="mx-auto mt-2 max-w-[230px] leading-7 text-zinc-600">{step.body}</p>
-            </article>
+                </div>
+                <div className="p-5">
+                  <h3 className="text-lg font-extrabold leading-tight text-zinc-950">{step.title}</h3>
+                  <p className="mt-2 leading-7 text-zinc-600">{step.body}</p>
+                </div>
+              </article>
+            </Reveal>
           ))}
         </div>
       </section>
 
-      <section id="features" className="features-scene relative -mx-4 overflow-hidden bg-white px-4 py-12 md:-mx-8 md:px-8 lg:-mx-12 lg:px-12">
-        <div aria-hidden="true" className="features-food-edge features-food-left" />
-        <div aria-hidden="true" className="features-food-edge features-food-right" />
+      {/* ---------- Features ---------- */}
+      <section id="features" className="features-scene anchor-section relative -mx-4 overflow-hidden bg-white px-4 py-12 md:-mx-8 md:px-8 lg:-mx-12 lg:px-12">
         <div aria-hidden="true" className="features-canvas-glow absolute inset-0" />
-        <div className="relative mx-auto grid max-w-6xl gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
-          <div className="space-y-4">
-            <p className="text-sm font-extrabold uppercase text-emerald-700">Features</p>
-            <h2 className="max-w-xl text-[32px] font-extrabold leading-tight text-zinc-950 sm:text-[38px]">
+        <div className="relative mx-auto max-w-6xl">
+          <Reveal className="max-w-2xl">
+            <p className="text-sm font-extrabold uppercase tracking-wide text-emerald-700">Features</p>
+            <h2 className="mt-2 text-[32px] font-extrabold leading-tight text-zinc-950 sm:text-[38px]">
               Built for playful cooks, not busywork.
             </h2>
-            <p className="max-w-lg text-lg leading-8 text-zinc-600">
-              Quick inputs, useful rerolls, photo import, and a cookbook that keeps your best
-              experiments close.
+            <p className="mt-3 max-w-lg text-lg leading-8 text-zinc-600">
+              Quick inputs, useful rerolls, photo import, and a cookbook that keeps your
+              wildest successful experiments close.
             </p>
-            <TextLink href="/faq">See common questions</TextLink>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {featureCards.map((feature, index) => (
-              <article
-                key={feature.title}
-                className="rounded-2xl border border-emerald-100 bg-emerald-50/55 p-5 shadow-sm transition hover:-translate-y-1 hover:bg-white hover:shadow-md"
-              >
-                <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-white text-emerald-700 shadow-sm ring-1 ring-emerald-100">
-                  <svg aria-hidden="true" className="h-7 w-7" viewBox="0 0 32 32" fill="none">
-                    {index === 0 ? (
-                      <>
-                        <path d="M8 16c5-6 11-6 16 0-5 6-11 6-16 0Z" stroke="currentColor" strokeWidth="2.4" />
-                        <path d="M16 11v10" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-                      </>
-                    ) : null}
-                    {index === 1 ? (
-                      <>
-                        <rect x="7" y="9" width="18" height="14" rx="3" stroke="currentColor" strokeWidth="2.4" />
-                        <path d="M12 9l2-3h4l2 3" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-                        <circle cx="16" cy="16" r="3.2" stroke="currentColor" strokeWidth="2.4" />
-                      </>
-                    ) : null}
-                    {index === 2 ? (
-                      <>
-                        <path d="M9 13v12h14V13" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
-                        <path d="M12 13V9a4 4 0 0 1 8 0v4" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-                      </>
-                    ) : null}
-                    {index === 3 ? (
-                      <>
-                        <path d="M8 18a8 8 0 1 0 3-6.2" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-                        <path d="M8 9v7h7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                      </>
-                    ) : null}
-                  </svg>
-                </div>
-                <h3 className="text-xl font-extrabold leading-tight text-zinc-950">{feature.title}</h3>
-                <p className="mt-3 leading-7 text-zinc-600">{feature.body}</p>
-              </article>
+          </Reveal>
+          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {fusionFeatures.map((feature, index) => (
+              <Reveal key={feature.title} delay={(index % 4) as 0 | 1 | 2 | 3}>
+                <article className="food-card wiggle-on-hover h-full overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
+                  <div className="relative aspect-[4/3] overflow-hidden">
+                    <Image
+                      src={feature.image}
+                      alt={feature.imageAlt}
+                      fill
+                      sizes="(max-width: 640px) 92vw, (max-width: 1024px) 46vw, 280px"
+                      className="food-card-image object-cover"
+                    />
+                    <span className="absolute bottom-3 left-3 z-10 rounded-full bg-white/95 px-3 py-1 text-xs font-extrabold text-amber-700 shadow-sm ring-1 ring-amber-200">
+                      <span className="wiggle-target inline-block">{feature.dish}</span>
+                    </span>
+                  </div>
+                  <div className="p-5">
+                    <h3 className="text-lg font-extrabold leading-tight text-zinc-950">{feature.title}</h3>
+                    <p className="mt-2 leading-7 text-zinc-600">{feature.body}</p>
+                  </div>
+                </article>
+              </Reveal>
             ))}
           </div>
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-6xl gap-8 py-10 lg:grid-cols-[0.8fr_1.2fr]">
-        <div>
-          <p className="text-sm font-extrabold uppercase text-emerald-700">Questions</p>
+      {/* ---------- Pricing ---------- */}
+      <section id="pricing" className="anchor-section mx-auto max-w-6xl py-4">
+        <Reveal className="text-center">
+          <p className="text-sm font-extrabold uppercase tracking-wide text-emerald-700">Pricing</p>
+          <h2 className="mt-2 text-[32px] font-extrabold leading-tight text-zinc-950 sm:text-[38px]">
+            No subscription. Ever.
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-lg leading-8 text-zinc-600">
+            Pay as you go: buy a credit pack, and each fusion or reroll uses credits from
+            your balance. Top up only when you need more — nothing renews automatically.
+          </p>
+        </Reveal>
+        <div className="mt-10 grid gap-6 md:grid-cols-3">
+          {fallbackCreditPacks.map((pack, index) => (
+            <Reveal key={pack.name} delay={(index % 3) as 0 | 1 | 2}>
+              <article
+                className={[
+                  "food-card relative h-full rounded-2xl border bg-white p-6 shadow-sm",
+                  pack.featured ? "border-amber-300 ring-2 ring-amber-200" : "border-emerald-100",
+                ].join(" ")}
+              >
+                {pack.featured ? (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-amber-500 px-3 py-1 text-xs font-extrabold uppercase tracking-wide text-white shadow-sm">
+                    Most popular
+                  </span>
+                ) : null}
+                <h3 className="text-xl font-extrabold text-zinc-950">{pack.name}</h3>
+                <p className="mt-3 flex items-baseline gap-2">
+                  <span className="text-4xl font-extrabold text-emerald-800">{pack.price}</span>
+                  <span className="text-sm font-bold text-zinc-500">one-time</span>
+                </p>
+                <p className="mt-1 text-sm font-extrabold text-amber-700">{pack.credits} credits</p>
+                <p className="mt-3 leading-7 text-zinc-600">{pack.description}</p>
+              </article>
+            </Reveal>
+          ))}
+        </div>
+        <Reveal className="mt-6 text-center">
+          <p className="text-sm leading-7 text-zinc-500">
+            Purchases are handled by Apple in the App Store.{" "}
+            <TextLink href="/pricing">Full pricing details</TextLink>
+          </p>
+        </Reveal>
+      </section>
+
+      {/* ---------- FAQ ---------- */}
+      <section id="faq" className="anchor-section mx-auto grid max-w-6xl gap-8 py-6 lg:grid-cols-[0.8fr_1.2fr]">
+        <Reveal>
+          <p className="text-sm font-extrabold uppercase tracking-wide text-emerald-700">Questions</p>
           <h2 className="mt-3 text-[32px] font-extrabold leading-tight text-zinc-950 sm:text-[36px]">
-            A calmer way to launch.
+            Everything before your first mashup.
           </h2>
           <p className="mt-3 max-w-md leading-8 text-zinc-600">
-            Quick answers for users, reviewers, and support before opening the mobile app.
+            Quick answers about fusion quality, credits, photo import, and saves.
           </p>
           <div className="mt-5">
             <TextLink href="/faq">Read all FAQs</TextLink>
           </div>
-        </div>
-        <div className="divide-y divide-emerald-100 rounded-2xl border border-emerald-100 bg-white shadow-sm">
-          {previewFaq.map((item) => (
-            <details key={item.question} className="group px-5 py-4" open={item === previewFaq[0]}>
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-lg text-left text-lg font-extrabold text-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-4">
-                {item.question}
-                <span className="text-2xl leading-none text-emerald-700 transition group-open:rotate-45">+</span>
-              </summary>
-              <BodyText className="mt-3 max-w-2xl">{item.answer}</BodyText>
-            </details>
-          ))}
-        </div>
+        </Reveal>
+        <Reveal delay={1}>
+          <div className="divide-y divide-emerald-100 rounded-2xl border border-emerald-100 bg-white shadow-sm">
+            {homeFaqItems.map((item, index) => (
+              <details key={item.id} className="group px-5 py-4" open={index === 0}>
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-lg text-left text-lg font-extrabold text-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-4">
+                  {item.question}
+                  <span className="text-2xl leading-none text-emerald-700 transition group-open:rotate-45">+</span>
+                </summary>
+                <BodyText className="mt-3 max-w-2xl">{item.answer}</BodyText>
+              </details>
+            ))}
+          </div>
+        </Reveal>
       </section>
 
-      <section className="mobile-cta-scene relative -mx-4 -mt-6 -mb-6 overflow-hidden rounded-none border-y border-emerald-100 bg-emerald-700 px-5 py-10 text-white md:-mx-8 md:-mt-8 md:-mb-10 md:px-8 lg:-mx-12 lg:px-12">
-        <div aria-hidden="true" className="mobile-cta-art" />
-        <div aria-hidden="true" className="mobile-cta-overlay absolute inset-0" />
-        <div className="relative mx-auto flex max-w-6xl flex-col items-center gap-5 md:flex-row md:items-center md:justify-between md:gap-7">
-          <div className="flex flex-col items-center gap-[30px] text-center md:flex-row md:text-left">
-            <div>
-              <p className="text-sm font-extrabold uppercase text-emerald-100">Mobile app</p>
-              <h2 className="mt-3 max-w-2xl text-[34px] font-extrabold leading-tight sm:text-[44px]">
-                Now Available on the App Store
-              </h2>
-              <p className="mx-auto mt-4 max-w-xl text-lg leading-8 text-emerald-50 md:mx-0">
-                Turn everyday meals into exciting fusion dishes with AI.
-              </p>
-            </div>
+      {/* ---------- Final CTA ---------- */}
+      <section className="relative -mx-4 -mt-6 -mb-6 overflow-hidden border-y border-emerald-100 px-5 py-12 text-white md:-mx-8 md:-mt-8 md:-mb-10 md:px-8 lg:-mx-12 lg:px-12">
+        <Image
+          src="/landing/fusion/cta-banner.jpg"
+          alt=""
+          fill
+          sizes="100vw"
+          className="object-cover"
+          aria-hidden="true"
+        />
+        <div
+          aria-hidden="true"
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(100deg, rgba(4, 78, 56, 0.94) 0%, rgba(4, 96, 70, 0.88) 45%, rgba(124, 45, 18, 0.82) 100%)",
+          }}
+        />
+        <div className="relative mx-auto flex max-w-6xl flex-col items-center gap-6 md:flex-row md:items-center md:justify-between md:gap-8">
+          <div className="text-center md:text-left">
+            <p className="text-sm font-extrabold uppercase tracking-wide text-amber-200">Mobile app</p>
+            <h2 className="mt-3 max-w-2xl text-[34px] font-extrabold leading-tight sm:text-[44px]">
+              Tonight&rsquo;s dinner deserves a plot twist.
+            </h2>
+            <p className="mx-auto mt-4 max-w-xl text-lg leading-8 text-emerald-50 md:mx-0">
+              Download Flavor Fusion Chef and turn everyday meals into wild,
+              cookable fusion dishes with AI.
+            </p>
+          </div>
+          <div className="flex flex-col items-center gap-4 md:shrink-0">
             <Link
               href={appStoreUrl}
               target="_blank"
@@ -311,20 +393,20 @@ export default function Home() {
             >
               <AppStoreBadge className="app-store-badge-large" />
             </Link>
-          </div>
-          <div className="flex w-[min(230px,100%)] flex-col gap-4 sm:w-auto md:shrink-0 md:gap-3">
-            <Link
-              href="/pricing"
-              className="inline-flex min-h-14 items-center justify-center rounded-xl bg-white px-6 text-base font-extrabold text-emerald-800 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"
-            >
-              View pricing
-            </Link>
-            <Link
-              href="/support"
-              className="inline-flex min-h-14 items-center justify-center rounded-xl border border-white/45 px-6 text-base font-extrabold text-white transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"
-            >
-              Contact support
-            </Link>
+            <div className="flex gap-3">
+              <Link
+                href="/pricing"
+                className="inline-flex min-h-12 items-center justify-center rounded-xl bg-white px-5 text-sm font-extrabold text-emerald-800 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"
+              >
+                View pricing
+              </Link>
+              <Link
+                href="/support"
+                className="inline-flex min-h-12 items-center justify-center rounded-xl border border-white/50 px-5 text-sm font-extrabold text-white transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"
+              >
+                Contact support
+              </Link>
+            </div>
           </div>
         </div>
       </section>
