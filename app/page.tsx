@@ -182,7 +182,7 @@ export default function Home() {
                         </>
                       ) : null}
                     </svg>
-                    <span className="min-w-0 whitespace-nowrap">{chip}</span>
+                    <span className="min-w-0">{chip}</span>
                   </span>
                 ))}
               </div>
