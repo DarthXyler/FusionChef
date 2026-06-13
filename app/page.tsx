@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { BodyText, TextLink } from "@/components/PublicSite";
+import { FusionDemo } from "@/components/FusionDemo";
 import { PhoneScreenCarousel } from "@/components/PhoneScreenCarousel";
 import { Reveal } from "@/components/Reveal";
 import { fallbackCreditPacks } from "@/lib/public-site-content";
@@ -186,11 +187,33 @@ export default function Home() {
                   </span>
                 ))}
               </div>
+              <a
+                href="#fusion-demo"
+                className="inline-flex items-center gap-1.5 text-sm font-extrabold text-emerald-700 hover:text-emerald-800"
+              >
+                Try a fusion right here ↓
+              </a>
             </div>
           </div>
 
           <PhoneScreenCarousel />
         </div>
+      </section>
+
+      {/* ---------- Fusion demo ---------- */}
+      <section id="fusion-demo" className="anchor-section relative -mx-4 overflow-hidden bg-white px-4 py-10 md:-mx-8 md:px-8 lg:-mx-12 lg:px-12">
+        <Reveal className="text-center">
+          <p className="text-sm font-extrabold uppercase tracking-wide text-emerald-700">Live demo</p>
+          <h2 className="mt-2 text-[32px] font-extrabold leading-tight text-zinc-950 sm:text-[38px]">
+            Spin up tonight&rsquo;s experiment.
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-lg leading-8 text-zinc-600">
+            Three dishes. Three cuisines. Nine gloriously weird outcomes. No app required.
+          </p>
+        </Reveal>
+        <Reveal delay={1}>
+          <FusionDemo />
+        </Reveal>
       </section>
 
       {/* ---------- How it works ---------- */}
