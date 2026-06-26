@@ -2,9 +2,11 @@ import * as AppleAuthentication from "expo-apple-authentication";
 import * as Linking from "expo-linking";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
+import { Platform } from "react-native";
 import { getApiBaseUrl } from "../config/api";
 
 const MOBILE_AUTH_TOKEN_KEY = "flavor_fusion_mobile_auth_token";
+const ANDROID_CHROME_PACKAGE = "com.android.chrome";
 
 export type MobileAuthSession = {
   userId: string;
@@ -103,7 +105,10 @@ export async function loginWithGoogleForMobile() {
     redirectUri,
   )}`;
 
-  const result = await WebBrowser.openAuthSessionAsync(startUrl, redirectUri);
+  const result =
+    Platform.OS === "android"
+      ? await openGoogleAuthSessionWithChromeForAndroid(startUrl, redirectUri)
+      : await WebBrowser.openAuthSessionAsync(startUrl, redirectUri);
   if (result.type !== "success") {
     return false;
   }
@@ -120,6 +125,17 @@ export async function loginWithGoogleForMobile() {
 
   await SecureStore.setItemAsync(MOBILE_AUTH_TOKEN_KEY, token);
   return true;
+}
+
+async function openGoogleAuthSessionWithChromeForAndroid(startUrl: string, redirectUri: string) {
+  const customTabs = await WebBrowser.getCustomTabsSupportingBrowsersAsync();
+  const hasChrome = customTabs.browserPackages.includes(ANDROID_CHROME_PACKAGE);
+  if (!hasChrome) {
+    throw new Error("Please install or update Chrome to sign in with Google.");
+  }
+  return WebBrowser.openAuthSessionAsync(startUrl, redirectUri, {
+    browserPackage: ANDROID_CHROME_PACKAGE,
+  });
 }
 
 function normalizeAppleName(fullName: AppleAuthentication.AppleAuthenticationFullName | null) {
