@@ -11,6 +11,7 @@ import {
   Image,
   Linking,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -31,9 +32,11 @@ import {
 } from "../services/auth";
 import {
   fetchMonetizationAccountSnapshot,
-  getAvailableAppleProductIds,
-  getConfiguredAppleProductIds,
-  purchaseAppleCredits,
+  getAvailableCreditProductIdsForPlatform,
+  getConfiguredCreditProductIdsForPlatform,
+  getCreditPricingProductIdForPlatform,
+  getCreditProviderForPlatform,
+  purchaseCreditsForPlatform,
   subscribeToMonetizationAccountSnapshot,
   type MonetizationAccountSnapshot,
 } from "../services/monetization";
@@ -265,8 +268,8 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     }
   }, []);
 
-  const getAppleCreditPackOptions = useCallback(async () => {
-    const configuredFallback = getConfiguredAppleProductIds().map((productId) => ({
+  const getCreditPackOptions = useCallback(async () => {
+    const configuredFallback = getConfiguredCreditProductIdsForPlatform().map((productId) => ({
       productId,
       credits: inferCreditsFromProductId(productId),
       label: `${inferCreditsFromProductId(productId)} Credits`,
@@ -278,22 +281,27 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     let baseOptions = configuredFallback;
     try {
       const account = await fetchMonetizationAccountSnapshot({ preferCache: true });
+      const provider = getCreditProviderForPlatform();
       const pricingPacks = account.pricingPackages
         .filter((pack) => pack.active)
-        .map((pack) => ({
-          productId: pack.appleProductId,
-          credits: pack.credits,
-          label: pack.label,
-          displayPriceUsd: pack.displayPriceUsd,
-          packageKey: pack.packageKey,
-          active: pack.active,
-        }))
+        .map((pack) => {
+          const productId = getCreditPricingProductIdForPlatform(pack);
+          return {
+            productId,
+            credits: pack.credits,
+            label: pack.label,
+            displayPriceUsd: pack.displayPriceUsd,
+            packageKey: pack.packageKey,
+            active: pack.active,
+          };
+        })
+        .filter((pack) => pack.productId.length > 0)
         .sort((left, right) => left.credits - right.credits);
       if (pricingPacks.length > 0) {
         baseOptions = pricingPacks;
       } else {
-        const applePacks = account.products
-          .filter((product) => product.provider === "apple_app_store")
+        const creditPacks = account.products
+          .filter((product) => product.provider === provider)
           .map((product) => ({
             productId: product.productId,
             credits: product.credits,
@@ -303,15 +311,15 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
             active: true,
           }))
           .sort((left, right) => left.credits - right.credits);
-        if (applePacks.length > 0) {
-          baseOptions = applePacks;
+        if (creditPacks.length > 0) {
+          baseOptions = creditPacks;
         }
       }
     } catch {
       // Fallback remains available.
     }
 
-    const availableProductIds = await getAvailableAppleProductIds(
+    const availableProductIds = await getAvailableCreditProductIdsForPlatform(
       baseOptions.map((option) => option.productId),
     );
     if (availableProductIds.length === 0) {
@@ -365,7 +373,10 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     if (!isSignedIn) {
       setIsSigningIn(true);
       try {
-        const didLogin = await loginWithAppleForMobile();
+        const didLogin =
+          Platform.OS === "android"
+            ? await loginWithGoogleForMobile()
+            : await loginWithAppleForMobile();
         if (!didLogin) {
           setCreditPurchaseMessage("Sign in was cancelled. Sign in to purchase credits.");
           return;
@@ -386,7 +397,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     setIsCreditSheetOpen(true);
     setIsLoadingCreditPacks(true);
     try {
-      const options = await getAppleCreditPackOptions();
+      const options = await getCreditPackOptions();
       setCreditPackOptions(options);
       setSelectedCreditPackId((current) =>
         options.some((option) => option.productId === current)
@@ -394,7 +405,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
           : getRecommendedPackId(options),
       );
       if (options.length === 0) {
-        setCreditPurchaseMessage("No credit packs are available from App Store yet.");
+        setCreditPurchaseMessage("No credit packs are available from the store yet.");
       }
     } catch (error) {
       const message =
@@ -406,7 +417,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     } finally {
       setIsLoadingCreditPacks(false);
     }
-  }, [getAppleCreditPackOptions, isSignedIn, loadProfile]);
+  }, [getCreditPackOptions, isSignedIn, loadProfile]);
 
   useEffect(() => {
     if (route.params?.openCreditSheetToken) {
@@ -429,9 +440,9 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     }
 
     setIsPurchasingCredits(true);
-    setCreditPurchaseMessage("Opening App Store...");
+    setCreditPurchaseMessage("Opening store...");
     try {
-      const purchase = await purchaseAppleCredits(selectedPack.productId, {
+      const purchase = await purchaseCreditsForPlatform(selectedPack.productId, {
         onStatus: setCreditPurchaseMessage,
       });
       const nextSnapshot = await fetchMonetizationAccountSnapshot({ forceRefresh: true });
@@ -446,7 +457,9 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       setIsCreditSheetOpen(false);
       Alert.alert(
         "Credits added",
-        purchase.verification.grantedCredits > 0
+        "warningMessage" in purchase && purchase.warningMessage
+          ? purchase.warningMessage
+          : purchase.verification.grantedCredits > 0
           ? `${purchase.verification.grantedCredits} credits were added to your account.`
           : "Purchase verified. Your credits are ready.",
       );
@@ -1085,7 +1098,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
               {isLoadingCreditPacks ? (
                 <View style={styles.profileCreditSheetLoading}>
                   <ActivityIndicator color="#10b981" />
-                  <Text style={styles.profileCreditSheetSubtitle}>Loading App Store packs...</Text>
+                <Text style={styles.profileCreditSheetSubtitle}>Loading credit packs...</Text>
                 </View>
               ) : (
                 <View style={styles.profileCreditPackList}>
@@ -1117,7 +1130,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
                             isSelected && styles.profileCreditPackPriceSelected,
                           ]}
                         >
-                          {formatPriceUsd(option.displayPriceUsd) || "App Store"}
+                          {formatPriceUsd(option.displayPriceUsd) || "Store"}
                         </Text>
                       </Pressable>
                     );

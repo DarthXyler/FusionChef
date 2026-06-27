@@ -17,6 +17,8 @@ type IapResponse = {
   }>;
 };
 
+type ReactNativeIapModule = typeof import("react-native-iap");
+
 type ExpoIapModule = {
   connectAsync: () => Promise<void>;
   finishTransactionAsync: (purchase: unknown, consumeItem?: boolean) => Promise<void>;
@@ -110,9 +112,12 @@ type ApplePurchaseVerificationResult = {
   balance: CreditBalance | null;
 };
 
+type CreditPurchaseVerificationResult = ApplePurchaseVerificationResult;
+
 const IN_APP_PURCHASE_STATE_PURCHASED = 1;
 const IN_APP_PURCHASE_STATE_RESTORED = 3;
 const PURCHASE_CONFIRMATION_TIMEOUT_MS = 45_000;
+const ANDROID_PACKAGE_NAME = "com.flavorfusionchef.mobile";
 
 type PurchaseAppleCreditsOptions = {
   onStatus?: (message: string) => void;
@@ -182,6 +187,19 @@ function getDefaultAppleProductIds(): string[] {
   const configured = typeof configuredRaw === "string" ? configuredRaw.trim() : "";
   if (!configured) {
     return ["com.flavorfusion.credits.20", "com.flavorfusion.credits.50", "com.flavorfusion.credits.120"];
+  }
+
+  return configured
+    .split(",")
+    .map((value: string) => value.trim())
+    .filter((value: string) => value.length > 0);
+}
+
+function getDefaultGoogleProductIds(): string[] {
+  const configuredRaw = process.env.EXPO_PUBLIC_GOOGLE_PLAY_IAP_PRODUCT_IDS as string | undefined;
+  const configured = typeof configuredRaw === "string" ? configuredRaw.trim() : "";
+  if (!configured) {
+    return ["credits_20", "credits_50", "credits_120"];
   }
 
   return configured
@@ -271,7 +289,13 @@ function parsePricingPackages(value: unknown): MonetizationPricingPackage[] {
       const googleProductId =
         typeof entry.googleProductId === "string" ? entry.googleProductId.trim() : "";
       const active = entry.active !== false;
-      if (!packageKey || !label || credits < 1 || displayPriceUsd <= 0 || !appleProductId) {
+      if (
+        !packageKey ||
+        !label ||
+        credits < 1 ||
+        displayPriceUsd <= 0 ||
+        (!appleProductId && !googleProductId)
+      ) {
         return null;
       }
       return {
@@ -427,6 +451,47 @@ async function verifyApplePurchase(params: {
   } satisfies ApplePurchaseVerificationResult;
 }
 
+async function verifyGooglePurchase(params: {
+  productId: string;
+  googlePurchaseToken: string;
+}) {
+  const identityHeaders = await withIdentityHeaders();
+  const response = await fetch(`${getApiBaseUrl()}/api/monetization/purchases/verify`, {
+    method: "POST",
+    headers: {
+      ...identityHeaders,
+      "Content-Type": "application/json",
+      "idempotency-key": generateIdempotencyKey(),
+    },
+    body: JSON.stringify({
+      provider: "google_play",
+      productId: params.productId,
+      googlePurchaseToken: params.googlePurchaseToken,
+      packageName: ANDROID_PACKAGE_NAME,
+    }),
+  });
+  const canonicalAnonId = response.headers.get("x-flavor-fusion-anon-id")?.trim();
+  if (canonicalAnonId) {
+    await setMobileAnonymousId(canonicalAnonId);
+  }
+
+  const payload = (await response.json()) as VerifyPurchasePayload;
+  if (!response.ok) {
+    await handleInvalidAuthResponse(response, payload);
+    throw new Error(
+      extractErrorMessage(
+        payload as Record<string, unknown>,
+        "Purchase verification failed. Please try again or contact support.",
+      ),
+    );
+  }
+
+  return {
+    grantedCredits: asInteger(payload.grantedCredits, 0),
+    balance: parseBalance(payload.balance),
+  } satisfies CreditPurchaseVerificationResult;
+}
+
 async function ensureIapConnected() {
   const iap = await getExpoIapModule();
   if (!iap) {
@@ -444,6 +509,19 @@ async function ensureIapConnected() {
     }
   }
 
+  return iap;
+}
+
+async function getReactNativeIapModule() {
+  return import("react-native-iap");
+}
+
+async function ensureGoogleIapConnected() {
+  if (Platform.OS !== "android") {
+    throw new Error("Google Play purchases are only available on Android.");
+  }
+  const iap = await getReactNativeIapModule();
+  await iap.initConnection();
   return iap;
 }
 
@@ -604,6 +682,144 @@ export async function purchaseAppleCredits(
   };
 }
 
+function isGooglePurchaseCancelled(error: unknown) {
+  if (!isObjectRecord(error)) {
+    return false;
+  }
+  const code = typeof error.code === "string" ? error.code.toLowerCase() : "";
+  const message = typeof error.message === "string" ? error.message.toLowerCase() : "";
+  return (
+    code.includes("user") && (code.includes("cancel") || code.includes("cancelled")) ||
+    message.includes("cancel")
+  );
+}
+
+function waitForGooglePurchase(iap: ReactNativeIapModule, productId: string) {
+  let cleanup = () => {};
+  const promise = new Promise<import("react-native-iap").Purchase>((resolve, reject) => {
+    let settled = false;
+    cleanup = () => {
+      updateSubscription.remove();
+      errorSubscription.remove();
+      clearTimeout(timeoutId);
+    };
+    const settle = (fn: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      fn();
+    };
+    const timeoutId = setTimeout(() => {
+      settle(() =>
+        reject(
+          new Error(
+            "No purchase confirmation came back from Google Play. Please try again in a moment.",
+          ),
+        ),
+      );
+    }, PURCHASE_CONFIRMATION_TIMEOUT_MS);
+    const updateSubscription = iap.purchaseUpdatedListener((purchase) => {
+      if (purchase.productId !== productId) {
+        return;
+      }
+      settle(() => resolve(purchase));
+    });
+    const errorSubscription = iap.purchaseErrorListener((error) => {
+      settle(() => reject(error));
+    });
+  });
+  return { promise, cleanup };
+}
+
+export async function purchaseGoogleCredits(
+  productId: string,
+  options?: PurchaseAppleCreditsOptions,
+) {
+  if (Platform.OS !== "android") {
+    throw new Error("Google Play purchases are only available on Android.");
+  }
+
+  const iap = await ensureGoogleIapConnected();
+  const products = await iap.fetchProducts({ skus: [productId], type: "in-app" });
+  const matchedProduct = products?.find((product) => product.id === productId);
+  if (!matchedProduct) {
+    throw new Error("This credit pack is unavailable in Google Play right now.");
+  }
+
+  const pendingPurchase = waitForGooglePurchase(iap, productId);
+  try {
+    await iap.requestPurchase({
+      request: {
+        google: {
+          skus: [productId],
+        },
+      },
+      type: "in-app",
+    });
+  } catch (error) {
+    pendingPurchase.cleanup();
+    if (isGooglePurchaseCancelled(error)) {
+      throw new Error("Purchase canceled.");
+    }
+    throw error instanceof Error
+      ? error
+      : new Error("Google Play could not start this purchase.");
+  }
+
+  let purchase: import("react-native-iap").Purchase;
+  try {
+    purchase = await pendingPurchase.promise;
+  } catch (error) {
+    if (isGooglePurchaseCancelled(error)) {
+      throw new Error("Purchase canceled.");
+    }
+    throw error instanceof Error
+      ? error
+      : new Error("Google Play could not complete this purchase.");
+  }
+
+  const googlePurchaseToken = purchase.purchaseToken?.trim() ?? "";
+  if (!googlePurchaseToken) {
+    throw new Error("Google Play did not return a purchase token. Please try again.");
+  }
+
+  options?.onStatus?.("Adding credits...");
+  const verification = await verifyGooglePurchase({
+    productId,
+    googlePurchaseToken,
+  });
+  invalidateMonetizationAccountSnapshotCache();
+  try {
+    await iap.finishTransaction({ purchase, isConsumable: true });
+  } catch {
+    await fetchMonetizationAccountSnapshot({ forceRefresh: true });
+    return {
+      product: matchedProduct,
+      verification,
+      warningMessage:
+        "Credits were added, but Google Play did not finish the transaction cleanly. If this repeats, contact support.",
+    };
+  }
+
+  return {
+    product: matchedProduct,
+    verification,
+  };
+}
+
+export async function purchaseCreditsForPlatform(
+  productId: string,
+  options?: PurchaseAppleCreditsOptions,
+) {
+  if (Platform.OS === "android") {
+    options?.onStatus?.("Opening Google Play...");
+    return purchaseGoogleCredits(productId, options);
+  }
+  return purchaseAppleCredits(productId, options);
+}
+
 export async function getAvailableAppleProductIds(productIds: string[]) {
   if (Platform.OS !== "ios") {
     return productIds;
@@ -637,4 +853,40 @@ export async function getAvailableAppleProductIds(productIds: string[]) {
 
 export function getConfiguredAppleProductIds(): string[] {
   return getDefaultAppleProductIds();
+}
+
+export async function getAvailableCreditProductIdsForPlatform(productIds: string[]) {
+  if (Platform.OS !== "android") {
+    return getAvailableAppleProductIds(productIds);
+  }
+
+  const normalizedIds = Array.from(
+    new Set(
+      productIds
+        .map((productId) => productId.trim())
+        .filter((productId) => productId.length > 0),
+    ),
+  );
+  if (normalizedIds.length === 0) {
+    return [] as string[];
+  }
+
+  const iap = await ensureGoogleIapConnected();
+  const products = await iap.fetchProducts({ skus: normalizedIds, type: "in-app" });
+  const availableIds = (products ?? [])
+    .map((product) => (typeof product.id === "string" ? product.id.trim() : ""))
+    .filter((productId) => productId.length > 0);
+  return Array.from(new Set(availableIds));
+}
+
+export function getConfiguredCreditProductIdsForPlatform(): string[] {
+  return Platform.OS === "android" ? getDefaultGoogleProductIds() : getDefaultAppleProductIds();
+}
+
+export function getCreditPricingProductIdForPlatform(pack: MonetizationPricingPackage) {
+  return Platform.OS === "android" ? pack.googleProductId.trim() : pack.appleProductId.trim();
+}
+
+export function getCreditProviderForPlatform(): PurchaseProvider {
+  return Platform.OS === "android" ? "google_play" : "apple_app_store";
 }

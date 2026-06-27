@@ -33,9 +33,11 @@ import { sampleGeneratedRecipeRecord } from "../data/sampleGeneratedRecipe";
 import { loginWithAppleForMobile, loginWithGoogleForMobile } from "../services/auth";
 import {
   fetchMonetizationAccountSnapshot,
-  getAvailableAppleProductIds,
-  getConfiguredAppleProductIds,
-  purchaseAppleCredits,
+  getAvailableCreditProductIdsForPlatform,
+  getConfiguredCreditProductIdsForPlatform,
+  getCreditPricingProductIdForPlatform,
+  getCreditProviderForPlatform,
+  purchaseCreditsForPlatform,
 } from "../services/monetization";
 import { fetchOcrExtractedText } from "../services/ocr";
 import { signOutAndResetMobileSession } from "../services/mobileSession";
@@ -315,7 +317,7 @@ export function HomeScreen({
         return;
       }
       setCreditGateAuthState(account.authenticated ? "authenticated" : "unauthenticated");
-      const options = await getAppleCreditPackOptions();
+      const options = await getCreditPackOptions();
       if (cancelled) {
         return;
       }
@@ -614,8 +616,8 @@ export function HomeScreen({
     return params.availableCredits < params.fuseCreditCost;
   }
 
-  async function getAppleCreditPackOptions() {
-    const configuredFallback = getConfiguredAppleProductIds().map((productId) => ({
+  async function getCreditPackOptions() {
+    const configuredFallback = getConfiguredCreditProductIdsForPlatform().map((productId) => ({
       productId,
       credits: inferCreditsFromProductId(productId),
       label: `${inferCreditsFromProductId(productId)} Credits`,
@@ -627,22 +629,27 @@ export function HomeScreen({
     let baseOptions = configuredFallback;
     try {
       const account = await fetchMonetizationAccountSnapshot({ preferCache: true });
+      const provider = getCreditProviderForPlatform();
       const pricingPacks = account.pricingPackages
         .filter((pack) => pack.active)
-        .map((pack) => ({
-          productId: pack.appleProductId,
-          credits: pack.credits,
-          label: pack.label,
-          displayPriceUsd: pack.displayPriceUsd,
-          packageKey: pack.packageKey,
-          active: pack.active,
-        }))
+        .map((pack) => {
+          const productId = getCreditPricingProductIdForPlatform(pack);
+          return {
+            productId,
+            credits: pack.credits,
+            label: pack.label,
+            displayPriceUsd: pack.displayPriceUsd,
+            packageKey: pack.packageKey,
+            active: pack.active,
+          };
+        })
+        .filter((pack) => pack.productId.length > 0)
         .sort((left, right) => left.credits - right.credits);
       if (pricingPacks.length > 0) {
         baseOptions = pricingPacks;
       } else {
-        const applePacks = account.products
-          .filter((product) => product.provider === "apple_app_store")
+        const creditPacks = account.products
+          .filter((product) => product.provider === provider)
           .map((product) => ({
             productId: product.productId,
             credits: product.credits,
@@ -652,8 +659,8 @@ export function HomeScreen({
             active: true,
           }))
           .sort((left, right) => left.credits - right.credits);
-        if (applePacks.length > 0) {
-          baseOptions = applePacks;
+        if (creditPacks.length > 0) {
+          baseOptions = creditPacks;
         }
       }
     } catch {
@@ -661,7 +668,7 @@ export function HomeScreen({
     }
 
     try {
-      const availableProductIds = await getAvailableAppleProductIds(
+      const availableProductIds = await getAvailableCreditProductIdsForPlatform(
         baseOptions.map((option) => option.productId),
       );
       if (availableProductIds.length === 0) {
@@ -714,11 +721,11 @@ export function HomeScreen({
 
       let options = creditPackOptions;
       if (options.length === 0) {
-        options = await getAppleCreditPackOptions();
+        options = await getCreditPackOptions();
         setCreditPackOptions(options);
       }
       if (options.length === 0) {
-        setCreditGateMessage("No credit packs are available from App Store yet.");
+        setCreditGateMessage("No credit packs are available from the store yet.");
         return;
       }
 
@@ -729,10 +736,13 @@ export function HomeScreen({
         return;
       }
 
-      const purchase = await purchaseAppleCredits(selectedPack.productId);
+      const purchase = await purchaseCreditsForPlatform(selectedPack.productId);
       if (purchase.verification.grantedCredits < 1) {
         setCreditGateMessage("Purchase verified, but credits were not added yet. Try again.");
         return;
+      }
+      if ("warningMessage" in purchase && purchase.warningMessage) {
+        Alert.alert("Credits added", purchase.warningMessage);
       }
 
       setIsCreditGateOpen(false);
@@ -847,14 +857,14 @@ export function HomeScreen({
       });
 
       if (needsCredits) {
-        const options = await getAppleCreditPackOptions();
+        const options = await getCreditPackOptions();
         setCreditPackOptions(options);
         setSelectedCreditPackId((current) => current || getRecommendedPackId(options));
         setPendingCreditGateInput(pendingInput);
         setCreditGateAuthState(account.authenticated ? "authenticated" : "unauthenticated");
         if (options.length === 0) {
           setCreditGateMessage(
-            "No credit packs are available in App Store for this build yet. Check App Store Connect product setup.",
+            "No credit packs are available for this build yet. Check store product setup.",
           );
         } else {
           setCreditGateMessage("");

@@ -34,9 +34,10 @@ import { fetchRecipeImagePreview } from "../services/fuseImage";
 import { upsertDashboardFusionHistory } from "../services/dashboardHistory";
 import {
   fetchMonetizationAccountSnapshot,
-  getAvailableAppleProductIds,
-  getConfiguredAppleProductIds,
-  purchaseAppleCredits,
+  getAvailableCreditProductIdsForPlatform,
+  getConfiguredCreditProductIdsForPlatform,
+  getCreditProviderForPlatform,
+  purchaseCreditsForPlatform,
 } from "../services/monetization";
 import { loginWithGoogleForMobile } from "../services/auth";
 import { styles } from "../styles/appStyles";
@@ -89,7 +90,7 @@ function getFreeRemainingForAction(
   return actionKind === "reroll" ? freeRemaining.reroll : freeRemaining.fuse;
 }
 
-async function selectAppleCreditPack(options: CreditPackOption[]) {
+async function selectCreditPack(options: CreditPackOption[]) {
   if (options.length === 0) {
     return null;
   }
@@ -235,8 +236,8 @@ export function RecipeWorkspaceScreen({
     outputRange: ["0deg", "360deg"],
   });
 
-  const getAppleCreditPackOptions = useCallback(async () => {
-    const configuredFallback = getConfiguredAppleProductIds().map((productId) => ({
+  const getCreditPackOptions = useCallback(async () => {
+    const configuredFallback = getConfiguredCreditProductIdsForPlatform().map((productId) => ({
       productId,
       credits: inferCreditsFromProductId(productId),
     }));
@@ -244,18 +245,19 @@ export function RecipeWorkspaceScreen({
     let baseOptions = configuredFallback;
     try {
       const account = await fetchMonetizationAccountSnapshot();
-      const applePacks = account.products
-        .filter((product) => product.provider === "apple_app_store")
+      const provider = getCreditProviderForPlatform();
+      const creditPacks = account.products
+        .filter((product) => product.provider === provider)
         .map((product) => ({ productId: product.productId, credits: product.credits }))
         .sort((left, right) => left.credits - right.credits);
-      if (applePacks.length > 0) {
-        baseOptions = applePacks;
+      if (creditPacks.length > 0) {
+        baseOptions = creditPacks;
       }
     } catch {
       // Fall back to configured product ids when account endpoint is unavailable.
     }
 
-    const availableProductIds = await getAvailableAppleProductIds(
+    const availableProductIds = await getAvailableCreditProductIdsForPlatform(
       baseOptions.map((option) => option.productId),
     );
     if (availableProductIds.length === 0) {
@@ -304,22 +306,24 @@ export function RecipeWorkspaceScreen({
         }
       }
 
-      const options = await getAppleCreditPackOptions();
+      const options = await getCreditPackOptions();
       if (options.length === 0) {
-        Alert.alert("Credits unavailable", "No credit packs are available from App Store yet.");
+        Alert.alert("Credits unavailable", "No credit packs are available from the store yet.");
         return false;
       }
 
-      const selectedPack = await selectAppleCreditPack(options);
+      const selectedPack = await selectCreditPack(options);
       if (!selectedPack) {
         return false;
       }
 
-      const purchase = await purchaseAppleCredits(selectedPack.productId);
+      const purchase = await purchaseCreditsForPlatform(selectedPack.productId);
       const grantedCredits = purchase.verification.grantedCredits;
       Alert.alert(
         "Credits added",
-        grantedCredits > 0
+        "warningMessage" in purchase && purchase.warningMessage
+          ? purchase.warningMessage
+          : grantedCredits > 0
           ? `${grantedCredits} credits were added to your account.`
           : "Purchase verified. Your credits are ready.",
       );
@@ -338,7 +342,7 @@ export function RecipeWorkspaceScreen({
       isPurchasingCreditsRef.current = false;
       setIsPurchasingCredits(false);
     }
-  }, [getAppleCreditPackOptions]);
+  }, [getCreditPackOptions]);
 
   const handleBackToEdit = useCallback(() => {
     if (navigation.canGoBack()) {

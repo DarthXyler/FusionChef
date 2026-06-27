@@ -22,7 +22,8 @@
       ],
       "expo-font",
       "expo-secure-store",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "react-native-iap"
     ],
     "ios": {
       "bundleIdentifier": "com.flavorfusionchef.mobile",
@@ -42,7 +43,10 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "com.android.vending.BILLING"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
