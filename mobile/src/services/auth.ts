@@ -129,12 +129,29 @@ export async function loginWithGoogleForMobile() {
 
 async function openGoogleAuthSessionWithChromeForAndroid(startUrl: string, redirectUri: string) {
   const customTabs = await WebBrowser.getCustomTabsSupportingBrowsersAsync();
-  const hasChrome = customTabs.browserPackages.includes(ANDROID_CHROME_PACKAGE);
-  if (!hasChrome) {
-    throw new Error("Please install or update Chrome to sign in with Google.");
+  const browserPackages = customTabs.browserPackages;
+  const servicePackages = customTabs.servicePackages;
+  const configuredPackages = [
+    ...browserPackages,
+    ...servicePackages,
+    customTabs.preferredBrowserPackage,
+    customTabs.defaultBrowserPackage,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  const chromePackage = configuredPackages.find((value) => value === ANDROID_CHROME_PACKAGE);
+  const sharedCustomTabsPackage =
+    browserPackages.find((value) => servicePackages.includes(value)) ?? null;
+  const browserPackage =
+    chromePackage ??
+    customTabs.preferredBrowserPackage ??
+    sharedCustomTabsPackage ??
+    browserPackages[0] ??
+    null;
+
+  if (!browserPackage) {
+    return WebBrowser.openAuthSessionAsync(startUrl, redirectUri);
   }
   return WebBrowser.openAuthSessionAsync(startUrl, redirectUri, {
-    browserPackage: ANDROID_CHROME_PACKAGE,
+    browserPackage,
   });
 }
 

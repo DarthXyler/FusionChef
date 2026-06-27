@@ -323,17 +323,11 @@ export async function fetchMonetizationAccountSnapshot(options?: {
   const preferCache = options?.preferCache === true;
   const forceRefresh = options?.forceRefresh === true;
   const now = Date.now();
-  const authToken = await getMobileAuthToken();
-  if (!authToken) {
-    resetMonetizationAccountSnapshotForSignedOutSession();
-    return cachedAccountSnapshot?.value ?? buildSignedOutAccountSnapshot();
-  }
 
   if (
     !forceRefresh &&
     preferCache &&
     cachedAccountSnapshot &&
-    cachedAccountSnapshot.value.authenticated &&
     now - cachedAccountSnapshot.fetchedAtMs <= ACCOUNT_SNAPSHOT_CACHE_TTL_MS
   ) {
     return cachedAccountSnapshot.value;

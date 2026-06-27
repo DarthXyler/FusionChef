@@ -213,14 +213,10 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       setSession(nextSession);
       setProfileOverrides(nextOverrides);
       setFailedPhotoUri("");
-      if (nextSession) {
-        try {
-          const snapshot = await fetchMonetizationAccountSnapshot({ preferCache: true });
-          setAccountSnapshot(snapshot);
-        } catch {
-          setAccountSnapshot(null);
-        }
-      } else {
+      try {
+        const snapshot = await fetchMonetizationAccountSnapshot({ preferCache: true });
+        setAccountSnapshot(snapshot);
+      } catch {
         setAccountSnapshot(null);
       }
     } finally {
