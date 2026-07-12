@@ -7,7 +7,7 @@ import type { NextRequest } from "next/server";
 import type { FuseRequest, RecipeFusion } from "@/lib/types";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
-import { buildInactiveAuthResponse } from "@/lib/auth-api";
+import { buildInactiveAuthResponse, buildLoginRequiredResponse } from "@/lib/auth-api";
 import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
@@ -705,6 +705,15 @@ export async function POST(request: NextRequest) {
     return response;
   };
   try {
+    const authValidation = await getActiveAuthSessionFromRequest(request);
+    const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
+    if (inactiveAuthResponse) {
+      return inactiveAuthResponse;
+    }
+    if (!authValidation.session) {
+      return buildLoginRequiredResponse();
+    }
+
     if (shouldBlockRetiredWebFusionRequest(request)) {
       return NextResponse.json(
         { error: "Web fusion is currently unavailable." },
@@ -727,12 +736,6 @@ export async function POST(request: NextRequest) {
         { error: "Request is too large." },
         413,
       );
-    }
-
-    const authValidation = await getActiveAuthSessionFromRequest(request);
-    const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
-    if (inactiveAuthResponse) {
-      return inactiveAuthResponse;
     }
 
     const body = (await request.json()) as unknown;

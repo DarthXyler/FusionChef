@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
-import { buildInactiveAuthResponse } from "@/lib/auth-api";
+import { buildInactiveAuthResponse, buildLoginRequiredResponse } from "@/lib/auth-api";
 import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
 import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
@@ -26,15 +26,6 @@ function getTodayDateOnly() {
 }
 
 export async function GET(request: NextRequest) {
-  const limited = await enforceRateLimit(request, {
-    bucket: "api-monetization-account",
-    limit: 60,
-    windowMs: 60_000,
-  });
-  if (limited) {
-    return limited;
-  }
-
   try {
     const authValidation = await getActiveAuthSessionFromRequest(request);
     const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
@@ -43,6 +34,21 @@ export async function GET(request: NextRequest) {
       return inactiveAuthResponse;
     }
     const authSession = authValidation.session;
+    if (!authSession) {
+      const loginRequiredResponse = buildLoginRequiredResponse();
+      noStore(loginRequiredResponse);
+      return loginRequiredResponse;
+    }
+
+    const limited = await enforceRateLimit(request, {
+      bucket: "api-monetization-account",
+      limit: 60,
+      windowMs: 60_000,
+    });
+    if (limited) {
+      return limited;
+    }
+
     const identity = await resolveCookbookIdentity(request);
     const [runtimeConfig, balance, todayUsage] = await Promise.all([
       getMonetizationRuntimeConfig(),

@@ -280,10 +280,10 @@ function normalizeSeasonalOffers(raw: unknown) {
 function normalizeConfig(raw: unknown, updatedAt: string, updatedBy: string): MonetizationRuntimeConfig {
   if (!isObjectRecord(raw)) {
     return {
-      enabled: false,
-      enforcementMode: "off",
-      freeDailyFuseActions: 0,
-      freeDailyRerollActions: 0,
+      enabled: true,
+      enforcementMode: "enforce",
+      freeDailyFuseActions: 1,
+      freeDailyRerollActions: 1,
       fuseCreditCost: 2,
       rerollCreditCost: 1,
       allowCompActions: true,
@@ -299,13 +299,13 @@ function normalizeConfig(raw: unknown, updatedAt: string, updatedBy: string): Mo
     raw.enforcementMode === "observe" ||
     raw.enforcementMode === "enforce"
       ? raw.enforcementMode
-      : "off";
+      : "enforce";
 
   return {
-    enabled: raw.enabled === true,
+    enabled: raw.enabled !== false,
     enforcementMode,
-    freeDailyFuseActions: toPositiveInteger(raw.freeDailyFuseActions, 0),
-    freeDailyRerollActions: toPositiveInteger(raw.freeDailyRerollActions, 0),
+    freeDailyFuseActions: toPositiveInteger(raw.freeDailyFuseActions, 1),
+    freeDailyRerollActions: toPositiveInteger(raw.freeDailyRerollActions, 1),
     fuseCreditCost: toIntegerInRange(raw.fuseCreditCost, 2, 1, DEFAULT_MAX_ACTION_CREDIT_COST),
     rerollCreditCost: toIntegerInRange(raw.rerollCreditCost, 1, 1, DEFAULT_MAX_ACTION_CREDIT_COST),
     allowCompActions: raw.allowCompActions !== false,

@@ -248,10 +248,10 @@ const DEFAULT_PRICING_PACKAGES: PricingPackageConfig[] = [
 ];
 
 const DEFAULT_FORM: RuntimeConfig = {
-  enabled: false,
-  enforcementMode: "off",
-  freeDailyFuseActions: 0,
-  freeDailyRerollActions: 0,
+  enabled: true,
+  enforcementMode: "enforce",
+  freeDailyFuseActions: 1,
+  freeDailyRerollActions: 1,
   fuseCreditCost: 2,
   rerollCreditCost: 1,
   allowCompActions: true,
@@ -262,10 +262,10 @@ const DEFAULT_FORM: RuntimeConfig = {
 };
 
 const DEFAULT_OBSERVE_RUNTIME: ObserveRuntime = {
-  enabled: false,
-  enforcementMode: "off",
-  freeDailyFuseActions: 0,
-  freeDailyRerollActions: 0,
+  enabled: true,
+  enforcementMode: "enforce",
+  freeDailyFuseActions: 1,
+  freeDailyRerollActions: 1,
   fuseCreditCost: 2,
   rerollCreditCost: 1,
 };
@@ -737,8 +737,8 @@ const PRESETS: Preset[] = [
     config: {
       enabled: true,
       enforcementMode: "observe",
-      freeDailyFuseActions: 3,
-      freeDailyRerollActions: 2,
+      freeDailyFuseActions: 1,
+      freeDailyRerollActions: 1,
       fuseCreditCost: 2,
       rerollCreditCost: 1,
       allowCompActions: true,
@@ -750,8 +750,8 @@ const PRESETS: Preset[] = [
     config: {
       enabled: true,
       enforcementMode: "enforce",
-      freeDailyFuseActions: 3,
-      freeDailyRerollActions: 2,
+      freeDailyFuseActions: 1,
+      freeDailyRerollActions: 1,
       fuseCreditCost: 2,
       rerollCreditCost: 1,
       allowCompActions: true,

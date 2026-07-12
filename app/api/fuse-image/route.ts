@@ -3,9 +3,12 @@
  * Generates a recipe preview image with OpenAI and returns optimized WebP as a data URL.
  */
 import type { MealType } from "@/lib/types";
+import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
+import { buildInactiveAuthResponse, buildLoginRequiredResponse } from "@/lib/auth-api";
+import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import { shouldBlockRetiredWebFusionRequest } from "@/lib/web-fusion-access";
 
 type FuseImageRequest = {
@@ -207,10 +210,19 @@ function buildImagePrompt(body: FuseImageRequest) {
   ].join("\n");
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const requestId = crypto.randomUUID();
   const requestStartedAt = Date.now();
   try {
+    const authValidation = await getActiveAuthSessionFromRequest(request);
+    const inactiveAuthResponse = buildInactiveAuthResponse(authValidation);
+    if (inactiveAuthResponse) {
+      return inactiveAuthResponse;
+    }
+    if (!authValidation.session) {
+      return buildLoginRequiredResponse();
+    }
+
     if (shouldBlockRetiredWebFusionRequest(request)) {
       return NextResponse.json(
         { error: "Web fusion image generation is currently unavailable." },
