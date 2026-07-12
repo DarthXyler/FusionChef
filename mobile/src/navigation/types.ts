@@ -16,7 +16,7 @@ export type HomeStackParamList = {
         importPhotoOnOpen?: boolean;
         creditGateToken?: string;
         creditGateInput?: FuseRequest;
-        creditGateReason?: "insufficient_credits_402";
+        creditGateReason?: "insufficient_credits_402" | "login_required";
       }
     | undefined;
   RecipeWorkspace:

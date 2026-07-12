@@ -176,6 +176,10 @@ function isAppleAuthCancelled(error: unknown) {
 }
 
 export async function loginWithAppleForMobile() {
+  if (Platform.OS !== "ios") {
+    throw new Error("Apple Sign in is only available on iOS.");
+  }
+
   const isAvailable = await AppleAuthentication.isAvailableAsync();
   if (!isAvailable) {
     throw new Error("Apple Sign in is only available on supported Apple devices.");

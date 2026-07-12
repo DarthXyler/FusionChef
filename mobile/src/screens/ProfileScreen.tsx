@@ -40,6 +40,12 @@ import {
   subscribeToMonetizationAccountSnapshot,
   type MonetizationAccountSnapshot,
 } from "../services/monetization";
+import {
+  DELETE_ACCOUNT_SUPPORT_URL,
+  GENERAL_SUPPORT_URL,
+  PURCHASE_SUPPORT_URL,
+  REFUND_POLICY_URL,
+} from "../config/links";
 import { uploadProfilePhoto } from "../services/imageUpload";
 import {
   readMobileProfile,
@@ -50,11 +56,9 @@ import { signOutAndResetMobileSession } from "../services/mobileSession";
 import { styles } from "../styles/appStyles";
 import googleGLogo from "../../assets/google-g-logo.png";
 
-const SUPPORT_URL = "https://www.flavorfusionchef.com/support";
 const FAQ_URL = "https://www.flavorfusionchef.com/faq";
 const PRIVACY_POLICY_URL = "https://www.flavorfusionchef.com/privacy";
 const TERMS_URL = "https://www.flavorfusionchef.com/terms";
-const REFUND_POLICY_URL = "https://www.flavorfusionchef.com/refund-policy";
 
 type ProfileLinkRowProps = {
   icon: keyof typeof MaterialIcons.glyphMap;
@@ -216,6 +220,10 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       setSession(nextSession);
       setProfileOverrides(nextOverrides);
       setFailedPhotoUri("");
+      if (!nextSession) {
+        setAccountSnapshot(null);
+        return;
+      }
       try {
         const snapshot = await fetchMonetizationAccountSnapshot({ preferCache: true });
         setAccountSnapshot(snapshot);
@@ -494,29 +502,35 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   }, [creditPackOptions, isPurchasingCredits, selectedCreditPackId]);
 
   const handleSignOut = useCallback(() => {
-    Alert.alert("Sign out?", "You can sign back in any time with Apple or Google.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Sign Out",
-        style: "destructive",
-        onPress: () => {
-          void signOutAndResetMobileSession()
-            .then(() => {
-              resetLocalState();
-              setSession(null);
-              setProfileOverrides({ displayName: "", photoUri: "" });
-              setAccountSnapshot(null);
-              setCreditPackOptions([]);
-              setSelectedCreditPackId("");
-              setCreditPurchaseMessage("");
-              setIsCreditSheetOpen(false);
-            })
-            .catch(() => {
-              Alert.alert("Sign out failed", "Could not fully reset this device session.");
-            });
+    Alert.alert(
+      "Sign out?",
+      Platform.OS === "android"
+        ? "You can sign back in any time with Google."
+        : "You can sign back in any time with Apple or Google.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign Out",
+          style: "destructive",
+          onPress: () => {
+            void signOutAndResetMobileSession()
+              .then(() => {
+                resetLocalState();
+                setSession(null);
+                setProfileOverrides({ displayName: "", photoUri: "" });
+                setAccountSnapshot(null);
+                setCreditPackOptions([]);
+                setSelectedCreditPackId("");
+                setCreditPurchaseMessage("");
+                setIsCreditSheetOpen(false);
+              })
+              .catch(() => {
+                Alert.alert("Sign out failed", "Could not fully reset this device session.");
+              });
+          },
         },
-      },
-    ]);
+      ],
+    );
   }, [resetLocalState]);
 
   const handleDeleteAccount = useCallback(() => {
@@ -528,7 +542,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
         {
           text: "Contact Support",
           onPress: () => {
-            void openLink(SUPPORT_URL, "support");
+            void openLink(DELETE_ACCOUNT_SUPPORT_URL, "delete account support");
           },
         },
       ],
@@ -544,7 +558,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
         {
           text: "Contact Support",
           onPress: () => {
-            void openLink(SUPPORT_URL, "support");
+            void openLink(PURCHASE_SUPPORT_URL, "purchase support");
           },
         },
       ],
@@ -716,7 +730,9 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
         >
           <View style={styles.profileTopBar}>
             <BrandHeader compact />
-            <CreditPill credits={availableCredits} onPress={handleOpenCreditSheet} />
+            {isSignedIn ? (
+              <CreditPill credits={availableCredits} onPress={handleOpenCreditSheet} />
+            ) : null}
           </View>
 
           <View style={styles.profileHeroCard}>
@@ -774,115 +790,148 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
             </View>
           </View>
 
-          <View style={styles.profileSectionHeader}>
-            <Text style={styles.profileSectionTitle}>Credits and Free Usage</Text>
-            {isLoading ? <ActivityIndicator color="#10b981" size="small" /> : null}
-          </View>
-          <View style={styles.profileUsageGrid}>
-            <Pressable
-              accessibilityLabel="Buy credits"
-              accessibilityRole="button"
-              onPress={handleOpenCreditSheet}
-              style={({ pressed }) => [
-                styles.profileUsageCard,
-                pressed && styles.profileRowPressed,
-              ]}
-            >
-              <View style={styles.profileUsageIcon}>
-                <MaterialCommunityIcons color="#047857" name="database" size={22} />
+          {isSignedIn ? (
+            <>
+              <View style={styles.profileSectionHeader}>
+                <Text style={styles.profileSectionTitle}>Credits and Free Usage</Text>
+                {isLoading ? <ActivityIndicator color="#10b981" size="small" /> : null}
               </View>
-              <Text style={styles.profileUsageValue}>{availableCredits}</Text>
-              <Text style={styles.profileUsageLabel}>Credits</Text>
-            </Pressable>
-            <View style={[styles.profileUsageCard, styles.profileUsageCardWarm]}>
-              <View style={[styles.profileUsageIcon, styles.profileUsageIconWarm]}>
-                <MaterialIcons color="#c2410c" name="auto-awesome" size={22} />
-              </View>
-              <Text style={styles.profileUsageValue}>{freeFuseRemaining}</Text>
-              <Text style={[styles.profileUsageLabel, styles.profileUsageLabelWarm]}>
-                Free today
-              </Text>
-            </View>
-            <View style={[styles.profileUsageCard, styles.profileUsageCardBlue]}>
-              <View style={[styles.profileUsageIcon, styles.profileUsageIconBlue]}>
-                <MaterialIcons color="#1d4ed8" name="refresh" size={22} />
-              </View>
-              <Text style={styles.profileUsageValue}>{freeRerollRemaining}</Text>
-              <Text style={[styles.profileUsageLabel, styles.profileUsageLabelBlue]}>
-                Free rerolls
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.profileCreditPurchaseCard}>
-            <View style={styles.profileCreditPurchaseTextWrap}>
-              <Text style={styles.profileCreditPurchaseTitle}>Need more credits?</Text>
-              <Text style={styles.profileCreditPurchaseCopy}>
-                Add a one-time credit pack for fusions and rerolls.
-              </Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              onPress={handleOpenCreditSheet}
-              style={({ pressed }) => [
-                styles.profileBuyCreditsButton,
-                pressed && styles.profileRowPressed,
-              ]}
-            >
-              {isSigningIn || isLoadingCreditPacks ? (
-                <ActivityIndicator color="#ffffff" size="small" />
-              ) : (
-                <Text style={styles.profileBuyCreditsButtonText}>Buy Credits</Text>
-              )}
-            </Pressable>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ expanded: isCreditInfoExpanded }}
-            onPress={() => setIsCreditInfoExpanded((current) => !current)}
-            style={({ pressed }) => [
-              styles.profileCreditInfoCard,
-              pressed && styles.profileCreditInfoCardPressed,
-            ]}
-          >
-            <View style={styles.profileCreditInfoHeader}>
-              <View style={styles.profileCreditInfoTitleRow}>
-                <View style={styles.profileCreditInfoIcon}>
-                  <MaterialIcons color="#047857" name="info-outline" size={18} />
+              <View style={styles.profileUsageGrid}>
+                <Pressable
+                  accessibilityLabel="Buy credits"
+                  accessibilityRole="button"
+                  onPress={handleOpenCreditSheet}
+                  style={({ pressed }) => [
+                    styles.profileUsageCard,
+                    pressed && styles.profileRowPressed,
+                  ]}
+                >
+                  <View style={styles.profileUsageIcon}>
+                    <MaterialCommunityIcons color="#047857" name="database" size={22} />
+                  </View>
+                  <Text style={styles.profileUsageValue}>{availableCredits}</Text>
+                  <Text style={styles.profileUsageLabel}>Credits</Text>
+                </Pressable>
+                <View style={[styles.profileUsageCard, styles.profileUsageCardWarm]}>
+                  <View style={[styles.profileUsageIcon, styles.profileUsageIconWarm]}>
+                    <MaterialIcons color="#c2410c" name="auto-awesome" size={22} />
+                  </View>
+                  <Text style={styles.profileUsageValue}>{freeFuseRemaining}</Text>
+                  <Text style={[styles.profileUsageLabel, styles.profileUsageLabelWarm]}>
+                    Free today
+                  </Text>
                 </View>
-                <View style={styles.profileCreditInfoTextWrap}>
-                  <Text style={styles.profileCreditInfoTitle}>How credits are used</Text>
-                  <Text style={styles.profileCreditInfoSummary}>
-                    Generation {fuseCreditCostLabel}, reroll {rerollCreditCostLabel}.
+                <View style={[styles.profileUsageCard, styles.profileUsageCardBlue]}>
+                  <View style={[styles.profileUsageIcon, styles.profileUsageIconBlue]}>
+                    <MaterialIcons color="#1d4ed8" name="refresh" size={22} />
+                  </View>
+                  <Text style={styles.profileUsageValue}>{freeRerollRemaining}</Text>
+                  <Text style={[styles.profileUsageLabel, styles.profileUsageLabelBlue]}>
+                    Free rerolls
                   </Text>
                 </View>
               </View>
-              <MaterialIcons
-                color="#6b7280"
-                name={isCreditInfoExpanded ? "expand-less" : "expand-more"}
-                size={24}
-              />
-            </View>
-            {isCreditInfoExpanded ? (
-              <View style={styles.profileCreditInfoDetails}>
-                <View style={styles.profileCreditInfoDetailRow}>
-                  <Text style={styles.profileCreditInfoDetailLabel}>Recipe generation</Text>
-                  <Text style={styles.profileCreditInfoDetailValue}>{fuseCreditCostLabel}</Text>
+
+              <View style={styles.profileCreditPurchaseCard}>
+                <View style={styles.profileCreditPurchaseTextWrap}>
+                  <Text style={styles.profileCreditPurchaseTitle}>Need more credits?</Text>
+                  <Text style={styles.profileCreditPurchaseCopy}>
+                    Add a one-time credit pack for fusions and rerolls.
+                  </Text>
                 </View>
-                <View style={styles.profileCreditInfoDetailRow}>
-                  <Text style={styles.profileCreditInfoDetailLabel}>Reroll</Text>
-                  <Text style={styles.profileCreditInfoDetailValue}>{rerollCreditCostLabel}</Text>
-                </View>
-                <Text style={styles.profileCreditInfoNote}>
-                  Free actions are used first when available. Credits are charged only after a
-                  successful result.
-                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={handleOpenCreditSheet}
+                  style={({ pressed }) => [
+                    styles.profileBuyCreditsButton,
+                    pressed && styles.profileRowPressed,
+                  ]}
+                >
+                  {isSigningIn || isLoadingCreditPacks ? (
+                    <ActivityIndicator color="#ffffff" size="small" />
+                  ) : (
+                    <Text style={styles.profileBuyCreditsButtonText}>Buy Credits</Text>
+                  )}
+                </Pressable>
               </View>
-            ) : null}
-          </Pressable>
-          {creditPurchaseMessage && !isCreditSheetOpen ? (
-            <Text style={styles.profileCreditPurchaseMessage}>{creditPurchaseMessage}</Text>
-          ) : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ expanded: isCreditInfoExpanded }}
+                onPress={() => setIsCreditInfoExpanded((current) => !current)}
+                style={({ pressed }) => [
+                  styles.profileCreditInfoCard,
+                  pressed && styles.profileCreditInfoCardPressed,
+                ]}
+              >
+                <View style={styles.profileCreditInfoHeader}>
+                  <View style={styles.profileCreditInfoTitleRow}>
+                    <View style={styles.profileCreditInfoIcon}>
+                      <MaterialIcons color="#047857" name="info-outline" size={18} />
+                    </View>
+                    <View style={styles.profileCreditInfoTextWrap}>
+                      <Text style={styles.profileCreditInfoTitle}>How credits are used</Text>
+                      <Text style={styles.profileCreditInfoSummary}>
+                        Generation {fuseCreditCostLabel}, reroll {rerollCreditCostLabel}.
+                      </Text>
+                    </View>
+                  </View>
+                  <MaterialIcons
+                    color="#6b7280"
+                    name={isCreditInfoExpanded ? "expand-less" : "expand-more"}
+                    size={24}
+                  />
+                </View>
+                {isCreditInfoExpanded ? (
+                  <View style={styles.profileCreditInfoDetails}>
+                    <View style={styles.profileCreditInfoDetailRow}>
+                      <Text style={styles.profileCreditInfoDetailLabel}>Recipe generation</Text>
+                      <Text style={styles.profileCreditInfoDetailValue}>{fuseCreditCostLabel}</Text>
+                    </View>
+                    <View style={styles.profileCreditInfoDetailRow}>
+                      <Text style={styles.profileCreditInfoDetailLabel}>Reroll</Text>
+                      <Text style={styles.profileCreditInfoDetailValue}>{rerollCreditCostLabel}</Text>
+                    </View>
+                    <Text style={styles.profileCreditInfoNote}>
+                      Free actions are used first when available. Credits are charged only after a
+                      successful result.
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+              {creditPurchaseMessage && !isCreditSheetOpen ? (
+                <Text style={styles.profileCreditPurchaseMessage}>{creditPurchaseMessage}</Text>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <View style={styles.profileSectionHeader}>
+                <Text style={styles.profileSectionTitle}>Credits and Free Usage</Text>
+              </View>
+              <View style={styles.profileCreditPurchaseCard}>
+                <View style={styles.profileCreditPurchaseTextWrap}>
+                  <Text style={styles.profileCreditPurchaseTitle}>Sign in to view credits</Text>
+                  <Text style={styles.profileCreditPurchaseCopy}>
+                    Sign in to see your free daily actions, balance, and purchase history.
+                  </Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isSigningIn}
+                  onPress={() => setIsAuthSheetOpen(true)}
+                  style={({ pressed }) => [
+                    styles.profileBuyCreditsButton,
+                    pressed && styles.profileRowPressed,
+                  ]}
+                >
+                  {isSigningIn ? (
+                    <ActivityIndicator color="#ffffff" size="small" />
+                  ) : (
+                    <Text style={styles.profileBuyCreditsButtonText}>Sign in</Text>
+                  )}
+                </Pressable>
+              </View>
+            </>
+          )}
 
           <View style={styles.profileStatsShadow}>
             <View style={styles.profileStatsCard}>
@@ -906,7 +955,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
             <ProfileLinkRow
               icon="support-agent"
               label="Support"
-              onPress={() => openLink(SUPPORT_URL, "support")}
+              onPress={() => openLink(GENERAL_SUPPORT_URL, "support")}
             />
             <ProfileLinkRow icon="help-outline" label="FAQ" onPress={() => openLink(FAQ_URL, "FAQ")} />
             <ProfileLinkRow
@@ -917,8 +966,8 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
             <ProfileLinkRow icon="article" label="Terms" onPress={() => openLink(TERMS_URL, "terms")} />
             <ProfileLinkRow
               icon="receipt-long"
-              label="Purchases & Refunds"
-              onPress={() => openLink(REFUND_POLICY_URL, "purchases and refunds")}
+              label="Refund Policy"
+              onPress={() => openLink(REFUND_POLICY_URL, "refund policy")}
             />
           </View>
 
@@ -950,20 +999,22 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
               </View>
 
               <View style={styles.profileAuthProviderList}>
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={isSigningIn}
-                  onPress={handleSignInWithApple}
-                  style={({ pressed }) => [
-                    styles.profileAuthProviderButton,
-                    pressed && styles.profileRowPressed,
-                  ]}
-                >
-                  <View style={styles.profileAuthProviderIcon}>
-                    <MaterialIcons color="#047857" name="apple" size={23} />
-                  </View>
-                  <Text style={styles.profileAuthProviderText}>Continue with Apple</Text>
-                </Pressable>
+                {Platform.OS === "ios" ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={isSigningIn}
+                    onPress={handleSignInWithApple}
+                    style={({ pressed }) => [
+                      styles.profileAuthProviderButton,
+                      pressed && styles.profileRowPressed,
+                    ]}
+                  >
+                    <View style={styles.profileAuthProviderIcon}>
+                      <MaterialIcons color="#047857" name="apple" size={23} />
+                    </View>
+                    <Text style={styles.profileAuthProviderText}>Continue with Apple</Text>
+                  </Pressable>
+                ) : null}
 
                 <Pressable
                   accessibilityRole="button"

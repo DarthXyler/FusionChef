@@ -100,20 +100,29 @@ export async function fetchLiveRecipeRecord(
   action: FuseActionKind = "fuse",
   requestId?: string,
 ): Promise<GeneratedRecipeRecord> {
+  const authToken = await getMobileAuthToken();
+  if (!authToken) {
+    throw new FuseRequestError(
+      401,
+      {
+        error: "Sign in to create or reroll recipes.",
+        reason: "login_required",
+      },
+      "Sign in to create or reroll recipes.",
+    );
+  }
+
   const mobileAnonId = await getMobileAnonymousId();
   const mobileDeviceKey = await getMobileDeviceKey();
-  const authToken = await getMobileAuthToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "x-flavor-fusion-anon-id": mobileAnonId,
     "x-flavor-fusion-device-key": mobileDeviceKey,
     "x-flavor-fusion-action": action,
+    authorization: `Bearer ${authToken}`,
   };
   if (typeof requestId === "string" && requestId.trim().length > 0) {
     headers["x-flavor-fusion-request-id"] = requestId.trim();
-  }
-  if (authToken) {
-    headers.authorization = `Bearer ${authToken}`;
   }
   const response = await fetch(`${getApiBaseUrl()}/api/fuse`, {
     method: "POST",

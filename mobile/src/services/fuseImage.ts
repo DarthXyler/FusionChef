@@ -1,5 +1,6 @@
 import { getApiBaseUrl } from "../config/api";
 import type { MealType } from "../types/recipe";
+import { getMobileAuthToken } from "./auth";
 import { getMobileAnonymousId, getMobileDeviceKey } from "./mobileIdentity";
 
 type FuseImageRequest = {
@@ -11,7 +12,10 @@ type FuseImageRequest = {
 
 async function readErrorMessage(response: Response) {
   try {
-    const payload = (await response.json()) as { error?: unknown };
+    const payload = (await response.json()) as { error?: unknown; reason?: unknown };
+    if (response.status === 401 && payload.reason === "login_required") {
+      return "Sign in to create or reroll recipes.";
+    }
     return typeof payload.error === "string" && payload.error.trim().length > 0
       ? payload.error
       : "The recipe image request failed.";
@@ -23,6 +27,11 @@ async function readErrorMessage(response: Response) {
 export async function fetchRecipeImagePreview(
   input: FuseImageRequest,
 ): Promise<string> {
+  const authToken = await getMobileAuthToken();
+  if (!authToken) {
+    throw new Error("Sign in to create or reroll recipes.");
+  }
+
   const [mobileAnonId, mobileDeviceKey] = await Promise.all([
     getMobileAnonymousId(),
     getMobileDeviceKey(),
@@ -33,6 +42,7 @@ export async function fetchRecipeImagePreview(
       "Content-Type": "application/json",
       "x-flavor-fusion-anon-id": mobileAnonId,
       "x-flavor-fusion-device-key": mobileDeviceKey,
+      authorization: `Bearer ${authToken}`,
     },
     body: JSON.stringify(input),
   });

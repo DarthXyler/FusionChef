@@ -48,6 +48,8 @@ type VerifyPurchasePayload = {
 
 type MonetizationAccountPayload = {
   authenticated?: unknown;
+  reason?: unknown;
+  code?: unknown;
   login?: unknown;
   enabled?: unknown;
   enforcementMode?: unknown;
@@ -143,6 +145,23 @@ function buildSignedOutAccountSnapshot(): MonetizationAccountSnapshot {
     products: [],
     pricingPackages: [],
   };
+}
+
+function isLoginRequiredPayload(payload: unknown) {
+  if (!isObjectRecord(payload)) {
+    return false;
+  }
+  return payload.reason === "login_required" || payload.code === "login_required";
+}
+
+function setSignedOutAccountSnapshot() {
+  const snapshot = buildSignedOutAccountSnapshot();
+  cachedAccountSnapshot = {
+    value: snapshot,
+    fetchedAtMs: Date.now(),
+  };
+  notifyAccountSnapshotListeners(snapshot);
+  return snapshot;
 }
 
 async function getExpoIapModule() {
@@ -317,12 +336,7 @@ export function invalidateMonetizationAccountSnapshotCache() {
 }
 
 export function resetMonetizationAccountSnapshotForSignedOutSession() {
-  const snapshot = buildSignedOutAccountSnapshot();
-  cachedAccountSnapshot = {
-    value: snapshot,
-    fetchedAtMs: Date.now(),
-  };
-  notifyAccountSnapshotListeners(snapshot);
+  setSignedOutAccountSnapshot();
 }
 
 export function subscribeToMonetizationAccountSnapshot(
@@ -357,6 +371,11 @@ export async function fetchMonetizationAccountSnapshot(options?: {
     return cachedAccountSnapshot.value;
   }
 
+  const authToken = await getMobileAuthToken();
+  if (!authToken) {
+    return setSignedOutAccountSnapshot();
+  }
+
   const identityHeaders = await withIdentityHeaders();
   const response = await fetch(`${getApiBaseUrl()}/api/monetization/account`, {
     method: "GET",
@@ -371,6 +390,9 @@ export async function fetchMonetizationAccountSnapshot(options?: {
   }
   const payload = (await response.json()) as MonetizationAccountPayload;
   if (!response.ok) {
+    if (response.status === 401 && isLoginRequiredPayload(payload)) {
+      return setSignedOutAccountSnapshot();
+    }
     await handleInvalidAuthResponse(response, payload);
     const message = extractErrorMessage(
       payload as Record<string, unknown>,

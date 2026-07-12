@@ -30,7 +30,12 @@ import {
 import { useResponsiveFlags } from "../hooks/useResponsiveFlags";
 import type { HomeStackParamList } from "../navigation/types";
 import { sampleGeneratedRecipeRecord } from "../data/sampleGeneratedRecipe";
-import { loginWithAppleForMobile, loginWithGoogleForMobile } from "../services/auth";
+import {
+  isMobileAuthenticated,
+  loginWithAppleForMobile,
+  loginWithGoogleForMobile,
+} from "../services/auth";
+import { GENERAL_SUPPORT_URL } from "../config/links";
 import {
   fetchMonetizationAccountSnapshot,
   getAvailableCreditProductIdsForPlatform,
@@ -55,7 +60,6 @@ import googleGLogo from "../../assets/google-g-logo.png";
  */
 const DEFAULT_MOBILE_FUSION_CUISINE = CUISINE_OPTIONS[0] ?? "Japanese";
 const PRIVACY_POLICY_URL = "https://www.flavorfusionchef.com/privacy";
-const SUPPORT_URL = "https://www.flavorfusionchef.com/support";
 const MAX_OCR_IMAGE_DATA_URL_CHARS = 3_700_000;
 const OCR_IMAGE_VARIANTS_BALANCED = [
   { maxDimension: 1600, compress: 0.65 },
@@ -308,6 +312,8 @@ export function HomeScreen({
     setCreditGateMessage(
       creditGateReason === "insufficient_credits_402"
         ? "Credits exhausted. Your free tries and credits are used up. Choose a pack to continue."
+        : creditGateReason === "login_required"
+          ? "Sign in to create or reroll recipes."
         : "",
     );
 
@@ -519,7 +525,7 @@ export function HomeScreen({
       if (!permission.granted) {
         Alert.alert(
           "Photos access needed",
-          "Allow photo library access so you can choose a recipe image from your iPhone.",
+          "Allow photo library access so you can choose a recipe image from your phone.",
         );
         return;
       }
@@ -847,6 +853,17 @@ export function HomeScreen({
     Keyboard.dismiss();
     setIsGenerating(true);
     try {
+      const isAuthenticated = await isMobileAuthenticated();
+      if (!isAuthenticated) {
+        setPendingCreditGateInput(pendingInput);
+        setCreditGateAuthState("unauthenticated");
+        setCreditPackOptions([]);
+        setSelectedCreditPackId("");
+        setCreditGateMessage("Sign in to create or reroll recipes.");
+        setIsCreditGateOpen(true);
+        return;
+      }
+
       const account = await fetchMonetizationAccountSnapshot({ preferCache: true });
       const needsCredits = shouldRequireCreditsForFuse({
         enabled: account.enabled,
@@ -1351,26 +1368,28 @@ export function HomeScreen({
                           isShortScreen && styles.creditGateAuthActionsCompact,
                         ]}
                       >
-                        <Pressable
-                          accessibilityRole="button"
-                          disabled={isCreditGateBusy}
-                          onPress={() => void handleCreditGateAppleLogin()}
-                          style={({ pressed }) => [
-                            styles.creditGateAppleButton,
-                            isCompactScreen && styles.creditGateAuthButtonCompact,
-                            pressed && styles.creditGateAuthButtonPressed,
-                          ]}
-                        >
-                          <MaterialIcons name="apple" size={24} style={styles.creditGateAppleIcon} />
-                          <Text
-                            style={[
-                              styles.creditGateAppleButtonText,
-                              isCompactScreen && styles.creditGateAuthButtonTextCompact,
+                        {Platform.OS === "ios" ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            disabled={isCreditGateBusy}
+                            onPress={() => void handleCreditGateAppleLogin()}
+                            style={({ pressed }) => [
+                              styles.creditGateAppleButton,
+                              isCompactScreen && styles.creditGateAuthButtonCompact,
+                              pressed && styles.creditGateAuthButtonPressed,
                             ]}
                           >
-                            Continue with Apple
-                          </Text>
-                        </Pressable>
+                            <MaterialIcons name="apple" size={24} style={styles.creditGateAppleIcon} />
+                            <Text
+                              style={[
+                                styles.creditGateAppleButtonText,
+                                isCompactScreen && styles.creditGateAuthButtonTextCompact,
+                              ]}
+                            >
+                              Continue with Apple
+                            </Text>
+                          </Pressable>
+                        ) : null}
                         <Pressable
                           accessibilityRole="button"
                           disabled={isCreditGateBusy}
@@ -1448,7 +1467,7 @@ export function HomeScreen({
                       <Text style={styles.creditGateLegalDivider}>{"\u2022"}</Text>
                       <Pressable
                         accessibilityRole="link"
-                        onPress={() => void openCreditGateLink(SUPPORT_URL, "Support")}
+                        onPress={() => void openCreditGateLink(GENERAL_SUPPORT_URL, "Support")}
                       >
                         <Text
                           style={[

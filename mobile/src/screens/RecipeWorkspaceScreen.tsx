@@ -39,7 +39,7 @@ import {
   getCreditProviderForPlatform,
   purchaseCreditsForPlatform,
 } from "../services/monetization";
-import { loginWithGoogleForMobile } from "../services/auth";
+import { isMobileAuthenticated, loginWithGoogleForMobile } from "../services/auth";
 import { styles } from "../styles/appStyles";
 import type { FuseRequest, GeneratedRecipeRecord } from "../types/recipe";
 import { buildShoppingItemKey, toTitleCase } from "../utils/recipeUi";
@@ -80,6 +80,14 @@ function isInsufficientCreditsError(error: unknown): error is FuseRequestError {
     error instanceof FuseRequestError &&
     error.status === 402 &&
     error.reason === "insufficient_credits"
+  );
+}
+
+function isLoginRequiredFuseError(error: unknown): error is FuseRequestError {
+  return (
+    error instanceof FuseRequestError &&
+    error.status === 401 &&
+    error.reason === "login_required"
   );
 }
 
@@ -356,7 +364,7 @@ export function RecipeWorkspaceScreen({
   const redirectToHomeCreditGate = useCallback(
     (
       input: FuseRequest,
-      reason?: "insufficient_credits_402",
+      reason?: "insufficient_credits_402" | "login_required",
     ) => {
       navigation.navigate("CreateFusion", {
         creditGateInput: input,
@@ -506,6 +514,14 @@ export function RecipeWorkspaceScreen({
 
     async function generateFromHome() {
       try {
+        const isAuthenticated = await isMobileAuthenticated();
+        if (!isAuthenticated) {
+          if (!cancelled) {
+            redirectToHomeCreditGate(pendingRequestPayload.input, "login_required");
+          }
+          return;
+        }
+
         const allowedBySnapshot = await hasCreditsOrFreeAction("fuse");
         if (!allowedBySnapshot) {
           if (!cancelled) {
@@ -538,6 +554,11 @@ export function RecipeWorkspaceScreen({
               "insufficient_credits_402",
             );
           }
+          return;
+        }
+
+        if (isLoginRequiredFuseError(error)) {
+          redirectToHomeCreditGate(pendingRequestPayload.input, "login_required");
           return;
         }
 
@@ -769,6 +790,12 @@ export function RecipeWorkspaceScreen({
 
     setIsLoadingLiveRecipe(true);
     try {
+      const isAuthenticated = await isMobileAuthenticated();
+      if (!isAuthenticated) {
+        redirectToHomeCreditGate(activeRecord.sourceInput, "login_required");
+        return;
+      }
+
       const allowedBySnapshot = await hasCreditsOrFreeAction("reroll");
       if (!allowedBySnapshot) {
         const purchasedCredits = await handleCreditRecoveryPurchase();
@@ -804,9 +831,15 @@ export function RecipeWorkspaceScreen({
       }
 
       const message =
-        error instanceof Error && error.message.trim().length > 0
-          ? error.message
-          : "Could not load a live recipe right now.";
+        isLoginRequiredFuseError(error)
+          ? "Sign in to create or reroll recipes."
+          : error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "Could not load a live recipe right now.";
+      if (isLoginRequiredFuseError(error)) {
+        redirectToHomeCreditGate(activeRecord.sourceInput, "login_required");
+        return;
+      }
       setLiveRecipeRecord(null);
       Alert.alert("Live recipe unavailable", message);
     } finally {
