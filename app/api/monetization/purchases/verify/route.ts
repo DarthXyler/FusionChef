@@ -175,6 +175,7 @@ export async function POST(request: NextRequest) {
             purchaseToken: body.googlePurchaseToken!,
             expectedProductId: body.productId,
             packageName: body.packageName,
+            requestId,
           });
 
     // The app store confirms the purchase; our own catalog decides how many

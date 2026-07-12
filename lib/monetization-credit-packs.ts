@@ -7,8 +7,16 @@ export type PurchaseProvider = "apple_app_store" | "google_play";
 type CreditPackCatalog = Record<PurchaseProvider, Record<string, number>>;
 
 const DEFAULT_CATALOG: CreditPackCatalog = {
-  apple_app_store: {},
-  google_play: {},
+  apple_app_store: {
+    "com.flavorfusion.credits.20": 20,
+    "com.flavorfusion.credits.50": 50,
+    "com.flavorfusion.credits.120": 120,
+  },
+  google_play: {
+    credits_20_android: 20,
+    credits_50_android: 50,
+    credits_120_android: 120,
+  },
 };
 
 let catalogCache: CreditPackCatalog | null = null;

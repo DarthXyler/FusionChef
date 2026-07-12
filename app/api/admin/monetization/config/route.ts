@@ -27,6 +27,7 @@ import {
 
 const MAX_CONFIG_BODY_BYTES = 20_000;
 const PACKAGE_KEYS = ["pack_1", "pack_2", "pack_3"] as const;
+const DELETED_GOOGLE_PRODUCT_IDS = new Set(["credits_20", "credits_50", "credits_120"]);
 
 class RequestValidationError extends Error {}
 
@@ -66,6 +67,12 @@ function parsePricingPackages(value: unknown) {
     if (typeof entry.googleProductId !== "string") {
       throw new RequestValidationError("pricing package googleProductId must be a string.");
     }
+    const googleProductId = entry.googleProductId.trim();
+    if (DELETED_GOOGLE_PRODUCT_IDS.has(googleProductId)) {
+      throw new RequestValidationError(
+        "Deleted Google Play product ids cannot be used as googleProductId.",
+      );
+    }
     if (typeof entry.active !== "boolean") {
       throw new RequestValidationError("pricing package active must be boolean.");
     }
@@ -75,7 +82,7 @@ function parsePricingPackages(value: unknown) {
       credits: Math.trunc(entry.credits),
       displayPriceUsd: Math.round(entry.displayPriceUsd * 100) / 100,
       appleProductId: entry.appleProductId.trim(),
-      googleProductId: entry.googleProductId.trim(),
+      googleProductId,
       active: entry.active,
     };
   });

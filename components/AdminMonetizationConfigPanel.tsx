@@ -224,7 +224,7 @@ const DEFAULT_PRICING_PACKAGES: PricingPackageConfig[] = [
     credits: 20,
     displayPriceUsd: 3.99,
     appleProductId: "com.flavorfusion.credits.20",
-    googleProductId: "credits_20",
+    googleProductId: "credits_20_android",
     active: true,
   },
   {
@@ -233,7 +233,7 @@ const DEFAULT_PRICING_PACKAGES: PricingPackageConfig[] = [
     credits: 50,
     displayPriceUsd: 8.99,
     appleProductId: "com.flavorfusion.credits.50",
-    googleProductId: "credits_50",
+    googleProductId: "credits_50_android",
     active: true,
   },
   {
@@ -242,7 +242,7 @@ const DEFAULT_PRICING_PACKAGES: PricingPackageConfig[] = [
     credits: 120,
     displayPriceUsd: 17.99,
     appleProductId: "com.flavorfusion.credits.120",
-    googleProductId: "credits_120",
+    googleProductId: "credits_120_android",
     active: true,
   },
 ];

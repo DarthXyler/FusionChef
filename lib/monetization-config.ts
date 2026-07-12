@@ -152,7 +152,7 @@ const DEFAULT_PRICING_PACKAGES: MonetizationPricingPackage[] = [
     credits: 20,
     displayPriceUsd: 3.99,
     appleProductId: "com.flavorfusion.credits.20",
-    googleProductId: "credits_20",
+    googleProductId: "credits_20_android",
     active: true,
   },
   {
@@ -161,7 +161,7 @@ const DEFAULT_PRICING_PACKAGES: MonetizationPricingPackage[] = [
     credits: 50,
     displayPriceUsd: 8.99,
     appleProductId: "com.flavorfusion.credits.50",
-    googleProductId: "credits_50",
+    googleProductId: "credits_50_android",
     active: true,
   },
   {
@@ -170,10 +170,28 @@ const DEFAULT_PRICING_PACKAGES: MonetizationPricingPackage[] = [
     credits: 120,
     displayPriceUsd: 17.99,
     appleProductId: "com.flavorfusion.credits.120",
-    googleProductId: "credits_120",
+    googleProductId: "credits_120_android",
     active: true,
   },
 ];
+
+const DEPRECATED_GOOGLE_PRODUCT_ID_REPLACEMENTS: Record<string, string> = {
+  credits_20: "credits_20_android",
+  credits_50: "credits_50_android",
+  credits_120: "credits_120_android",
+};
+
+function normalizeGoogleProductId(value: unknown, fallback: string) {
+  const productId = normalizeProductId(value) || fallback;
+  return DEPRECATED_GOOGLE_PRODUCT_ID_REPLACEMENTS[productId] ?? productId;
+}
+
+function isDeprecatedGoogleProductId(value: string) {
+  return Object.prototype.hasOwnProperty.call(
+    DEPRECATED_GOOGLE_PRODUCT_ID_REPLACEMENTS,
+    value.trim(),
+  );
+}
 
 function normalizePricingPackages(raw: unknown) {
   // Admins can edit package labels, prices, and product IDs. These guards keep
@@ -202,7 +220,7 @@ function normalizePricingPackages(raw: unknown) {
       credits: toIntegerInRange(entry.credits, fallback.credits, 1, 100_000),
       displayPriceUsd: toNumberInRange(entry.displayPriceUsd, fallback.displayPriceUsd, 0.49, 999.99),
       appleProductId: normalizeProductId(entry.appleProductId) || fallback.appleProductId,
-      googleProductId: normalizeProductId(entry.googleProductId) || fallback.googleProductId,
+      googleProductId: normalizeGoogleProductId(entry.googleProductId, fallback.googleProductId),
       active: entry.active !== false,
     });
   }
@@ -448,6 +466,11 @@ function applyPatch(
     }
     if (!pack.appleProductId.trim()) {
       throw new MonetizationConfigValidationError("Each package needs an Apple product id.");
+    }
+    if (isDeprecatedGoogleProductId(pack.googleProductId)) {
+      throw new MonetizationConfigValidationError(
+        "Deleted Google Play product ids cannot be used as googleProductId.",
+      );
     }
   }
 

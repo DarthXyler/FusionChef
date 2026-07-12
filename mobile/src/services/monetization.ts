@@ -199,7 +199,7 @@ function getDefaultGoogleProductIds(): string[] {
   const configuredRaw = process.env.EXPO_PUBLIC_GOOGLE_PLAY_IAP_PRODUCT_IDS as string | undefined;
   const configured = typeof configuredRaw === "string" ? configuredRaw.trim() : "";
   if (!configured) {
-    return ["credits_20", "credits_50", "credits_120"];
+    return ["credits_20_android", "credits_50_android", "credits_120_android"];
   }
 
   return configured

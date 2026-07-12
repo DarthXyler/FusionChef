@@ -28,6 +28,7 @@ export type GoogleVerificationInput = {
   purchaseToken: string;
   expectedProductId: string;
   packageName?: string | null;
+  requestId?: string | null;
 };
 
 class ProviderVerificationError extends Error {
@@ -86,6 +87,42 @@ function decodeJwtPayload(token: string) {
   } catch {
     return null;
   }
+}
+
+function asObjectRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+function asTrimmedString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function extractGoogleErrorDiagnostics(payload: unknown) {
+  const root = asObjectRecord(payload);
+  const error = asObjectRecord(root?.error) ?? root;
+  const details = Array.isArray(error?.details) ? error.details : [];
+  const firstDetail = details.map(asObjectRecord).find(Boolean) ?? null;
+
+  return {
+    googleErrorCode: typeof error?.code === "number" ? error.code : undefined,
+    googleErrorStatus: asTrimmedString(error?.status) || undefined,
+    googleErrorReason:
+      asTrimmedString(firstDetail?.reason) ||
+      asTrimmedString(error?.reason) ||
+      asTrimmedString(root?.error) ||
+      undefined,
+    googleErrorMessage:
+      asTrimmedString(error?.message) ||
+      asTrimmedString(root?.error_description) ||
+      undefined,
+  };
+}
+
+function logGooglePlayVerificationDiagnostic(event: Record<string, unknown>) {
+  console.info("[google-play-purchase-verification]", JSON.stringify(event));
 }
 
 async function fetchJson(url: string, init: RequestInit) {
@@ -257,7 +294,7 @@ function buildGoogleServiceJwt() {
   return `${signingInput}.${base64UrlEncode(signature)}`;
 }
 
-async function getGoogleAccessToken() {
+async function getGoogleAccessToken(requestId?: string | null) {
   const assertion = buildGoogleServiceJwt();
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -271,6 +308,13 @@ async function getGoogleAccessToken() {
   });
 
   if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as unknown;
+    logGooglePlayVerificationDiagnostic({
+      requestId: requestId || undefined,
+      event: "google_play_oauth_response_failed",
+      httpStatus: response.status,
+      ...extractGoogleErrorDiagnostics(payload),
+    });
     throw new ProviderVerificationError("Google OAuth token request failed.", 502);
   }
 
@@ -299,7 +343,7 @@ export async function verifyGooglePurchase(
     "GOOGLE_PLAY_PACKAGE_NAME",
   );
   const packageName = (input.packageName?.trim() || configuredPackageName).trim();
-  const accessToken = await getGoogleAccessToken();
+  const accessToken = await getGoogleAccessToken(input.requestId);
   const verificationUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(packageName)}/purchases/products/${encodeURIComponent(expectedProductId)}/tokens/${encodeURIComponent(purchaseToken)}`;
 
   const response = await fetch(verificationUrl, {
@@ -311,6 +355,14 @@ export async function verifyGooglePurchase(
   });
   const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
   if (!response.ok || !payload) {
+    logGooglePlayVerificationDiagnostic({
+      requestId: input.requestId || undefined,
+      event: "google_play_verification_response_failed",
+      httpStatus: response.status,
+      packageName,
+      productId: expectedProductId,
+      ...extractGoogleErrorDiagnostics(payload),
+    });
     throw new ProviderVerificationError("Google purchase verification failed.", 502);
   }
 
