@@ -1,6 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, getFocusedRouteNameFromRoute } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { StatusBar } from "expo-status-bar";
@@ -84,9 +84,14 @@ function HomeStackNavigator() {
       <HomeStack.Screen
         name="RecipeWorkspace"
         component={RecipeWorkspaceScreen}
-        options={{
-          headerShown: false,
-          gestureEnabled: false,
+        options={({ route }) => {
+          const canGestureBack =
+            Boolean(route.params?.initialRecord) && !route.params?.pendingRequest;
+          return {
+            headerShown: false,
+            gestureEnabled: canGestureBack,
+            fullScreenGestureEnabled: canGestureBack,
+          };
         }}
       />
     </HomeStack.Navigator>
@@ -159,6 +164,20 @@ export default function App() {
             <RootTab.Screen
               name="Cookbook"
               component={CookbookStackNavigator}
+              listeners={({ navigation, route }) => ({
+                tabPress: (event) => {
+                  const focusedRouteName =
+                    getFocusedRouteNameFromRoute(route) ?? "CookbookList";
+                  if (focusedRouteName === "CookbookList") {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  navigation.navigate("Cookbook", {
+                    screen: "CookbookList",
+                  });
+                },
+              })}
               options={{
                 tabBarLabel: "Cookbook",
                 tabBarIcon: ({ color, size }) => (

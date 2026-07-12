@@ -336,7 +336,12 @@ export function CookbookListScreen({
             <View style={styles.cookbookCard}>
               <View style={styles.cookbookCardRow}>
                 <Pressable
-                  onPress={() => navigation.navigate("CookbookDetail", { recipeId: summary.recipeId })}
+                  onPress={() =>
+                    navigation.navigate("CookbookDetail", {
+                      recipeId: summary.recipeId,
+                      initialSummary: summary,
+                    })
+                  }
                   style={({ pressed }) => [
                     styles.cookbookCardMainPressable,
                     pressed && styles.menuButtonPressed,

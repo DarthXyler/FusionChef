@@ -49,6 +49,7 @@ export function CookbookDetailScreen({
   const loadRecordRef = useRef(loadRecord);
   const refreshRecordRef = useRef(refreshRecord);
   const [captureCardSize, setCaptureCardSize] = useState({ width: 0, height: 0 });
+  const [isCaptureCardMounted, setIsCaptureCardMounted] = useState(false);
   const [isSharingImage, setIsSharingImage] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const [shoppingChecks, setShoppingChecks] = useState<Record<string, boolean>>({});
@@ -63,6 +64,7 @@ export function CookbookDetailScreen({
   const [detailSyncError, setDetailSyncError] = useState("");
 
   const recipe = record?.recipe ?? null;
+  const initialSummary = route.params.initialSummary;
   const shareMessage = useMemo(
     () => (recipe ? formatRecipeShareText(recipe) : ""),
     [recipe],
@@ -152,6 +154,15 @@ export function CookbookDetailScreen({
   }, [recipe?.id]);
 
   useEffect(() => {
+    const unsubscribe = navigation.addListener("blur", () => {
+      setIsImageViewerOpen(false);
+      setIsActionsMenuOpen(false);
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
+  useEffect(() => {
     setIsImageViewerOpen(false);
   }, [recipe?.imageUrl]);
 
@@ -215,8 +226,23 @@ export function CookbookDetailScreen({
     }
   }
 
+  async function waitForCaptureCardMount() {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+  }
+
   async function handleShareRecipeCardImage() {
-    if (!recipe || !recipeCardRef.current || isSharingImage) {
+    if (!recipe || isSharingImage) {
+      return;
+    }
+
+    if (!isCaptureCardMounted) {
+      setIsCaptureCardMounted(true);
+      await waitForCaptureCardMount();
+    }
+
+    if (!recipeCardRef.current) {
       return;
     }
 
@@ -237,6 +263,7 @@ export function CookbookDetailScreen({
       Alert.alert("Share unavailable", "Could not share the recipe card image right now.");
     } finally {
       setIsSharingImage(false);
+      setIsCaptureCardMounted(false);
     }
   }
 
@@ -350,6 +377,83 @@ export function CookbookDetailScreen({
             : "Could not update recipe.";
         Alert.alert("Update failed", message);
       });
+  }
+
+  if ((isLoading || !record || !recipe) && initialSummary) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.screen}>
+          <ScrollView
+            contentContainerStyle={[styles.content, isVeryCompactScreen && styles.contentCompact]}
+          >
+            <AppCreditHeader />
+            <View style={styles.homeHeroCard}>
+              <Text style={styles.kicker}>Cookbook</Text>
+              <Text
+                style={[
+                  styles.title,
+                  isCompactScreen && styles.titleCompact,
+                  isVeryCompactScreen && styles.titleVeryCompact,
+                ]}
+              >
+                {initialSummary.title}
+              </Text>
+              <Text style={styles.meta}>
+                {initialSummary.baseCuisine} + {initialSummary.fusionCuisine}
+              </Text>
+              <Text style={styles.summary}>
+                Saved{" "}
+                {new Date(initialSummary.savedAt).toLocaleDateString("en-US", {
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                })}
+              </Text>
+            </View>
+
+            <Pressable disabled style={styles.heroImageCard}>
+              {initialSummary.imageUrl ? (
+                <Image source={{ uri: initialSummary.imageUrl }} style={styles.heroImage} />
+              ) : (
+                <View style={styles.heroImageState}>
+                  <Text style={styles.heroImageStateText}>Saved image unavailable</Text>
+                </View>
+              )}
+            </Pressable>
+
+            <View style={styles.visibleCard}>
+              <Text style={styles.sectionTitle}>Recipe Details</Text>
+              <Text style={styles.summary}>{loadError || "Loading full recipe details..."}</Text>
+              {loadError ? (
+                <PrimaryButton
+                  label="Try Again"
+                  onPress={() => {
+                    setRecord(null);
+                    setLoadError("");
+                    setIsLoading(true);
+                    void loadRecord(route.params.recipeId)
+                      .then((nextRecord) => {
+                        setRecord(nextRecord);
+                        setLoadError("");
+                      })
+                      .catch((error) => {
+                        const message =
+                          error instanceof Error && error.message.trim().length > 0
+                            ? error.message
+                            : "Could not load recipe.";
+                        setLoadError(message);
+                      })
+                      .finally(() => {
+                        setIsLoading(false);
+                      });
+                  }}
+                />
+              ) : null}
+            </View>
+          </ScrollView>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   if (isLoading || !record || !recipe) {
@@ -687,107 +791,109 @@ export function CookbookDetailScreen({
         </Modal>
       </View>
 
-      <View pointerEvents="none" style={styles.hiddenCaptureHost}>
-        <View
-          collapsable={false}
-          onLayout={handleCaptureCardLayout}
-          ref={recipeCardRef}
-          style={styles.captureCard}
-        >
-          <View style={styles.captureHeader}>
-            <View style={styles.captureBrandRow}>
-              <Text style={styles.captureBrand}>Flavor Fusion Chef</Text>
-              <Text style={styles.captureStamp}>Recipe Card</Text>
+      {isCaptureCardMounted ? (
+        <View pointerEvents="none" style={styles.hiddenCaptureHost}>
+          <View
+            collapsable={false}
+            onLayout={handleCaptureCardLayout}
+            ref={recipeCardRef}
+            style={styles.captureCard}
+          >
+            <View style={styles.captureHeader}>
+              <View style={styles.captureBrandRow}>
+                <Text style={styles.captureBrand}>Flavor Fusion Chef</Text>
+                <Text style={styles.captureStamp}>Recipe Card</Text>
+              </View>
+              <Text style={styles.captureEyebrow}>
+                {recipe.baseCuisine} + {recipe.fusionCuisine}
+              </Text>
+              <Text style={styles.captureTitle}>{recipe.title}</Text>
+              <Text style={styles.captureSubtitle}>
+                A practical fusion recipe with shopping list, swaps, and easy sharing from your
+                phone.
+              </Text>
+              <View style={styles.badgeRow}>
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{recipe.servings} servings</Text>
+                </View>
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{recipe.timeMinutes} min</Text>
+                </View>
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>Spice {recipe.spiceLevel}/5</Text>
+                </View>
+              </View>
             </View>
-            <Text style={styles.captureEyebrow}>
-              {recipe.baseCuisine} + {recipe.fusionCuisine}
-            </Text>
-            <Text style={styles.captureTitle}>{recipe.title}</Text>
-            <Text style={styles.captureSubtitle}>
-              A practical fusion recipe with shopping list, swaps, and easy sharing from your
-              phone.
-            </Text>
-            <View style={styles.badgeRow}>
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{recipe.servings} servings</Text>
-              </View>
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{recipe.timeMinutes} min</Text>
-              </View>
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>Spice {recipe.spiceLevel}/5</Text>
-              </View>
-            </View>
-          </View>
 
-          {recipe.imageUrl ? (
-            <Image source={{ uri: recipe.imageUrl }} style={styles.captureHeroImage} />
-          ) : (
-            <View style={styles.captureHeroImageFallback}>
-              <Text style={styles.captureHeroImageFallbackText}>Recipe image unavailable</Text>
-            </View>
-          )}
+            {recipe.imageUrl ? (
+              <Image source={{ uri: recipe.imageUrl }} style={styles.captureHeroImage} />
+            ) : (
+              <View style={styles.captureHeroImageFallback}>
+                <Text style={styles.captureHeroImageFallbackText}>Recipe image unavailable</Text>
+              </View>
+            )}
 
-          <View style={styles.card}>
-            <View style={styles.capturePanel}>
-              <Text style={styles.capturePanelTitle}>What you&apos;ll need</Text>
-              <View style={styles.captureTagGrid}>
-                {featuredIngredients.map((ingredient, index) => (
+            <View style={styles.card}>
+              <View style={styles.capturePanel}>
+                <Text style={styles.capturePanelTitle}>What you&apos;ll need</Text>
+                <View style={styles.captureTagGrid}>
+                  {featuredIngredients.map((ingredient, index) => (
+                    <View
+                      key={`featured-ingredient-${index}-${ingredient.item}-${ingredient.quantity}`}
+                      style={styles.captureTag}
+                    >
+                      <Text style={styles.captureTagLabel}>
+                        {ingredient.quantity} {toTitleCase(ingredient.item)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.divider} />
+
+              <View style={styles.capturePanel}>
+                <Text style={styles.capturePanelTitle}>Ingredient highlights</Text>
+                {recipe.ingredients.map((ingredient, index) => (
                   <View
-                    key={`featured-ingredient-${index}-${ingredient.item}-${ingredient.quantity}`}
-                    style={styles.captureTag}
+                    key={`capture-ingredient-${index}-${ingredient.item}-${ingredient.quantity}`}
+                    style={styles.listRow}
                   >
-                    <Text style={styles.captureTagLabel}>
+                    <Text style={styles.listPrimary}>
                       {ingredient.quantity} {toTitleCase(ingredient.item)}
                     </Text>
+                    <Text style={styles.listSecondary}>{ingredient.notes}</Text>
                   </View>
                 ))}
               </View>
-            </View>
 
-            <View style={styles.divider} />
+              <View style={styles.divider} />
 
-            <View style={styles.capturePanel}>
-              <Text style={styles.capturePanelTitle}>Ingredient highlights</Text>
-              {recipe.ingredients.map((ingredient, index) => (
-                <View
-                  key={`capture-ingredient-${index}-${ingredient.item}-${ingredient.quantity}`}
-                  style={styles.listRow}
-                >
-                  <Text style={styles.listPrimary}>
-                    {ingredient.quantity} {toTitleCase(ingredient.item)}
-                  </Text>
-                  <Text style={styles.listSecondary}>{ingredient.notes}</Text>
-                </View>
-              ))}
-            </View>
+              <View style={styles.capturePanel}>
+                <Text style={styles.capturePanelTitle}>How it comes together</Text>
+                {featuredSteps.map((step, index) => (
+                  <View key={`${index + 1}-${step}`} style={styles.stepRow}>
+                    <Text style={styles.stepIndex}>{index + 1}</Text>
+                    <Text style={styles.stepText}>{step}</Text>
+                  </View>
+                ))}
+              </View>
 
-            <View style={styles.divider} />
+              <View style={styles.captureNote}>
+                <Text style={styles.captureNoteLabel}>Nutrition note</Text>
+                <Text style={styles.captureNoteText}>{recipe.nutritionNotes}</Text>
+              </View>
 
-            <View style={styles.capturePanel}>
-              <Text style={styles.capturePanelTitle}>How it comes together</Text>
-              {featuredSteps.map((step, index) => (
-                <View key={`${index + 1}-${step}`} style={styles.stepRow}>
-                  <Text style={styles.stepIndex}>{index + 1}</Text>
-                  <Text style={styles.stepText}>{step}</Text>
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.captureNote}>
-              <Text style={styles.captureNoteLabel}>Nutrition note</Text>
-              <Text style={styles.captureNoteText}>{recipe.nutritionNotes}</Text>
-            </View>
-
-            <View style={styles.captureFooter}>
-              <Text style={styles.captureFooterTitle}>Shared from Flavor Fusion Chef</Text>
-              <Text style={styles.captureFooterText}>
-                Discover fusion recipes, shopping lists, and easy rerolls right from your phone.
-              </Text>
+              <View style={styles.captureFooter}>
+                <Text style={styles.captureFooterTitle}>Shared from Flavor Fusion Chef</Text>
+                <Text style={styles.captureFooterText}>
+                  Discover fusion recipes, shopping lists, and easy rerolls right from your phone.
+                </Text>
+              </View>
             </View>
           </View>
         </View>
-      </View>
+      ) : null}
     </SafeAreaView>
   );
 }

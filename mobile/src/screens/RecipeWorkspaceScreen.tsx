@@ -373,6 +373,15 @@ export function RecipeWorkspaceScreen({
   }, [activeRecipe.id]);
 
   useEffect(() => {
+    const unsubscribe = navigation.addListener("blur", () => {
+      setIsImageViewerOpen(false);
+      setIsActionsMenuOpen(false);
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
+  useEffect(() => {
     // Animate loader text while initial fuse request is pending.
     if (!isInitialFusePending) {
       setPendingEllipsisCount(1);
