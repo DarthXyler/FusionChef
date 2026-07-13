@@ -39,7 +39,12 @@ import {
   getCreditProviderForPlatform,
   purchaseCreditsForPlatform,
 } from "../services/monetization";
-import { isMobileAuthenticated, loginWithGoogleForMobile } from "../services/auth";
+import {
+  isMobileAuthenticated,
+  loginWithAppleForMobile,
+  loginWithGoogleForMobile,
+} from "../services/auth";
+import { createAuthenticatedRerollContinuation } from "../services/rerollContinuation";
 import { styles } from "../styles/appStyles";
 import type { FuseRequest, GeneratedRecipeRecord } from "../types/recipe";
 import { buildShoppingItemKey, toTitleCase } from "../utils/recipeUi";
@@ -179,6 +184,51 @@ async function promptLoginForCredits() {
   });
 }
 
+async function promptLoginForReroll() {
+  if (Platform.OS === "ios") {
+    return new Promise<boolean>((resolve, reject) => {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ["Cancel", "Continue with Apple", "Continue with Google"],
+          cancelButtonIndex: 0,
+        },
+        async (buttonIndex) => {
+          if (buttonIndex === 0) {
+            resolve(false);
+            return;
+          }
+
+          try {
+            const loggedIn =
+              buttonIndex === 1
+                ? await loginWithAppleForMobile()
+                : await loginWithGoogleForMobile();
+            resolve(loggedIn);
+          } catch (error) {
+            reject(error);
+          }
+        },
+      );
+    });
+  }
+
+  return new Promise<boolean>((resolve, reject) => {
+    Alert.alert("Login required", "Sign in to reroll this recipe.", [
+      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+      {
+        text: "Continue with Google",
+        onPress: async () => {
+          try {
+            resolve(await loginWithGoogleForMobile());
+          } catch (error) {
+            reject(error);
+          }
+        },
+      },
+    ]);
+  });
+}
+
 function inferCreditsFromProductId(productId: string) {
   const match = productId.match(/(\d+)(?!.*\d)/);
   if (!match) {
@@ -213,6 +263,7 @@ export function RecipeWorkspaceScreen({
   const [isSavingCookbook, setIsSavingCookbook] = useState(false);
   const [isPurchasingCredits, setIsPurchasingCredits] = useState(false);
   const isPurchasingCreditsRef = useRef(false);
+  const rerollContinuation = useRef(createAuthenticatedRerollContinuation()).current;
   const startedPendingRequestIdsRef = useRef<Set<string>>(new Set());
   const loaderSpin = useRef(new Animated.Value(0)).current;
   const loaderPulse = useRef(new Animated.Value(1)).current;
@@ -784,28 +835,42 @@ export function RecipeWorkspaceScreen({
 
   async function handleLoadLiveRecipe() {
     // Reroll path reuses the same source input and replaces active live record.
-    if (isLoadingLiveRecipe || isPurchasingCredits) {
+    if (isLoadingLiveRecipe || isPurchasingCredits || rerollContinuation.isRunning()) {
       return;
     }
 
     setIsLoadingLiveRecipe(true);
     try {
-      const isAuthenticated = await isMobileAuthenticated();
-      if (!isAuthenticated) {
-        redirectToHomeCreditGate(activeRecord.sourceInput, "login_required");
+      const outcome = await rerollContinuation.run({
+        isAuthenticated: isMobileAuthenticated,
+        authenticate: promptLoginForReroll,
+        requestReroll: async (actionKind) => {
+          const allowedBySnapshot = await hasCreditsOrFreeAction(actionKind);
+          if (!allowedBySnapshot) {
+            const purchasedCredits = await handleCreditRecoveryPurchase();
+            if (!purchasedCredits) {
+              Alert.alert("Need credits", "Add credits to continue rerolling recipes.");
+              return null;
+            }
+          }
+
+          return fetchLiveRecipeRecord(activeRecord.sourceInput, actionKind);
+        },
+      });
+
+      if (outcome.status === "authentication_failed") {
+        const message =
+          outcome.error instanceof Error && outcome.error.message.trim().length > 0
+            ? outcome.error.message
+            : "Could not complete sign in right now.";
+        Alert.alert("Sign in failed", message);
+        return;
+      }
+      if (outcome.status !== "completed" || !outcome.value) {
         return;
       }
 
-      const allowedBySnapshot = await hasCreditsOrFreeAction("reroll");
-      if (!allowedBySnapshot) {
-        const purchasedCredits = await handleCreditRecoveryPurchase();
-        if (!purchasedCredits) {
-          Alert.alert("Need credits", "Add credits to continue rerolling recipes.");
-          return;
-        }
-      }
-
-      const nextRecord = await fetchLiveRecipeRecord(activeRecord.sourceInput, "reroll");
+      const nextRecord = outcome.value;
       setLiveRecipeRecord(nextRecord);
       void upsertDashboardFusionHistory(nextRecord);
     } catch (error) {
@@ -837,7 +902,7 @@ export function RecipeWorkspaceScreen({
             ? error.message
             : "Could not load a live recipe right now.";
       if (isLoginRequiredFuseError(error)) {
-        redirectToHomeCreditGate(activeRecord.sourceInput, "login_required");
+        Alert.alert("Login required", message);
         return;
       }
       setLiveRecipeRecord(null);
