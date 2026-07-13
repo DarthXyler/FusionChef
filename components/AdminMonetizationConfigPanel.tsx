@@ -252,7 +252,7 @@ const DEFAULT_FORM: RuntimeConfig = {
   enforcementMode: "enforce",
   freeDailyFuseActions: 1,
   freeDailyRerollActions: 1,
-  fuseCreditCost: 2,
+  fuseCreditCost: 3,
   rerollCreditCost: 1,
   allowCompActions: true,
   pricingPackages: DEFAULT_PRICING_PACKAGES,
@@ -266,7 +266,7 @@ const DEFAULT_OBSERVE_RUNTIME: ObserveRuntime = {
   enforcementMode: "enforce",
   freeDailyFuseActions: 1,
   freeDailyRerollActions: 1,
-  fuseCreditCost: 2,
+  fuseCreditCost: 3,
   rerollCreditCost: 1,
 };
 
@@ -726,7 +726,7 @@ const PRESETS: Preset[] = [
       enforcementMode: "off",
       freeDailyFuseActions: 0,
       freeDailyRerollActions: 0,
-      fuseCreditCost: 2,
+      fuseCreditCost: 3,
       rerollCreditCost: 1,
       allowCompActions: true,
     },
@@ -739,7 +739,7 @@ const PRESETS: Preset[] = [
       enforcementMode: "observe",
       freeDailyFuseActions: 1,
       freeDailyRerollActions: 1,
-      fuseCreditCost: 2,
+      fuseCreditCost: 3,
       rerollCreditCost: 1,
       allowCompActions: true,
     },
@@ -752,7 +752,7 @@ const PRESETS: Preset[] = [
       enforcementMode: "enforce",
       freeDailyFuseActions: 1,
       freeDailyRerollActions: 1,
-      fuseCreditCost: 2,
+      fuseCreditCost: 3,
       rerollCreditCost: 1,
       allowCompActions: true,
     },
@@ -2683,7 +2683,7 @@ export function AdminMonetizationConfigPanel({
               className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-base font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
             />
             <p className="text-xs font-normal text-zinc-600">
-              Credits charged for one new recipe generation after free Fuse actions are used in enforce mode. Current production target: 2 credits.
+              Credits charged for one new recipe generation after free Fuse actions are used in enforce mode. Current production target: 3 credits.
             </p>
           </label>
 

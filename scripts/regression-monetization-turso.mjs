@@ -1,6 +1,8 @@
 import { createClient } from "@libsql/client";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import ts from "typescript";
 
 const runId = `ff_regression_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 const usingRemote = Boolean(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN);
@@ -20,6 +22,161 @@ function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+async function parseTypeScriptSource(relativePath, scriptKind) {
+  const sourceText = await readFile(new URL(`../${relativePath}`, import.meta.url), "utf8");
+  return ts.createSourceFile(relativePath, sourceText, ts.ScriptTarget.Latest, true, scriptKind);
+}
+
+function getNumericLiteralValue(node) {
+  return ts.isNumericLiteral(node) ? Number(node.text) : null;
+}
+
+function collectNumericPropertyValues(sourceFile, propertyName) {
+  const values = [];
+  function visit(node) {
+    if (
+      ts.isPropertyAssignment(node) &&
+      node.name.getText(sourceFile) === propertyName &&
+      ts.isNumericLiteral(node.initializer)
+    ) {
+      values.push(Number(node.initializer.text));
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return values;
+}
+
+function findCalls(sourceFile, functionName) {
+  const calls = [];
+  function visit(node) {
+    if (ts.isCallExpression(node) && node.expression.getText(sourceFile) === functionName) {
+      calls.push(node);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return calls;
+}
+
+function findVariableInitializer(sourceFile, variableName) {
+  let initializer = null;
+  function visit(node) {
+    if (
+      !initializer &&
+      ts.isVariableDeclaration(node) &&
+      node.name.getText(sourceFile) === variableName
+    ) {
+      initializer = node.initializer ?? null;
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return initializer;
+}
+
+function findFunctionReturnObject(sourceFile, functionName) {
+  let returnObject = null;
+  function visit(node) {
+    if (
+      !returnObject &&
+      ts.isFunctionDeclaration(node) &&
+      node.name?.text === functionName &&
+      node.body
+    ) {
+      const returnStatement = node.body.statements.find(ts.isReturnStatement);
+      if (returnStatement?.expression && ts.isObjectLiteralExpression(returnStatement.expression)) {
+        returnObject = returnStatement.expression;
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return returnObject;
+}
+
+function findNestedObjectProperty(sourceFile, objectLiteral, propertyPath) {
+  let current = objectLiteral;
+  for (const [index, propertyName] of propertyPath.entries()) {
+    if (!current || !ts.isObjectLiteralExpression(current)) {
+      return null;
+    }
+    const property = current.properties.find(
+      (entry) =>
+        ts.isPropertyAssignment(entry) && entry.name.getText(sourceFile) === propertyName,
+    );
+    if (!property || !ts.isPropertyAssignment(property)) {
+      return null;
+    }
+    if (index === propertyPath.length - 1) {
+      return property.initializer;
+    }
+    current = property.initializer;
+  }
+  return null;
+}
+
+async function assertFuseCostFallbacks() {
+  const [backend, admin, mobile, profile] = await Promise.all([
+    parseTypeScriptSource("lib/monetization-config.ts", ts.ScriptKind.TS),
+    parseTypeScriptSource("components/AdminMonetizationConfigPanel.tsx", ts.ScriptKind.TSX),
+    parseTypeScriptSource("mobile/src/services/monetization.ts", ts.ScriptKind.TS),
+    parseTypeScriptSource("mobile/src/screens/ProfileScreen.tsx", ts.ScriptKind.TSX),
+  ]);
+
+  const backendLiteralFallbacks = collectNumericPropertyValues(backend, "fuseCreditCost");
+  assert(
+    backendLiteralFallbacks.length === 1 && backendLiteralFallbacks[0] === 3,
+    "backend default fuse cost must be 3",
+  );
+  const backendNormalizationCall = findCalls(backend, "toIntegerInRange").find(
+    (call) => call.arguments[0]?.getText(backend) === "raw.fuseCreditCost",
+  );
+  assert(
+    backendNormalizationCall && getNumericLiteralValue(backendNormalizationCall.arguments[1]) === 3,
+    "backend normalization fallback fuse cost must be 3",
+  );
+
+  const adminFuseCosts = collectNumericPropertyValues(admin, "fuseCreditCost");
+  assert(
+    adminFuseCosts.length === 5 && adminFuseCosts.every((value) => value === 3),
+    "every admin default and preset fuse cost must be 3",
+  );
+
+  const signedOutSnapshot = findFunctionReturnObject(mobile, "buildSignedOutAccountSnapshot");
+  const mobileSignedOutFuseCost = findNestedObjectProperty(
+    mobile,
+    signedOutSnapshot,
+    ["actionCosts", "fuse"],
+  );
+  assert(
+    mobileSignedOutFuseCost && getNumericLiteralValue(mobileSignedOutFuseCost) === 3,
+    "mobile signed-out fallback fuse cost must be 3",
+  );
+  const mobileParsingCall = findCalls(mobile, "asInteger").find((call) =>
+    call.arguments[0]?.getText(mobile).includes("payload.actionCosts.fuse"),
+  );
+  const mobileConditionalFallback =
+    mobileParsingCall && ts.isConditionalExpression(mobileParsingCall.arguments[0])
+      ? getNumericLiteralValue(mobileParsingCall.arguments[0].whenFalse)
+      : null;
+  assert(
+    mobileParsingCall &&
+      mobileConditionalFallback === 3 &&
+      getNumericLiteralValue(mobileParsingCall.arguments[1]) === 3,
+    "mobile account parser fallback fuse cost must be 3",
+  );
+
+  const profileFallback = findVariableInitializer(profile, "fuseCreditCost");
+  assert(
+    profileFallback &&
+      ts.isBinaryExpression(profileFallback) &&
+      profileFallback.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken &&
+      getNumericLiteralValue(profileFallback.right) === 3,
+    "Profile fuse cost display fallback must be 3",
+  );
 }
 
 async function execute(sql, args = []) {
@@ -216,6 +373,7 @@ async function getBalance() {
 }
 
 try {
+  await assertFuseCostFallbacks();
   await ensureSchema();
   await ensureBalanceRow();
 
@@ -254,6 +412,7 @@ try {
         anonUserId,
         checks: [
           "schema",
+          "fuse_cost_fallbacks_3",
           "purchase_grant_20",
           "duplicate_purchase_replay",
           "purchase_grant_50",

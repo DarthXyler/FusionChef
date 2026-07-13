@@ -203,7 +203,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   const availableCredits = accountSnapshot?.balance.availableCredits ?? 0;
   const freeFuseRemaining = accountSnapshot?.freeRemaining.fuse ?? 0;
   const freeRerollRemaining = accountSnapshot?.freeRemaining.reroll ?? 0;
-  const fuseCreditCost = accountSnapshot?.actionCosts.fuse ?? 2;
+  const fuseCreditCost = accountSnapshot?.actionCosts.fuse ?? 3;
   const rerollCreditCost = accountSnapshot?.actionCosts.reroll ?? 1;
   const fuseCreditCostLabel = formatCreditCount(fuseCreditCost);
   const rerollCreditCostLabel = formatCreditCount(rerollCreditCost);

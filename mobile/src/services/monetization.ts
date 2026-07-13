@@ -131,7 +131,7 @@ function buildSignedOutAccountSnapshot(): MonetizationAccountSnapshot {
     enabled: false,
     enforcementMode: "off",
     actionCosts: {
-      fuse: 2,
+      fuse: 3,
       reroll: 1,
     },
     balance: {
@@ -413,7 +413,7 @@ export async function fetchMonetizationAccountSnapshot(options?: {
     enabled: payload.enabled === true,
     enforcementMode,
     actionCosts: {
-      fuse: asInteger(isObjectRecord(payload.actionCosts) ? payload.actionCosts.fuse : 2, 2),
+      fuse: asInteger(isObjectRecord(payload.actionCosts) ? payload.actionCosts.fuse : 3, 3),
       reroll: asInteger(isObjectRecord(payload.actionCosts) ? payload.actionCosts.reroll : 1, 1),
     },
     balance: parseBalance(payload.balance) ?? {
