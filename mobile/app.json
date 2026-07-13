@@ -17,7 +17,8 @@
         "expo-image-picker",
         {
           "cameraPermission": "Allow Flavor Fusion Chef to use your camera so you can photograph recipes.",
-          "photosPermission": "Allow Flavor Fusion Chef to access your photo library so you can import recipe images."
+          "photosPermission": "Allow Flavor Fusion Chef to access your photo library so you can import recipe images.",
+          "microphonePermission": false
         }
       ],
       "expo-font",
