@@ -36,7 +36,8 @@ const structuredData = {
     {
       "@type": "MobileApplication",
       name: "Flavor Fusion Chef",
-      operatingSystem: "iOS, Android",
+      // Add Android when the public Google Play listing and install URL are available.
+      operatingSystem: "iOS",
       applicationCategory: "FoodApplication",
       description:
         "AI-powered cooking app that turns any recipe into a practical fusion recipe with cuisine, spice, and dietary preferences.",
