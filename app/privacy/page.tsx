@@ -18,6 +18,8 @@ const policySections = [
       "Recipe photos or imported images you choose to use with app features.",
       "Saved cookbook records, generated recipe details, and related images you choose to keep.",
       "Device, anonymous identity, and session identifiers used to connect app activity, saved recipes, credits, authentication sessions, and support diagnostics.",
+      "IP address and request-security information, such as request timing and signals used to detect automated, fraudulent, or abusive traffic.",
+      "An approximate country or region inferred from your IP address. This is regional network inference, not precise GPS location.",
       "For credit purchases, store product identifiers, App Store transaction identifiers, Google Play order identifiers or purchase tokens, and purchase verification status. Flavor Fusion Chef does not receive or store your full payment-card details.",
       "Support messages you send, including your email address and any details or screenshots you include.",
     ],
@@ -29,7 +31,16 @@ const policySections = [
       "To save and retrieve cookbook entries that you choose to keep.",
       "To authenticate your account, synchronize account-owned data, and maintain your signed-in session.",
       "To operate credits, verify App Store and Google Play purchases, prevent duplicate or fraudulent credit grants, and support purchase issues.",
-      "To diagnose errors, prevent abuse, protect service reliability, and improve the app experience.",
+      "To apply rate limits, detect fraud or abuse, protect service security and reliability, and diagnose errors.",
+      "To use an approximate IP-derived country or region, where relevant, to localize recipe or ingredient guidance.",
+    ],
+  },
+  {
+    title: "Network and regional processing",
+    body: [
+      "Internet requests include an IP address and may include request-security information needed to deliver and protect the service. We use this information for rate limiting, fraud prevention, abuse prevention, and service security.",
+      "We may infer an approximate country or region from an IP address to support regional recipe or ingredient guidance. This inference is approximate and is not precise GPS location.",
+      "Flavor Fusion Chef does not claim to collect precise location through this regional processing.",
     ],
   },
   {
