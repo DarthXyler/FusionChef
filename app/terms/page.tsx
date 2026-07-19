@@ -10,6 +10,13 @@ export const metadata: Metadata = {
 
 const termsSections = [
   {
+    title: "Accounts",
+    body: [
+      "Some features require a signed-in account. You are responsible for using an account you are authorized to access and for keeping access to your device and authentication provider secure.",
+      "Account, cookbook, credit, and purchase-verification records may be associated with your authentication provider and device or session identifiers so the service can synchronize data and prevent duplicate credit grants.",
+    ],
+  },
+  {
     title: "Use of the app",
     body: [
       "Flavor Fusion Chef helps create recipe ideas and cooking guidance. You are responsible for reviewing ingredients, allergens, food safety, cooking times, and suitability before preparing or serving any recipe.",
@@ -27,7 +34,9 @@ const termsSections = [
     title: "Credits and purchases",
     body: [
       "Credits are consumable digital items used for recipe generation and rerolls. Credit packs are one-time purchases and are not subscriptions.",
-      "Apple processes iOS purchases. Purchase availability, local pricing, taxes, receipts, and refunds are handled through Apple's systems and policies.",
+      "Purchases are processed through the App Store on iOS and Google Play on Android. Store availability, local pricing, taxes, payment methods, receipts, and refund decisions are governed by the applicable storefront and its policies.",
+      "Flavor Fusion Chef verifies store product and transaction information before granting credits. We do not receive or store full payment-card details.",
+      "A refund is not promised and eligibility is not fixed by Flavor Fusion Chef. Refund requests must be reviewed by Apple or Google under the applicable store policy.",
     ],
   },
   {
@@ -41,6 +50,7 @@ const termsSections = [
     title: "Support and contact",
     body: [
       "If you experience app, purchase, cookbook, or privacy issues, contact support with enough detail to investigate the problem.",
+      "For missing credits, include the platform or store, credit pack, approximate purchase time, and relevant receipt, transaction, or order information. Do not send full payment-card details or authentication secrets.",
     ],
   },
 ] as const;

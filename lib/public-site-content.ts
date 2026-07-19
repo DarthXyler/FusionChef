@@ -126,4 +126,4 @@ export const featureCards = [
   },
 ] as const;
 
-export const legalLastUpdated = "May 2, 2026";
+export const legalLastUpdated = "July 19, 2026";

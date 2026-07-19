@@ -6,17 +6,19 @@ import { legalLastUpdated, SUPPORT_EMAIL } from "@/lib/public-site-content";
 export const metadata: Metadata = {
   title: "Privacy Policy",
   description:
-    "Read how Flavor Fusion Chef handles recipe inputs, mobile cookbook data, imported images, credits, and support requests.",
+    "Read how Flavor Fusion Chef handles account details, recipe and cookbook data, purchases, imported images, credits, and support requests.",
 };
 
 const policySections = [
   {
     title: "Information we collect",
     body: [
+      "When you sign in, we may collect your account name, email address, profile image, authentication provider, and the provider-specific account identifier needed to connect your sign-in.",
       "Recipe text, cuisine preferences, meal type, spice level, and dietary preferences you choose to submit.",
       "Recipe photos or imported images you choose to use with app features.",
       "Saved cookbook records, generated recipe details, and related images you choose to keep.",
-      "Anonymous device or session identifiers used to connect app activity, saved recipes, credits, and support diagnostics.",
+      "Device, anonymous identity, and session identifiers used to connect app activity, saved recipes, credits, authentication sessions, and support diagnostics.",
+      "For credit purchases, store product identifiers, App Store transaction identifiers, Google Play order identifiers or purchase tokens, and purchase verification status. Flavor Fusion Chef does not receive or store your full payment-card details.",
       "Support messages you send, including your email address and any details or screenshots you include.",
     ],
   },
@@ -25,7 +27,8 @@ const policySections = [
     body: [
       "To generate fusion recipes, rerolls, shopping lists, substitutions, and related recipe images.",
       "To save and retrieve cookbook entries that you choose to keep.",
-      "To operate credits, purchase verification, fraud prevention, and support workflows.",
+      "To authenticate your account, synchronize account-owned data, and maintain your signed-in session.",
+      "To operate credits, verify App Store and Google Play purchases, prevent duplicate or fraudulent credit grants, and support purchase issues.",
       "To diagnose errors, prevent abuse, protect service reliability, and improve the app experience.",
     ],
   },
@@ -34,14 +37,16 @@ const policySections = [
     body: [
       "Flavor Fusion Chef uses hosted services for app hosting, database storage, file storage, AI generation, authentication, purchase verification, and email-based support.",
       "Those providers process only the data needed to provide the feature you requested or to keep the service operating securely.",
+      "Credit purchases are processed by Apple through the App Store on iOS and by Google through Google Play on Android. Their privacy terms also apply to information they process as the payment and storefront providers.",
     ],
   },
   {
-    title: "Your choices",
+    title: "Your choices and data rights",
     body: [
       "You can choose not to submit a recipe, not to import photos, and not to save generated recipes.",
-      "You can delete saved recipes in the app where deletion is available, or contact support for help with data-related requests.",
-      "You can contact support if credits or purchase-related state appears incorrect after a completed Apple purchase.",
+      "You can delete saved recipes in the app where deletion is available. You may contact support to request help accessing, correcting, or deleting account-related data, subject to records we must retain for security, fraud prevention, legal, or transaction-integrity purposes.",
+      "For account deletion help, visit the Support page using the delete-account topic. We may need to verify that the request comes from the account holder before acting on it.",
+      "If credits are missing after a completed purchase, tell support the platform or store, credit pack, approximate purchase time, and the relevant receipt, transaction, or order information. Do not send full payment-card details.",
     ],
   },
   {
@@ -67,8 +72,8 @@ export default function PrivacyPage() {
         meta={`Last updated: ${legalLastUpdated}`}
       >
         <p>
-          This policy explains what the app may process when you generate recipes, import recipe
-          photos, save cookbook entries, use credits, or contact support.
+          This policy explains what the app may process when you sign in, generate recipes, import
+          recipe photos, save cookbook entries, purchase or use credits, or contact support.
         </p>
       </PageHeader>
 

@@ -6,7 +6,7 @@ import { legalLastUpdated, SUPPORT_EMAIL } from "@/lib/public-site-content";
 export const metadata: Metadata = {
   title: "Purchases and Refunds",
   description:
-    "How Flavor Fusion Chef handles credit purchases, Apple purchase processing, and support for purchase issues.",
+    "How Flavor Fusion Chef handles credit purchases, App Store and Google Play refund requests, and support for missing credits.",
 };
 
 const purchaseSections = [
@@ -17,15 +17,31 @@ const purchaseSections = [
     ],
   },
   {
-    title: "Apple purchases",
+    title: "How purchases are processed",
     body: [
-      "On iOS, purchases are processed by Apple. Apple controls the purchase sheet, receipts, local pricing, taxes, payment methods, and refund review process.",
+      "Purchases are processed through the App Store on iOS and Google Play on Android. The applicable store controls the purchase flow, local pricing, taxes, payment methods, receipts, and refund review.",
+      "Flavor Fusion Chef receives the store product identifier and transaction, order, or purchase-token information needed to verify a purchase and record its verification status. We do not receive or store full payment-card details.",
+    ],
+  },
+  {
+    title: "App Store refund guidance",
+    body: [
+      "For an iOS purchase, review the transaction in your Apple purchase history and use Apple's Report a Problem or refund-request flow. Apple decides whether a purchase is eligible under its current policies.",
+      "Flavor Fusion Chef cannot approve an App Store refund or promise that Apple will grant one.",
+    ],
+  },
+  {
+    title: "Google Play refund guidance",
+    body: [
+      "For an Android purchase, review the order in Google Play purchase history and use Google Play's refund or support flow. Google decides whether a purchase is eligible under its current policies.",
+      "Flavor Fusion Chef cannot approve a Google Play refund or promise that Google will grant one.",
     ],
   },
   {
     title: "When to contact support",
     body: [
-      "If Apple shows a purchase as completed but credits do not appear in the app, contact Flavor Fusion Chef support. Include the purchase time, credit pack, device model, and a screenshot of the Apple purchase history if available.",
+      "If the App Store or Google Play shows a purchase as completed but credits do not appear, contact Flavor Fusion Chef support so we can investigate verification and credit delivery.",
+      "Include the platform or store, credit pack, approximate purchase time, and relevant receipt, transaction, or order information. A screenshot may help, but do not send full payment-card details, account passwords, or purchase tokens in an unsecured message.",
     ],
   },
 ] as const;
@@ -35,7 +51,7 @@ export default function RefundPolicyPage() {
     <PageShell maxWidth="max-w-4xl">
       <PageHeader
         eyebrow="Purchases and Refunds"
-        title="Credit purchases are handled through Apple on iOS."
+        title="Credit purchases are handled by your mobile app store."
         meta={`Last updated: ${legalLastUpdated}`}
       >
         <p>
@@ -49,10 +65,13 @@ export default function RefundPolicyPage() {
       <LegalCallout title="Need help?">
         <BodyText className="mt-3">
           Email{" "}
-          <a className="font-semibold text-emerald-700 underline underline-offset-4" href={`mailto:${SUPPORT_EMAIL}`}>
+          <a
+            className="font-semibold text-emerald-700 underline underline-offset-4"
+            href={`mailto:${SUPPORT_EMAIL}?subject=Flavor%20Fusion%20Chef%20Purchase%20Support`}
+          >
             {SUPPORT_EMAIL}
           </a>{" "}
-          or visit <TextLink href="/support">Support</TextLink>.
+          or visit <TextLink href="/support?topic=purchase">Purchase support</TextLink>.
         </BodyText>
       </LegalCallout>
     </PageShell>
