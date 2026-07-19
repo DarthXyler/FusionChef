@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     template: "%s | Flavor Fusion Chef",
   },
   description:
-    "The AI-powered iPhone app that smashes any recipe into a new cuisine — Sichuan Bolognese, Ramen Carbonara, Bulgogi Burritos. One-time credits, no subscription.",
+    "The AI-powered mobile app that turns familiar recipes into practical fusion dishes. One-time credits, no subscription.",
   openGraph: {
     type: "website",
     url: siteUrl,

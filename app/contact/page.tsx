@@ -11,7 +11,7 @@ const contactReasons = [
   "Mobile app support",
   "Purchase or credit issue",
   "Privacy or data request",
-  "App Store review or business inquiry",
+  "Store review or business inquiry",
 ] as const;
 
 export default function ContactPage() {

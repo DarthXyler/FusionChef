@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { BodyText, Card, CardTitle, PageHeader, PageShell, TextLink } from "@/components/PublicSite";
 import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
-import { fallbackCreditPacks } from "@/lib/public-site-content";
+import {
+  ENTITLEMENT_SUMMARY,
+  fallbackCreditPacks,
+  STORE_PURCHASE_SUMMARY,
+} from "@/lib/public-site-content";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +16,12 @@ export const metadata: Metadata = {
 };
 
 const usageNotes = [
-  "Credits are one-time consumable digital items.",
-  "Credits can be used for recipe generation and rerolls in the mobile app.",
+  "Signed-in users receive one free fusion each day.",
+  "Signed-in users receive one free reroll each day.",
+  "After the daily free fusion is used, a fusion costs 3 credits.",
+  "After the daily free reroll is used, a reroll costs 1 credit.",
   "Credit packs do not renew automatically and are not subscriptions.",
-  "Final local pricing and taxes are shown by Apple during purchase.",
+  "Final local pricing and taxes are shown by the App Store or Google Play during purchase.",
 ] as const;
 
 const packageDescriptions: Record<string, string> = {
@@ -57,8 +63,8 @@ export default async function PricingPage() {
     <PageShell maxWidth="max-w-5xl">
       <PageHeader eyebrow="Pricing" title="Simple one-time credit packs.">
         <p>
-          Flavor Fusion Chef is planned around flexible credits, not a subscription. Buy a pack
-          when you want more recipe generations or rerolls.
+          Flavor Fusion Chef uses flexible credits, not a subscription. Buy a pack when you want
+          more recipe generations or rerolls after your daily free actions.
         </p>
       </PageHeader>
 
@@ -118,8 +124,8 @@ export default async function PricingPage() {
           <div className="space-y-3 md:pr-3">
             <h2 className="text-3xl font-extrabold leading-tight text-zinc-950">How credits work</h2>
             <BodyText className="max-w-md">
-              Credits keep the app flexible: use them when you want new generations or another recipe
-              variation, then keep your favorite results in the cookbook.
+              {ENTITLEMENT_SUMMARY} Credit balances let you continue when you want more, while your
+              favorite results stay available in the cookbook.
             </BodyText>
           </div>
           <ul className="grid gap-3">
@@ -135,9 +141,9 @@ export default async function PricingPage() {
       <Card>
         <h2 className="text-3xl font-extrabold leading-tight text-zinc-950">Purchase and refund note</h2>
         <BodyText className="mt-3">
-          iOS purchases are processed by Apple. If you need help with a completed Apple purchase,
-          start with Apple&apos;s purchase history and refund flow, then contact Flavor Fusion Chef
-          support if the app did not reflect a completed purchase correctly.
+          {STORE_PURCHASE_SUMMARY} Refund requests are handled by the store where the purchase was
+          made under that store&apos;s policies. Contact Flavor Fusion Chef support if a completed
+          purchase is not reflected in your credit balance.
         </BodyText>
         <div className="mt-5">
           <TextLink href="/refund-policy">Read the purchases and refunds page</TextLink>

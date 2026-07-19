@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 const supportTopics = [
   {
     title: "Credits and purchases",
-    body: "Include the credit pack, purchase time, and whether Apple showed the purchase as complete.",
+    body: "Include your platform or store, credit pack, approximate purchase time, and whether the store showed the purchase as complete.",
     href: "/refund-policy",
   },
   {

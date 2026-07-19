@@ -1,5 +1,11 @@
 export const SUPPORT_EMAIL = "admin@flavorfusionchef.com";
 
+export const ENTITLEMENT_SUMMARY =
+  "Signed-in users receive one free fusion and one free reroll each day. After those daily actions are used, a fusion costs 3 credits and a reroll costs 1 credit.";
+
+export const STORE_PURCHASE_SUMMARY =
+  "Credit packs are one-time purchases, not subscriptions. Purchases are processed by the App Store on iOS or Google Play on Android.";
+
 export const fallbackCreditPacks = [
   {
     name: "Starter Pack",
@@ -37,8 +43,7 @@ export const faqItems = [
   {
     id: "credits-work",
     question: "How do credits work?",
-    answer:
-      "Credits are one-time consumable items used for recipe generation and rerolls. They are not a subscription, and they do not renew automatically.",
+    answer: `${ENTITLEMENT_SUMMARY} ${STORE_PURCHASE_SUMMARY}`,
   },
   {
     id: "cookbook-saves",
@@ -62,7 +67,7 @@ export const faqItems = [
     id: "purchases-handled",
     question: "Where are purchases handled?",
     answer:
-      "iOS purchases are handled by Apple through the App Store purchase flow. Refund requests for Apple purchases are handled under Apple's policies.",
+      "Purchases are processed by the App Store on iOS or Google Play on Android. Refund requests are handled by the store where the purchase was made under that store's policies.",
   },
 ] as const;
 
@@ -122,7 +127,7 @@ export const featureCards = [
   },
   {
     title: "Rerolls with credits",
-    body: "Try another version when you want a different twist, ingredient swap, or flavor balance.",
+    body: "Signed-in users get one free reroll each day. After that, rerolls cost 1 credit when you want another twist, swap, or flavor balance.",
   },
 ] as const;
 

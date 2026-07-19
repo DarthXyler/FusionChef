@@ -4,6 +4,8 @@
  * see FUSION-IMAGE-PROMPTS.md for the exact AI prompts and sizes.
  */
 
+import { ENTITLEMENT_SUMMARY, STORE_PURCHASE_SUMMARY } from "@/lib/public-site-content";
+
 export const howItWorksSteps = [
   {
     title: "Add a recipe",
@@ -55,7 +57,7 @@ export const fusionFeatures = [
   },
   {
     title: "Rerolls with credits",
-    body: "Not quite right? Reroll for a spicier, simpler, or stranger version. Each fusion or reroll uses credits. Pay as you go, no subscription.",
+    body: "Not quite right? Reroll for another version. Signed-in users get one free fusion and one free reroll daily; after that, fusion costs 3 credits and reroll costs 1.",
     image: "/landing/fusion/feature-credits.jpg",
     imageAlt: "Tacos al pastor fused with Indian butter chicken on naan crisps",
     dish: "Butter Chicken Tacos al Pastor",
@@ -78,8 +80,7 @@ export const homeFaqItems = [
   {
     id: "home-credits",
     question: "How do credits work?",
-    answer:
-      "Credits are one-time consumable items used for recipe generation and rerolls. They are not a subscription, and they do not renew automatically.",
+    answer: `${ENTITLEMENT_SUMMARY} ${STORE_PURCHASE_SUMMARY}`,
   },
   {
     id: "home-photo-import",
@@ -97,7 +98,7 @@ export const homeFaqItems = [
     id: "home-purchases",
     question: "Where are purchases handled?",
     answer:
-      "iOS purchases are handled by Apple through the App Store purchase flow. Refund requests for Apple purchases are handled under Apple's policies.",
+      "Purchases are processed by the App Store on iOS or Google Play on Android. Refund requests are handled by the store where the purchase was made under that store's policies.",
   },
 ] as const;
 

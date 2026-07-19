@@ -5,13 +5,17 @@ import { BodyText, TextLink } from "@/components/PublicSite";
 import { FusionDemo } from "@/components/FusionDemo";
 import { PhoneScreenCarousel } from "@/components/PhoneScreenCarousel";
 import { Reveal } from "@/components/Reveal";
-import { fallbackCreditPacks } from "@/lib/public-site-content";
+import {
+  ENTITLEMENT_SUMMARY,
+  fallbackCreditPacks,
+  STORE_PURCHASE_SUMMARY,
+} from "@/lib/public-site-content";
 import { fusionFeatures, homeFaqItems, howItWorksSteps } from "@/lib/landing-content";
 
 export const metadata: Metadata = {
   title: "Turn Any Recipe Into Wild Fusion Cuisine",
   description:
-    "Flavor Fusion Chef is the AI-powered iPhone app that smashes any recipe into a new cuisine — Sichuan Bolognese, Ramen Carbonara, Bulgogi Burritos. One-time credits, no subscription.",
+    "Flavor Fusion Chef is the AI-powered mobile app that turns any recipe into a new cuisine. Create practical mashups, save favorites, and buy credits only when needed.",
   alternates: {
     canonical: "/",
   },
@@ -32,7 +36,7 @@ const structuredData = {
     {
       "@type": "MobileApplication",
       name: "Flavor Fusion Chef",
-      operatingSystem: "iOS",
+      operatingSystem: "iOS, Android",
       applicationCategory: "FoodApplication",
       description:
         "AI-powered cooking app that turns any recipe into a practical fusion recipe with cuisine, spice, and dietary preferences.",
@@ -311,8 +315,8 @@ export default function Home() {
             No subscription. Ever.
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-lg leading-8 text-zinc-600">
-            Pay as you go: buy a credit pack, and each fusion or reroll uses credits from
-            your balance. Top up only when you need more — nothing renews automatically.
+            {ENTITLEMENT_SUMMARY} Top up only when you need more; credit packs do not
+            renew automatically.
           </p>
         </Reveal>
         <div className="mt-10 grid gap-6 md:grid-cols-3">
@@ -342,7 +346,7 @@ export default function Home() {
         </div>
         <Reveal className="mt-6 text-center">
           <p className="text-sm leading-7 text-zinc-500">
-            Purchases are handled by Apple in the App Store.{" "}
+            {STORE_PURCHASE_SUMMARY}{" "}
             <TextLink href="/pricing">Full pricing details</TextLink>
           </p>
         </Reveal>
