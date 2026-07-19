@@ -4,7 +4,11 @@
  * see FUSION-IMAGE-PROMPTS.md for the exact AI prompts and sizes.
  */
 
-import { ENTITLEMENT_SUMMARY, STORE_PURCHASE_SUMMARY } from "@/lib/public-site-content";
+import {
+  ENTITLEMENT_SUMMARY,
+  STORE_PURCHASE_SUMMARY,
+  STORE_REFUND_SUMMARY,
+} from "@/lib/public-site-content";
 
 export const howItWorksSteps = [
   {
@@ -97,8 +101,7 @@ export const homeFaqItems = [
   {
     id: "home-purchases",
     question: "Where are purchases handled?",
-    answer:
-      "Purchases are processed by the App Store on iOS or Google Play on Android. Refund requests are handled by the store where the purchase was made under that store's policies.",
+    answer: `${STORE_PURCHASE_SUMMARY} ${STORE_REFUND_SUMMARY}`,
   },
 ] as const;
 

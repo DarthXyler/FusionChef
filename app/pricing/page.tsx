@@ -5,6 +5,7 @@ import {
   ENTITLEMENT_SUMMARY,
   fallbackCreditPacks,
   STORE_PURCHASE_SUMMARY,
+  STORE_REFUND_SUMMARY,
 } from "@/lib/public-site-content";
 
 export const dynamic = "force-dynamic";
@@ -141,9 +142,8 @@ export default async function PricingPage() {
       <Card>
         <h2 className="text-3xl font-extrabold leading-tight text-zinc-950">Purchase and refund note</h2>
         <BodyText className="mt-3">
-          {STORE_PURCHASE_SUMMARY} Refund requests are handled by the store where the purchase was
-          made under that store&apos;s policies. Contact Flavor Fusion Chef support if a completed
-          purchase is not reflected in your credit balance.
+          {STORE_PURCHASE_SUMMARY} {STORE_REFUND_SUMMARY} Contact Flavor Fusion Chef support if a
+          completed purchase is not reflected in your credit balance.
         </BodyText>
         <div className="mt-5">
           <TextLink href="/refund-policy">Read the purchases and refunds page</TextLink>

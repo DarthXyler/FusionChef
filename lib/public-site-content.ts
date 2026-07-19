@@ -6,6 +6,12 @@ export const ENTITLEMENT_SUMMARY =
 export const STORE_PURCHASE_SUMMARY =
   "Credit packs are one-time purchases, not subscriptions. Purchases are processed by the App Store on iOS or Google Play on Android.";
 
+export const GOOGLE_PLAY_REFUND_GUIDANCE =
+  "For a Google Play purchase, you may request a refund through Google Play or contact Flavor Fusion Chef. Eligibility depends on applicable Google Play policies, Flavor Fusion Chef policy, and applicable law. No refund outcome is guaranteed.";
+
+export const STORE_REFUND_SUMMARY =
+  `App Store refund requests follow Apple's refund-request process. ${GOOGLE_PLAY_REFUND_GUIDANCE}`;
+
 export const fallbackCreditPacks = [
   {
     name: "Starter Pack",
@@ -66,8 +72,7 @@ export const faqItems = [
   {
     id: "purchases-handled",
     question: "Where are purchases handled?",
-    answer:
-      "Purchases are processed by the App Store on iOS or Google Play on Android. Refund requests are handled by the store where the purchase was made under that store's policies.",
+    answer: `${STORE_PURCHASE_SUMMARY} ${STORE_REFUND_SUMMARY}`,
   },
 ] as const;
 

@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { LegalCallout, LegalSectionList } from "@/components/LegalSectionList";
 import { BodyText, PageHeader, PageShell, TextLink } from "@/components/PublicSite";
-import { legalLastUpdated, SUPPORT_EMAIL } from "@/lib/public-site-content";
+import {
+  legalLastUpdated,
+  STORE_REFUND_SUMMARY,
+  SUPPORT_EMAIL,
+} from "@/lib/public-site-content";
 
 export const metadata: Metadata = {
   title: "Terms and Conditions",
@@ -34,9 +38,9 @@ const termsSections = [
     title: "Credits and purchases",
     body: [
       "Credits are consumable digital items used for recipe generation and rerolls. Credit packs are one-time purchases and are not subscriptions.",
-      "Purchases are processed through the App Store on iOS and Google Play on Android. Store availability, local pricing, taxes, payment methods, receipts, and refund decisions are governed by the applicable storefront and its policies.",
+      "Purchases are processed through the App Store on iOS and Google Play on Android. Store availability, local pricing, taxes, payment methods, and receipts are governed by the applicable storefront and its policies.",
       "Flavor Fusion Chef verifies store product and transaction information before granting credits. We do not receive or store full payment-card details.",
-      "A refund is not promised and eligibility is not fixed by Flavor Fusion Chef. Refund requests must be reviewed by Apple or Google under the applicable store policy.",
+      STORE_REFUND_SUMMARY,
     ],
   },
   {

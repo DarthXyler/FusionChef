@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { LegalCallout, LegalSectionList } from "@/components/LegalSectionList";
 import { BodyText, PageHeader, PageShell, TextLink } from "@/components/PublicSite";
-import { legalLastUpdated, SUPPORT_EMAIL } from "@/lib/public-site-content";
+import {
+  GOOGLE_PLAY_REFUND_GUIDANCE,
+  legalLastUpdated,
+  SUPPORT_EMAIL,
+} from "@/lib/public-site-content";
 
 export const metadata: Metadata = {
   title: "Purchases and Refunds",
@@ -19,7 +23,7 @@ const purchaseSections = [
   {
     title: "How purchases are processed",
     body: [
-      "Purchases are processed through the App Store on iOS and Google Play on Android. The applicable store controls the purchase flow, local pricing, taxes, payment methods, receipts, and refund review.",
+      "Purchases are processed through the App Store on iOS and Google Play on Android. The applicable store controls the purchase flow, local pricing, taxes, payment methods, and receipts.",
       "Flavor Fusion Chef receives the store product identifier and transaction, order, or purchase-token information needed to verify a purchase and record its verification status. We do not receive or store full payment-card details.",
     ],
   },
@@ -33,8 +37,8 @@ const purchaseSections = [
   {
     title: "Google Play refund guidance",
     body: [
-      "For an Android purchase, review the order in Google Play purchase history and use Google Play's refund or support flow. Google decides whether a purchase is eligible under its current policies.",
-      "Flavor Fusion Chef cannot approve a Google Play refund or promise that Google will grant one.",
+      GOOGLE_PLAY_REFUND_GUIDANCE,
+      "When contacting Flavor Fusion Chef, include the credit pack, approximate purchase time, and relevant Google Play receipt or order information. Do not send a purchase token or full payment-card details.",
     ],
   },
   {
