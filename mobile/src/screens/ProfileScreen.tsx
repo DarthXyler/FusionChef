@@ -587,7 +587,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
 
   const handleRestorePurchases = useCallback(() => {
     Alert.alert(
-      "Restore purchases",
+      "Purchase support",
       "Consumable credit packs are verified when each purchase completes. If a completed purchase did not add credits, contact support and include the purchase time.",
       [
         { text: "Cancel", style: "cancel" },

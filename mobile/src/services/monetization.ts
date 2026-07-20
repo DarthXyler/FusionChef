@@ -655,7 +655,7 @@ async function ensureIapConnected() {
   const iap = await getExpoIapModule();
   if (!iap) {
     throw new Error(
-      "In-app purchases are unavailable in this app build. Install the latest iOS development build.",
+      "In-app purchases are unavailable in this build. Update the app and try again.",
     );
   }
 
@@ -788,7 +788,7 @@ export async function purchaseAppleCredits(
   options?: PurchaseAppleCreditsOptions,
 ) {
   if (Platform.OS !== "ios") {
-    throw new Error("In-app purchases are currently enabled for iOS only.");
+    throw new Error("This purchase method is unavailable on this device.");
   }
 
   const iap = await ensureIapConnected();
