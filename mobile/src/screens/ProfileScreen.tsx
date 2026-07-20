@@ -273,7 +273,13 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     const expectedIdentity = sessionIdentity;
     setIsRefreshingProfile(true);
     try {
-      await Promise.all([loadProfile(), refreshSummaries()]);
+      const [, accountSnapshot] = await Promise.all([
+        Promise.all([loadProfile(), refreshSummaries()]),
+        fetchMonetizationAccountSnapshot({ forceRefresh: true }),
+      ]);
+      if (isMobileSessionIdentityCurrent(expectedIdentity)) {
+        setAccountSnapshot(accountSnapshot);
+      }
     } catch (error) {
       if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
         return;
@@ -516,15 +522,6 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       const purchase = await purchaseCreditsForPlatform(selectedPack.productId, {
         onStatus: setCreditPurchaseMessage,
       });
-      const nextSnapshot = await fetchMonetizationAccountSnapshot({ forceRefresh: true });
-      setAccountSnapshot(
-        purchase.verification.balance
-          ? {
-              ...nextSnapshot,
-              balance: purchase.verification.balance,
-            }
-          : nextSnapshot,
-      );
       setIsCreditSheetOpen(false);
       Alert.alert(
         "Credits added",

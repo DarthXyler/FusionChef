@@ -1,8 +1,14 @@
 import { Platform } from "react-native";
 import { getApiBaseUrl } from "../config/api";
+import {
+  createAccountRefreshRequestCoalescer,
+  createPostMutationAccountRefresh,
+  mergeVerifiedAccountBalance,
+} from "./accountRefresh";
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
 import { getMobileAuthRequestContext, getMobileAuthToken } from "./auth";
 import {
+  captureMobileSessionIdentity,
   getMobileSessionIdentity,
   isMobileSessionIdentityCurrent,
   subscribeToMobileSessionIdentity,
@@ -107,6 +113,9 @@ export type MonetizationPricingPackage = {
 };
 
 const ACCOUNT_SNAPSHOT_CACHE_TTL_MS = 20_000;
+const accountRefreshRequestCoalescer =
+  createAccountRefreshRequestCoalescer<MonetizationAccountSnapshot>();
+let accountRefreshGeneration = 0;
 let cachedAccountSnapshot:
   | {
       value: MonetizationAccountSnapshot;
@@ -371,31 +380,28 @@ function notifyAccountSnapshotListeners(snapshot: MonetizationAccountSnapshot) {
 }
 
 subscribeToMobileSessionIdentity(() => {
+  accountRefreshGeneration += 1;
+  accountRefreshRequestCoalescer.reset();
   setSignedOutAccountSnapshot();
 });
 
-export async function fetchMonetizationAccountSnapshot(options?: {
-  preferCache?: boolean;
-  forceRefresh?: boolean;
-}) {
-  const preferCache = options?.preferCache === true;
-  const forceRefresh = options?.forceRefresh === true;
-  const now = Date.now();
-  const authContext = await getMobileAuthRequestContext();
-  const requestIdentity = authContext.identity;
+function isAccountRefreshCurrent(
+  identity: MobileSessionIdentity,
+  refreshGeneration: number,
+) {
+  return (
+    refreshGeneration === accountRefreshGeneration &&
+    isMobileSessionIdentityCurrent(identity)
+  );
+}
 
-  if (
-    !forceRefresh &&
-    preferCache &&
-    cachedAccountSnapshot &&
-    cachedAccountSnapshot.sessionRevision === requestIdentity.revision &&
-    now - cachedAccountSnapshot.fetchedAtMs <= ACCOUNT_SNAPSHOT_CACHE_TTL_MS
-  ) {
-    return cachedAccountSnapshot.value;
-  }
-
+async function fetchFreshMonetizationAccountSnapshot(
+  authContext: Awaited<ReturnType<typeof getMobileAuthRequestContext>>,
+  requestIdentity: MobileSessionIdentity,
+  refreshGeneration: number,
+) {
   const identityHeaders = await withIdentityHeaders(authContext.token);
-  if (!isMobileSessionIdentityCurrent(requestIdentity)) {
+  if (!isAccountRefreshCurrent(requestIdentity, refreshGeneration)) {
     return cachedAccountSnapshot?.sessionRevision === getMobileSessionIdentity().revision
       ? cachedAccountSnapshot.value
       : buildSignedOutAccountSnapshot();
@@ -407,7 +413,7 @@ export async function fetchMonetizationAccountSnapshot(options?: {
       "Content-Type": "application/json",
     },
   });
-  if (!isMobileSessionIdentityCurrent(requestIdentity)) {
+  if (!isAccountRefreshCurrent(requestIdentity, refreshGeneration)) {
     return cachedAccountSnapshot?.sessionRevision === getMobileSessionIdentity().revision
       ? cachedAccountSnapshot.value
       : buildSignedOutAccountSnapshot();
@@ -417,7 +423,7 @@ export async function fetchMonetizationAccountSnapshot(options?: {
     await setMobileAnonymousId(canonicalAnonId);
   }
   const payload = (await response.json()) as MonetizationAccountPayload;
-  if (!isMobileSessionIdentityCurrent(requestIdentity)) {
+  if (!isAccountRefreshCurrent(requestIdentity, refreshGeneration)) {
     return cachedAccountSnapshot?.sessionRevision === getMobileSessionIdentity().revision
       ? cachedAccountSnapshot.value
       : buildSignedOutAccountSnapshot();
@@ -461,18 +467,110 @@ export async function fetchMonetizationAccountSnapshot(options?: {
     pricingPackages: parsePricingPackages(payload.pricingPackages),
   } satisfies MonetizationAccountSnapshot;
 
-  if (!isMobileSessionIdentityCurrent(requestIdentity)) {
+  if (!isAccountRefreshCurrent(requestIdentity, refreshGeneration)) {
     return cachedAccountSnapshot?.sessionRevision === getMobileSessionIdentity().revision
       ? cachedAccountSnapshot.value
       : buildSignedOutAccountSnapshot();
   }
   cachedAccountSnapshot = {
     value: snapshot,
-    fetchedAtMs: now,
+    fetchedAtMs: Date.now(),
     sessionRevision: requestIdentity.revision,
   };
   notifyAccountSnapshotListeners(snapshot);
   return snapshot;
+}
+
+export async function fetchMonetizationAccountSnapshot(options?: {
+  preferCache?: boolean;
+  forceRefresh?: boolean;
+}) {
+  const preferCache = options?.preferCache === true;
+  const forceRefresh = options?.forceRefresh === true;
+  const now = Date.now();
+  const authContext = await getMobileAuthRequestContext();
+  const requestIdentity = authContext.identity;
+  const refreshGeneration = accountRefreshGeneration;
+
+  if (
+    !forceRefresh &&
+    preferCache &&
+    cachedAccountSnapshot &&
+    cachedAccountSnapshot.sessionRevision === requestIdentity.revision &&
+    now - cachedAccountSnapshot.fetchedAtMs <= ACCOUNT_SNAPSHOT_CACHE_TTL_MS
+  ) {
+    return cachedAccountSnapshot.value;
+  }
+
+  return accountRefreshRequestCoalescer.run(
+    {
+      ...requestIdentity,
+      refreshGeneration,
+    },
+    () =>
+      fetchFreshMonetizationAccountSnapshot(
+        authContext,
+        requestIdentity,
+        refreshGeneration,
+      ),
+  );
+}
+
+function publishVerifiedPurchaseBalance(
+  balance: CreditBalance,
+  expectedIdentity: MobileSessionIdentity,
+) {
+  if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
+    return false;
+  }
+
+  const baseSnapshot =
+    cachedAccountSnapshot?.sessionRevision === expectedIdentity.revision
+      ? cachedAccountSnapshot.value
+      : {
+          ...buildSignedOutAccountSnapshot(),
+          authenticated: expectedIdentity.userId !== null,
+        };
+  const snapshot = mergeVerifiedAccountBalance(baseSnapshot, balance);
+  cachedAccountSnapshot = {
+    value: snapshot,
+    fetchedAtMs: Date.now(),
+    sessionRevision: expectedIdentity.revision,
+  };
+  notifyAccountSnapshotListeners(snapshot);
+  return true;
+}
+
+const runPostMutationAccountRefresh = createPostMutationAccountRefresh<
+  MonetizationAccountSnapshot,
+  CreditBalance,
+  MobileSessionIdentity
+>({
+  isCurrent: isMobileSessionIdentityCurrent,
+  onMutation: () => {
+    accountRefreshGeneration += 1;
+  },
+  requestFreshSnapshot: () =>
+    fetchMonetizationAccountSnapshot({ forceRefresh: true }),
+  publishVerifiedBalance: (balance, identity) => {
+    publishVerifiedPurchaseBalance(balance, identity);
+  },
+  refreshTimeoutMs: 5_000,
+});
+
+export function refreshMonetizationAccountAfterMutation(options?: {
+  expectedIdentity?: MobileSessionIdentity;
+  verifiedBalance?: CreditBalance | null;
+}) {
+  const expectedIdentity = options?.expectedIdentity ?? captureMobileSessionIdentity();
+  try {
+    return runPostMutationAccountRefresh.schedule({
+      expectedIdentity,
+      verifiedBalance: options?.verifiedBalance,
+    });
+  } catch {
+    return null;
+  }
 }
 
 async function verifyApplePurchase(params: {
@@ -725,6 +823,7 @@ export async function purchaseAppleCredits(
     purchase = recoveredPurchase;
   }
   options?.onStatus?.("Adding credits...");
+  const verificationIdentity = captureMobileSessionIdentity();
   const transactionId = purchase.orderId?.trim();
   if (!transactionId) {
     throw new Error("Purchase completed but no transaction id was returned.");
@@ -734,7 +833,10 @@ export async function purchaseAppleCredits(
     productId,
     appleTransactionId: transactionId,
   });
-  invalidateMonetizationAccountSnapshotCache();
+  refreshMonetizationAccountAfterMutation({
+    expectedIdentity: verificationIdentity,
+    verifiedBalance: verification.balance,
+  });
   await iap.finishTransactionAsync(purchase, true);
 
   return {
@@ -847,15 +949,18 @@ export async function purchaseGoogleCredits(
   }
 
   options?.onStatus?.("Adding credits...");
+  const verificationIdentity = captureMobileSessionIdentity();
   const verification = await verifyGooglePurchase({
     productId,
     googlePurchaseToken,
   });
-  invalidateMonetizationAccountSnapshotCache();
+  refreshMonetizationAccountAfterMutation({
+    expectedIdentity: verificationIdentity,
+    verifiedBalance: verification.balance,
+  });
   try {
     await iap.finishTransaction({ purchase, isConsumable: true });
   } catch {
-    await fetchMonetizationAccountSnapshot({ forceRefresh: true });
     return {
       product: matchedProduct,
       verification,

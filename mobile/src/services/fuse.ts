@@ -13,6 +13,7 @@ import {
   type MobileSessionIdentity,
 } from "./authSession";
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
+import { refreshMonetizationAccountAfterMutation } from "./monetization";
 import { clearInvalidMobileSession, isInvalidAuthPayload } from "./sessionInvalidation";
 
 type FuseActionKind = "fuse" | "reroll";
@@ -165,9 +166,16 @@ export async function fetchLiveRecipeRecord(
     throw new Error("The live recipe response was not in the expected format.");
   }
 
-  return {
+  const record = {
     recipe: payload,
     sourceInput: input,
     createdAt: new Date().toISOString(),
   };
+  refreshMonetizationAccountAfterMutation({
+    expectedIdentity: authContext.identity,
+  });
+  if (!isMobileSessionIdentityCurrent(authContext.identity)) {
+    throw new MobileSessionChangedError();
+  }
+  return record;
 }
