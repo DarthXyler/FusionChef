@@ -7,6 +7,7 @@ import type {
   GeneratedRecipeRecord,
 } from "../types/recipe";
 import type { MobileSessionIdentity } from "../services/authSession";
+import type { CookbookSavedMembershipStatus } from "../services/cookbookSavedMembership";
 
 export type HomeStackParamList = {
   DashboardHome: undefined;
@@ -63,6 +64,8 @@ export type MobileCookbookContextValue = {
   hasMore: boolean;
   isShowingCachedSummaries: boolean;
   summarySyncError: string;
+  getSavedRecipeMembership: (recipeId: string) => CookbookSavedMembershipStatus;
+  ensureSavedRecipeMembership: (recipeId: string) => Promise<boolean>;
   loadSummaries: () => Promise<void>;
   refreshSummaries: () => Promise<void>;
   loadMoreSummaries: () => Promise<void>;

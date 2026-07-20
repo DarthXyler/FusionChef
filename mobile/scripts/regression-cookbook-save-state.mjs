@@ -131,16 +131,20 @@ function verifyRecipeWorkspaceProductionWiring() {
   );
 
   assert.match(
+    workspaceSource,
+    /ensureSavedRecipeMembership,[\s\S]*getSavedRecipeMembership,[\s\S]*saveRecord,[\s\S]*=\s*useMobileCookbook\(\)/,
+  );
+  assert.match(
+    workspaceSource,
+    /const savedMembershipStatus = usingLiveRecipe\s*\?\s*getSavedRecipeMembership\(activeRecipe\.id\)/,
+  );
+  assert.match(
+    workspaceSource,
+    /usingLiveRecipe && savedMembershipStatus === "saved"/,
+  );
+  assert.match(
     cookbookContextSource,
-    /summaries:\s*isStateOwnedByCurrentSession\s*\?\s*cookbookSummaries\s*:\s*\[\]/,
-  );
-  assert.match(
-    workspaceSource,
-    /const\s*\{\s*saveRecord,\s*summaries\s*\}\s*=\s*useMobileCookbook\(\)/,
-  );
-  assert.match(
-    workspaceSource,
-    /usingLiveRecipe\s*&&\s*isRecipeConfirmedSaved\(\s*activeRecipe\.id,\s*summaries\s*\)/,
+    /getSavedRecipeMembership,[\s\S]*ensureSavedRecipeMembership/,
   );
 
   assert.match(
@@ -177,7 +181,7 @@ function verifyRecipeWorkspaceProductionWiring() {
 
   assert.match(
     workspaceSource,
-    /getCookbookSaveButtonState\(\{\s*isSaving:\s*isSavingCookbook,\s*isSaved:\s*isActiveRecipeSaved,\s*isBlocked:\s*isPurchasingCredits/,
+    /getCookbookSaveButtonState\(\{\s*isSaving:\s*isSavingCookbook,\s*isSaved:\s*isActiveRecipeSaved,\s*isBlocked:\s*isPurchasingCredits \|\| isSavedMembershipBlocked/,
   );
   assert.match(saveButtonSource, /disabled=\{saveButtonState\.disabled\}/);
   assert.match(saveButtonSource, /\{saveButtonState\.label\}/);

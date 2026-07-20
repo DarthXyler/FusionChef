@@ -48,8 +48,8 @@ import {
 import {
   createCookbookSaveAttemptController,
   getCookbookSaveButtonState,
-  isRecipeConfirmedSaved,
 } from "../services/cookbookSaveState";
+import { isCookbookSavedMembershipBlocking } from "../services/cookbookSavedMembership";
 import {
   captureMobileSessionIdentity,
   getWorkspaceSessionDisposition,
@@ -255,7 +255,11 @@ export function RecipeWorkspaceScreen({
   route,
 }: NativeStackScreenProps<HomeStackParamList, "RecipeWorkspace">) {
   const { isCompactScreen, isVeryCompactScreen } = useResponsiveFlags();
-  const { saveRecord, summaries } = useMobileCookbook();
+  const {
+    ensureSavedRecipeMembership,
+    getSavedRecipeMembership,
+    saveRecord,
+  } = useMobileCookbook();
   const sessionIdentity = useMobileSessionIdentity();
   const initialRecord = route.params?.initialRecord ?? null;
   const initialRecordOwner = initialRecord
@@ -311,12 +315,21 @@ export function RecipeWorkspaceScreen({
   const activeSourceInput =
     visibleLiveRecipeRecord?.sourceInput ?? visiblePendingSourceInput ?? activeRecord.sourceInput;
   const usingLiveRecipe = visibleLiveRecipeRecord !== null;
+  const savedMembershipStatus = usingLiveRecipe
+    ? getSavedRecipeMembership(activeRecipe.id)
+    : "unknown";
   const isActiveRecipeSaved =
-    usingLiveRecipe && isRecipeConfirmedSaved(activeRecipe.id, summaries);
+    usingLiveRecipe && savedMembershipStatus === "saved";
+  const isSavedMembershipBlocked =
+    usingLiveRecipe &&
+    isCookbookSavedMembershipBlocking(
+      savedMembershipStatus,
+      sessionIdentity.userId !== null,
+    );
   const saveButtonState = getCookbookSaveButtonState({
     isSaving: isSavingCookbook,
     isSaved: isActiveRecipeSaved,
-    isBlocked: isPurchasingCredits,
+    isBlocked: isPurchasingCredits || isSavedMembershipBlocked,
   });
   const shouldShowSpiceLevel =
     activeSourceInput.mealType !== "dessert" && activeSourceInput.mealType !== "beverage";
@@ -536,6 +549,45 @@ export function RecipeWorkspaceScreen({
     saveAttemptController.reset();
     setIsSavingCookbook(false);
   }, [activeRecipe.id, saveAttemptController, sessionIdentity.revision]);
+
+  useEffect(() => {
+    if (
+      !usingLiveRecipe ||
+      !sessionIdentity.userId ||
+      savedMembershipStatus !== "unknown"
+    ) {
+      return;
+    }
+    void ensureSavedRecipeMembership(activeRecipe.id).catch(() => {});
+  }, [
+    activeRecipe.id,
+    ensureSavedRecipeMembership,
+    savedMembershipStatus,
+    sessionIdentity.userId,
+    usingLiveRecipe,
+  ]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("focus", () => {
+      if (
+        !usingLiveRecipe ||
+        !sessionIdentity.userId ||
+        savedMembershipStatus !== "unavailable"
+      ) {
+        return;
+      }
+      void ensureSavedRecipeMembership(activeRecipe.id).catch(() => {});
+    });
+
+    return unsubscribe;
+  }, [
+    activeRecipe.id,
+    ensureSavedRecipeMembership,
+    navigation,
+    savedMembershipStatus,
+    sessionIdentity.userId,
+    usingLiveRecipe,
+  ]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener("blur", () => {
@@ -1059,7 +1111,7 @@ export function RecipeWorkspaceScreen({
 
   async function handleSaveToCookbook() {
     // Ensure current preview image is persisted when user saves from workspace.
-    if (isActiveRecipeSaved) {
+    if (isActiveRecipeSaved || isSavedMembershipBlocked) {
       return;
     }
 

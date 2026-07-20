@@ -635,6 +635,44 @@ export async function fetchCookbookRecipe(recipeId: string): Promise<CookbookRec
   return payload.record;
 }
 
+export async function checkCookbookRecipeSaved(
+  recipeId: string,
+  expectedIdentity: MobileSessionIdentity,
+): Promise<boolean> {
+  const requestContext = await buildCookbookRequestContext(undefined, expectedIdentity);
+  const response = await fetch(`${getApiBaseUrl()}/api/cookbook/${encodeURIComponent(recipeId)}`, {
+    method: "GET",
+    headers: requestContext.headers,
+  });
+
+  if (!isMobileSessionIdentityCurrent(requestContext.identity)) {
+    throw new Error("Mobile account changed while saved recipe membership was loading.");
+  }
+  if (response.status === 404) {
+    await syncAnonymousIdFromResponse(response, requestContext.identity);
+    return false;
+  }
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(
+        response,
+        "Could not confirm whether this recipe is saved.",
+        requestContext.identity,
+      ),
+    );
+  }
+  await syncAnonymousIdFromResponse(response, requestContext.identity);
+
+  const payload = (await response.json()) as { record?: unknown };
+  if (
+    !isCookbookRecipeRecord(payload.record) ||
+    payload.record.recipe.id !== recipeId
+  ) {
+    throw new Error("The saved recipe membership response was not in the expected format.");
+  }
+  return true;
+}
+
 export async function deleteCookbookRecipe(recipeId: string): Promise<void> {
   const requestContext = await buildCookbookRequestContext();
   const response = await fetch(`${getApiBaseUrl()}/api/cookbook/${encodeURIComponent(recipeId)}`, {
