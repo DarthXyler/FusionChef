@@ -46,6 +46,11 @@ import {
   loginWithGoogleForMobile,
 } from "../services/auth";
 import {
+  createCookbookSaveAttemptController,
+  getCookbookSaveButtonState,
+  isRecipeConfirmedSaved,
+} from "../services/cookbookSaveState";
+import {
   captureMobileSessionIdentity,
   getWorkspaceSessionDisposition,
   isMobileSessionChangedError,
@@ -250,7 +255,7 @@ export function RecipeWorkspaceScreen({
   route,
 }: NativeStackScreenProps<HomeStackParamList, "RecipeWorkspace">) {
   const { isCompactScreen, isVeryCompactScreen } = useResponsiveFlags();
-  const { saveRecord } = useMobileCookbook();
+  const { saveRecord, summaries } = useMobileCookbook();
   const sessionIdentity = useMobileSessionIdentity();
   const initialRecord = route.params?.initialRecord ?? null;
   const initialRecordOwner = initialRecord
@@ -279,6 +284,7 @@ export function RecipeWorkspaceScreen({
   const [isSavingCookbook, setIsSavingCookbook] = useState(false);
   const [isPurchasingCredits, setIsPurchasingCredits] = useState(false);
   const isPurchasingCreditsRef = useRef(false);
+  const saveAttemptController = useRef(createCookbookSaveAttemptController()).current;
   const workspaceOwnerIdentityRef = useRef<MobileSessionIdentity | null>(initialRecordOwner);
   const pendingSignedOutContinuationRef = useRef(false);
   const rerollContinuation = useRef(createAuthenticatedRerollContinuation()).current;
@@ -298,9 +304,20 @@ export function RecipeWorkspaceScreen({
   const visiblePendingSourceInput = canRenderWorkspaceContent ? pendingSourceInput : null;
   const activeRecord = visibleLiveRecipeRecord ?? sampleGeneratedRecipeRecord;
   const activeRecipe = activeRecord.recipe;
+  const activeRecipeIdRef = useRef(activeRecipe.id);
+  const sessionRevisionRef = useRef(sessionIdentity.revision);
+  activeRecipeIdRef.current = activeRecipe.id;
+  sessionRevisionRef.current = sessionIdentity.revision;
   const activeSourceInput =
     visibleLiveRecipeRecord?.sourceInput ?? visiblePendingSourceInput ?? activeRecord.sourceInput;
   const usingLiveRecipe = visibleLiveRecipeRecord !== null;
+  const isActiveRecipeSaved =
+    usingLiveRecipe && isRecipeConfirmedSaved(activeRecipe.id, summaries);
+  const saveButtonState = getCookbookSaveButtonState({
+    isSaving: isSavingCookbook,
+    isSaved: isActiveRecipeSaved,
+    isBlocked: isPurchasingCredits,
+  });
   const shouldShowSpiceLevel =
     activeSourceInput.mealType !== "dessert" && activeSourceInput.mealType !== "beverage";
   const shareMessage = useMemo(() => formatRecipeShareText(activeRecipe), [activeRecipe]);
@@ -343,6 +360,7 @@ export function RecipeWorkspaceScreen({
     setIsImageLoading(false);
     setIsInitialFusePending(false);
     setIsLoadingLiveRecipe(false);
+    saveAttemptController.reset();
     setIsSavingCookbook(false);
     setIsPurchasingCredits(false);
     isPurchasingCreditsRef.current = false;
@@ -350,7 +368,7 @@ export function RecipeWorkspaceScreen({
     setIsActionsMenuOpen(false);
     setShoppingChecks({});
     startedPendingRequestIdsRef.current.clear();
-  }, []);
+  }, [saveAttemptController]);
 
   const getCreditPackOptions = useCallback(async () => {
     const configuredFallback = getConfiguredCreditProductIdsForPlatform().map((productId) => ({
@@ -513,6 +531,11 @@ export function RecipeWorkspaceScreen({
     // Reset shopping checklist when recipe changes.
     setShoppingChecks({});
   }, [activeRecipe.id]);
+
+  useEffect(() => {
+    saveAttemptController.reset();
+    setIsSavingCookbook(false);
+  }, [activeRecipe.id, saveAttemptController, sessionIdentity.revision]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener("blur", () => {
@@ -1036,7 +1059,15 @@ export function RecipeWorkspaceScreen({
 
   async function handleSaveToCookbook() {
     // Ensure current preview image is persisted when user saves from workspace.
-    if (isSavingCookbook) {
+    if (isActiveRecipeSaved) {
+      return;
+    }
+
+    const saveAttempt = saveAttemptController.begin(
+      activeRecord.recipe.id,
+      sessionIdentity.revision,
+    );
+    if (!saveAttempt) {
       return;
     }
 
@@ -1053,6 +1084,15 @@ export function RecipeWorkspaceScreen({
             }
           : activeRecord;
       const savedRecord = await saveRecord(recordToSave);
+      if (
+        !saveAttemptController.canConfirm(
+          saveAttempt,
+          activeRecipeIdRef.current,
+          sessionRevisionRef.current,
+        )
+      ) {
+        return;
+      }
       const savedGeneratedRecord = {
         recipe: savedRecord.recipe,
         sourceInput: savedRecord.sourceInput,
@@ -1077,7 +1117,9 @@ export function RecipeWorkspaceScreen({
           : "Could not save recipe right now.";
       Alert.alert("Save failed", message);
     } finally {
-      setIsSavingCookbook(false);
+      if (saveAttemptController.finish(saveAttempt)) {
+        setIsSavingCookbook(false);
+      }
     }
   }
 
@@ -1255,11 +1297,11 @@ export function RecipeWorkspaceScreen({
               >
                 <Pressable
                   onPress={handleSaveToCookbook}
-                  disabled={isSavingCookbook || isPurchasingCredits}
+                  disabled={saveButtonState.disabled}
                   style={({ pressed }) => [
                     styles.resultActionPrimary,
                     isCompactScreen && styles.resultActionCompact,
-                    (pressed || isSavingCookbook || isPurchasingCredits) &&
+                    (pressed || saveButtonState.disabled) &&
                       styles.resultActionPressed,
                   ]}
                 >
@@ -1271,7 +1313,7 @@ export function RecipeWorkspaceScreen({
                         isCompactScreen && styles.resultActionTextCompact,
                       ]}
                     >
-                      {isSavingCookbook ? "Saving..." : "Save"}
+                      {saveButtonState.label}
                     </Text>
                   </View>
                 </Pressable>
