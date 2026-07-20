@@ -36,7 +36,7 @@ import {
   loginWithGoogleForMobile,
 } from "../services/auth";
 import { captureMobileSessionIdentity } from "../services/authSession";
-import { GENERAL_SUPPORT_URL } from "../config/links";
+import { MOBILE_LINKS } from "../config/links";
 import {
   fetchMonetizationAccountSnapshot,
   getAvailableCreditProductIdsForPlatform,
@@ -60,7 +60,6 @@ import googleGLogo from "../../assets/google-g-logo.png";
  * - navigates to RecipeWorkspace with a pending fuse request
  */
 const DEFAULT_MOBILE_FUSION_CUISINE = CUISINE_OPTIONS[0] ?? "Japanese";
-const PRIVACY_POLICY_URL = "https://www.flavorfusionchef.com/privacy";
 const MAX_OCR_IMAGE_DATA_URL_CHARS = 3_700_000;
 const OCR_IMAGE_VARIANTS_BALANCED = [
   { maxDimension: 1600, compress: 0.65 },
@@ -1455,7 +1454,7 @@ export function HomeScreen({
                     >
                       <Pressable
                         accessibilityRole="link"
-                        onPress={() => void openCreditGateLink(PRIVACY_POLICY_URL, "Privacy Policy")}
+                        onPress={() => void openCreditGateLink(MOBILE_LINKS.privacy, "Privacy Policy")}
                       >
                         <Text
                           style={[
@@ -1469,7 +1468,7 @@ export function HomeScreen({
                       <Text style={styles.creditGateLegalDivider}>{"\u2022"}</Text>
                       <Pressable
                         accessibilityRole="link"
-                        onPress={() => void openCreditGateLink(GENERAL_SUPPORT_URL, "Support")}
+                        onPress={() => void openCreditGateLink(MOBILE_LINKS.support, "Support")}
                       >
                         <Text
                           style={[

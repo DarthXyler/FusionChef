@@ -46,12 +46,7 @@ import {
   subscribeToMonetizationAccountSnapshot,
   type MonetizationAccountSnapshot,
 } from "../services/monetization";
-import {
-  DELETE_ACCOUNT_SUPPORT_URL,
-  GENERAL_SUPPORT_URL,
-  PURCHASE_SUPPORT_URL,
-  REFUND_POLICY_URL,
-} from "../config/links";
+import { MOBILE_LINKS } from "../config/links";
 import { uploadProfilePhoto } from "../services/imageUpload";
 import {
   readMobileProfile,
@@ -61,10 +56,6 @@ import {
 import { signOutAndResetMobileSession } from "../services/mobileSession";
 import { styles } from "../styles/appStyles";
 import googleGLogo from "../../assets/google-g-logo.png";
-
-const FAQ_URL = "https://www.flavorfusionchef.com/faq";
-const PRIVACY_POLICY_URL = "https://www.flavorfusionchef.com/privacy";
-const TERMS_URL = "https://www.flavorfusionchef.com/terms";
 
 type ProfileLinkRowProps = {
   icon: keyof typeof MaterialIcons.glyphMap;
@@ -587,7 +578,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
         {
           text: "Contact Support",
           onPress: () => {
-            void openLink(DELETE_ACCOUNT_SUPPORT_URL, "delete account support");
+            void openLink(MOBILE_LINKS.deleteAccountSupport, "delete account support");
           },
         },
       ],
@@ -603,7 +594,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
         {
           text: "Contact Support",
           onPress: () => {
-            void openLink(PURCHASE_SUPPORT_URL, "purchase support");
+            void openLink(MOBILE_LINKS.purchaseSupport, "purchase support");
           },
         },
       ],
@@ -1057,19 +1048,27 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
             <ProfileLinkRow
               icon="support-agent"
               label="Support"
-              onPress={() => openLink(GENERAL_SUPPORT_URL, "support")}
+              onPress={() => openLink(MOBILE_LINKS.support, "support")}
             />
-            <ProfileLinkRow icon="help-outline" label="FAQ" onPress={() => openLink(FAQ_URL, "FAQ")} />
+            <ProfileLinkRow
+              icon="help-outline"
+              label="FAQ"
+              onPress={() => openLink(MOBILE_LINKS.faq, "FAQ")}
+            />
             <ProfileLinkRow
               icon="privacy-tip"
               label="Privacy Policy"
-              onPress={() => openLink(PRIVACY_POLICY_URL, "privacy policy")}
+              onPress={() => openLink(MOBILE_LINKS.privacy, "privacy policy")}
             />
-            <ProfileLinkRow icon="article" label="Terms" onPress={() => openLink(TERMS_URL, "terms")} />
+            <ProfileLinkRow
+              icon="article"
+              label="Terms"
+              onPress={() => openLink(MOBILE_LINKS.terms, "terms")}
+            />
             <ProfileLinkRow
               icon="receipt-long"
               label="Refund Policy"
-              onPress={() => openLink(REFUND_POLICY_URL, "refund policy")}
+              onPress={() => openLink(MOBILE_LINKS.refundPolicy, "refund policy")}
             />
           </View>
 
