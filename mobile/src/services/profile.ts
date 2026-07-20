@@ -5,10 +5,14 @@ import { getMobileAuthRequestContext } from "./auth";
 import {
   assertMobileSessionIdentityCurrent,
   assertSameMobileSessionIdentity,
-  isMobileSessionChangedError,
   isMobileSessionIdentityCurrent,
   type MobileSessionIdentity,
 } from "./authSession";
+import {
+  classifyMobileProfileResponse,
+  getMobileProfileResponseError,
+} from "./profileResponse";
+import { clearInvalidMobileSession } from "./sessionInvalidation";
 
 const MOBILE_PROFILE_OVERRIDES_KEY = "flavor_fusion_mobile_profile_overrides_v1";
 const MOBILE_PROFILE_OVERRIDES_ACCOUNT_PREFIX = "flavor_fusion_mobile_profile_overrides_v2:";
@@ -27,6 +31,8 @@ type ServerProfilePayload = {
     name?: unknown;
     avatarUrl?: unknown;
   };
+  error?: unknown;
+  reason?: unknown;
 };
 
 type ProfileAccountScope = {
@@ -90,6 +96,37 @@ async function readMobileProfileOverridesForScope(scope: ProfileAccountScope) {
   }
 }
 
+async function readProfileResponsePayload(
+  response: Response,
+  expectedIdentity: MobileSessionIdentity,
+): Promise<ServerProfilePayload> {
+  let payload: unknown = {};
+  try {
+    payload = await response.json();
+  } catch {
+    payload = {};
+  }
+  assertMobileSessionIdentityCurrent(expectedIdentity);
+  return isObjectRecord(payload) ? (payload as ServerProfilePayload) : {};
+}
+
+async function invalidateRejectedProfileSession(
+  scope: ProfileAccountScope,
+  payload: ServerProfilePayload,
+) {
+  const didInvalidate = await clearInvalidMobileSession(scope.identity);
+  if (!didInvalidate) {
+    assertMobileSessionIdentityCurrent(scope.identity);
+  }
+  await AsyncStorage.removeItem(scope.key).catch(() => {});
+  throw new Error(
+    getMobileProfileResponseError(
+      payload,
+      "Your session is no longer active. Sign in again to continue.",
+    ),
+  );
+}
+
 export async function readMobileProfileOverrides() {
   const scope = await getProfileAccountScope();
   return scope
@@ -98,17 +135,34 @@ export async function readMobileProfileOverrides() {
 }
 
 async function readServerProfileOverrides(scope: ProfileAccountScope) {
-  const response = await fetch(`${getApiBaseUrl()}/api/auth/profile`, {
-    method: "GET",
-    headers: {
-      authorization: `Bearer ${scope.token}`,
-    },
-  });
-  if (!response.ok || !isMobileSessionIdentityCurrent(scope.identity)) {
+  let response: Response;
+  try {
+    response = await fetch(`${getApiBaseUrl()}/api/auth/profile`, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${scope.token}`,
+      },
+    });
+  } catch {
+    assertMobileSessionIdentityCurrent(scope.identity);
     return null;
   }
 
-  const payload = (await response.json()) as ServerProfilePayload;
+  assertMobileSessionIdentityCurrent(scope.identity);
+  const payload = await readProfileResponsePayload(response, scope.identity);
+  const disposition = classifyMobileProfileResponse(
+    "get",
+    response.status,
+    response.ok,
+    payload,
+  );
+  if (disposition === "invalid_session") {
+    await invalidateRejectedProfileSession(scope, payload);
+  }
+  if (disposition !== "success") {
+    return null;
+  }
+
   const profile = payload.profile;
   if (!profile) {
     return null;
@@ -168,11 +222,10 @@ export async function saveMobileProfile(
   if (!scope) {
     throw new Error("Sign in to save profile changes.");
   }
-  await saveMobileProfileOverridesForScope(normalized, scope);
-  assertMobileSessionIdentityCurrent(expectedIdentity);
 
+  let response: Response;
   try {
-    const response = await fetch(`${getApiBaseUrl()}/api/auth/profile`, {
+    response = await fetch(`${getApiBaseUrl()}/api/auth/profile`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
@@ -183,30 +236,42 @@ export async function saveMobileProfile(
         avatarUrl: normalized.photoUri,
       }),
     });
+  } catch {
     assertMobileSessionIdentityCurrent(expectedIdentity);
-    if (!response.ok) {
-      return normalized;
-    }
-    const payload = (await response.json()) as ServerProfilePayload;
-    assertMobileSessionIdentityCurrent(expectedIdentity);
-    const serverProfile = payload.profile;
-    if (!serverProfile) {
-      return normalized;
-    }
-    return {
-      displayName:
-        typeof serverProfile.name === "string" ? serverProfile.name.trim() : normalized.displayName,
-      photoUri:
-        typeof serverProfile.avatarUrl === "string"
-          ? serverProfile.avatarUrl.trim()
-          : normalized.photoUri,
-    } satisfies MobileProfileOverrides;
-  } catch (error) {
-    if (isMobileSessionChangedError(error)) {
-      throw error;
-    }
-    return normalized;
+    return saveMobileProfileOverridesForScope(normalized, scope);
   }
+
+  assertMobileSessionIdentityCurrent(expectedIdentity);
+  const payload = await readProfileResponsePayload(response, expectedIdentity);
+  const disposition = classifyMobileProfileResponse(
+    "patch",
+    response.status,
+    response.ok,
+    payload,
+  );
+  if (disposition === "invalid_session") {
+    await invalidateRejectedProfileSession(scope, payload);
+  }
+  if (disposition !== "success") {
+    throw new Error(
+      getMobileProfileResponseError(payload, "Could not save profile changes."),
+    );
+  }
+
+  const serverProfile = payload.profile;
+  const nextOverrides = serverProfile
+    ? {
+        displayName:
+          typeof serverProfile.name === "string"
+            ? serverProfile.name.trim()
+            : normalized.displayName,
+        photoUri:
+          typeof serverProfile.avatarUrl === "string"
+            ? serverProfile.avatarUrl.trim()
+            : normalized.photoUri,
+      }
+    : normalized;
+  return saveMobileProfileOverridesForScope(nextOverrides, scope);
 }
 
 export async function migrateLegacyProfileOverridesToCurrentAccount() {

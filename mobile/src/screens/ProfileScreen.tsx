@@ -302,7 +302,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
     setIsSavingProfile(false);
     setDraftName("");
     setDraftPhotoUri("");
-    void loadProfile();
+    void loadProfile().catch(() => {});
   }, [loadProfile, sessionIdentity.revision]);
 
   const syncAccountOwnedStateAfterLogin = useCallback(async () => {
