@@ -1,6 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { CookbookRecipeSummary, GeneratedRecipeRecord } from "../types/recipe";
-import { getMobileAuthSession } from "./auth";
+import { getMobileAuthRequestContext } from "./auth";
+import {
+  isMobileSessionIdentityCurrent,
+  type MobileSessionIdentity,
+} from "./authSession";
 
 const DASHBOARD_HISTORY_KEY = "flavor_fusion_dashboard_history_v1";
 const DASHBOARD_HISTORY_ACCOUNT_PREFIX = "flavor_fusion_dashboard_history_v2:";
@@ -48,20 +52,29 @@ function isLocalImageSnapshot(value: unknown) {
   return typeof value === "string" && value.trim().startsWith("data:image/");
 }
 
-async function getDashboardHistoryKeyForCurrentAccount() {
-  const session = await getMobileAuthSession();
-  const userId = session?.userId?.trim() ?? "";
-  return userId ? `${DASHBOARD_HISTORY_ACCOUNT_PREFIX}${userId}` : null;
+type DashboardHistoryScope = {
+  key: string;
+  identity: MobileSessionIdentity;
+};
+
+async function getDashboardHistoryScope(): Promise<DashboardHistoryScope | null> {
+  const authContext = await getMobileAuthRequestContext();
+  if (!authContext.session || !isMobileSessionIdentityCurrent(authContext.identity)) {
+    return null;
+  }
+  return {
+    key: `${DASHBOARD_HISTORY_ACCOUNT_PREFIX}${authContext.session.userId}`,
+    identity: authContext.identity,
+  };
 }
 
-export async function readDashboardFusionHistory() {
+async function readDashboardFusionHistoryForScope(scope: DashboardHistoryScope) {
   try {
-    const key = await getDashboardHistoryKeyForCurrentAccount();
-    if (!key) {
+    if (!isMobileSessionIdentityCurrent(scope.identity)) {
       return [];
     }
-    const raw = await AsyncStorage.getItem(key);
-    if (!raw) {
+    const raw = await AsyncStorage.getItem(scope.key);
+    if (!raw || !isMobileSessionIdentityCurrent(scope.identity)) {
       return [];
     }
     const payload = JSON.parse(raw) as unknown;
@@ -74,14 +87,26 @@ export async function readDashboardFusionHistory() {
   }
 }
 
-export async function saveDashboardFusionHistory(items: DashboardFusionSummary[]) {
-  const key = await getDashboardHistoryKeyForCurrentAccount();
-  if (!key) {
+export async function readDashboardFusionHistory() {
+  const scope = await getDashboardHistoryScope();
+  return scope ? readDashboardFusionHistoryForScope(scope) : [];
+}
+
+async function saveDashboardFusionHistoryForScope(
+  items: DashboardFusionSummary[],
+  scope: DashboardHistoryScope,
+) {
+  if (!isMobileSessionIdentityCurrent(scope.identity)) {
     return [];
   }
   const next = sortHistory(items).slice(0, MAX_DASHBOARD_HISTORY_ITEMS);
-  await AsyncStorage.setItem(key, JSON.stringify(next));
+  await AsyncStorage.setItem(scope.key, JSON.stringify(next));
   return next;
+}
+
+export async function saveDashboardFusionHistory(items: DashboardFusionSummary[]) {
+  const scope = await getDashboardHistoryScope();
+  return scope ? saveDashboardFusionHistoryForScope(items, scope) : [];
 }
 
 export async function clearDashboardFusionHistory() {
@@ -95,7 +120,11 @@ export async function clearDashboardFusionHistory() {
 }
 
 export async function upsertDashboardFusionHistory(record: GeneratedRecipeRecord) {
-  const current = await readDashboardFusionHistory();
+  const scope = await getDashboardHistoryScope();
+  if (!scope) {
+    return [];
+  }
+  const current = await readDashboardFusionHistoryForScope(scope);
   const existing = current.find((item) => item.id === record.recipe.id);
   const preservedImageUrl = isLocalImageSnapshot(existing?.record?.recipe.imageUrl)
     ? existing?.record?.recipe.imageUrl
@@ -120,10 +149,10 @@ export async function upsertDashboardFusionHistory(record: GeneratedRecipeRecord
     imageUrl: nextRecord.recipe.imageUrl,
     record: nextRecord,
   };
-  return saveDashboardFusionHistory([
-    nextItem,
-    ...current.filter((item) => item.id !== nextItem.id),
-  ]);
+  return saveDashboardFusionHistoryForScope(
+    [nextItem, ...current.filter((item) => item.id !== nextItem.id)],
+    scope,
+  );
 }
 
 export function cookbookSummaryToDashboardFusion(

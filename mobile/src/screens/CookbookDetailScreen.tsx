@@ -23,6 +23,7 @@ import { AppCreditHeader } from "../components/AppCreditHeader";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { SectionHeader } from "../components/SectionHeader";
 import { useMobileCookbook } from "../context/mobileCookbook";
+import { useMobileSessionIdentity } from "../hooks/useMobileSessionIdentity";
 import { useResponsiveFlags } from "../hooks/useResponsiveFlags";
 import type { CookbookStackParamList } from "../navigation/types";
 import { styles } from "../styles/appStyles";
@@ -44,6 +45,8 @@ export function CookbookDetailScreen({
   const recipeCardRef = useRef<View>(null);
   const recordRevisionRef = useRef(0);
   const flagRequestRevisionRef = useRef({ favorite: 0, toTry: 0 });
+  const sessionIdentity = useMobileSessionIdentity();
+  const mountedSessionRevisionRef = useRef(sessionIdentity.revision);
   const { getRecord, loadRecord, refreshRecord, updateRecipeFlags, deleteRecord } = useMobileCookbook();
   const getRecordRef = useRef(getRecord);
   const loadRecordRef = useRef(loadRecord);
@@ -54,17 +57,21 @@ export function CookbookDetailScreen({
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const [shoppingChecks, setShoppingChecks] = useState<Record<string, boolean>>({});
   const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
-  const [record, setRecord] = useState<CookbookRecipeRecord | null>(
+  const [storedRecord, setStoredRecord] = useState<CookbookRecipeRecord | null>(
     () => getRecord(route.params.recipeId) ?? null,
   );
-  const [isLoading, setIsLoading] = useState(record === null);
+  const [recordOwnerRevision, setRecordOwnerRevision] = useState(sessionIdentity.revision);
+  const record =
+    recordOwnerRevision === sessionIdentity.revision ? storedRecord : null;
+  const [isLoading, setIsLoading] = useState(storedRecord === null);
   const [loadError, setLoadError] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isShowingCachedRecord, setIsShowingCachedRecord] = useState(record !== null);
+  const [isShowingCachedRecord, setIsShowingCachedRecord] = useState(storedRecord !== null);
   const [detailSyncError, setDetailSyncError] = useState("");
 
   const recipe = record?.recipe ?? null;
-  const initialSummary = route.params.initialSummary;
+  const initialSummary =
+    recordOwnerRevision === sessionIdentity.revision ? route.params.initialSummary : undefined;
   const shareMessage = useMemo(
     () => (recipe ? formatRecipeShareText(recipe) : ""),
     [recipe],
@@ -86,12 +93,31 @@ export function CookbookDetailScreen({
   }, [getRecord, loadRecord, refreshRecord]);
 
   useEffect(() => {
+    if (mountedSessionRevisionRef.current === sessionIdentity.revision) {
+      return;
+    }
+    mountedSessionRevisionRef.current = sessionIdentity.revision;
+    recordRevisionRef.current += 1;
+    flagRequestRevisionRef.current = { favorite: 0, toTry: 0 };
+    setStoredRecord(null);
+    setRecordOwnerRevision(sessionIdentity.revision);
+    setIsLoading(false);
+    setLoadError("");
+    setDetailSyncError("");
+    setIsShowingCachedRecord(false);
+    setIsImageViewerOpen(false);
+    setIsActionsMenuOpen(false);
+    setIsCaptureCardMounted(false);
+    navigation.popToTop();
+  }, [navigation, sessionIdentity.revision]);
+
+  useEffect(() => {
     // Fast path: render cached record immediately, then refresh in background.
     const recipeId = route.params.recipeId;
     const cachedRecord = getRecordRef.current(recipeId);
     if (cachedRecord) {
       const refreshRevision = recordRevisionRef.current;
-      setRecord(cachedRecord);
+      setStoredRecord(cachedRecord);
       setIsLoading(false);
       setLoadError("");
       setIsShowingCachedRecord(true);
@@ -100,7 +126,7 @@ export function CookbookDetailScreen({
           if (recordRevisionRef.current !== refreshRevision) {
             return;
           }
-          setRecord(nextRecord);
+          setStoredRecord(nextRecord);
           setIsShowingCachedRecord(false);
           setDetailSyncError("");
         })
@@ -122,7 +148,7 @@ export function CookbookDetailScreen({
         if (cancelled) {
           return;
         }
-        setRecord(nextRecord);
+        setStoredRecord(nextRecord);
         setLoadError("");
         setIsShowingCachedRecord(false);
         setDetailSyncError("");
@@ -355,7 +381,7 @@ export function CookbookDetailScreen({
     const requestRevision = flagRequestRevisionRef.current[flag];
     const rollbackRecord = record;
     const optimisticRecord = { ...record, ...nextFlags };
-    setRecord(optimisticRecord);
+    setStoredRecord(optimisticRecord);
 
     void updateRecipeFlags(record.recipe.id, nextFlags)
       .then((updatedRecord) => {
@@ -363,14 +389,14 @@ export function CookbookDetailScreen({
           return;
         }
         recordRevisionRef.current += 1;
-        setRecord((current) => (current ? { ...current, ...updatedRecord } : updatedRecord));
+        setStoredRecord((current) => (current ? { ...current, ...updatedRecord } : updatedRecord));
       })
       .catch((error) => {
         if (flagRequestRevisionRef.current[flag] !== requestRevision) {
           return;
         }
         recordRevisionRef.current += 1;
-        setRecord(rollbackRecord);
+        setStoredRecord(rollbackRecord);
         const message =
           error instanceof Error && error.message.trim().length > 0
             ? error.message
@@ -428,12 +454,12 @@ export function CookbookDetailScreen({
                 <PrimaryButton
                   label="Try Again"
                   onPress={() => {
-                    setRecord(null);
+                    setStoredRecord(null);
                     setLoadError("");
                     setIsLoading(true);
                     void loadRecord(route.params.recipeId)
                       .then((nextRecord) => {
-                        setRecord(nextRecord);
+                        setStoredRecord(nextRecord);
                         setLoadError("");
                       })
                       .catch((error) => {
@@ -483,12 +509,12 @@ export function CookbookDetailScreen({
                 <PrimaryButton
                   label="Try Again"
                   onPress={() => {
-                    setRecord(null);
+                    setStoredRecord(null);
                     setLoadError("");
                     setIsLoading(true);
                     void loadRecord(route.params.recipeId)
                       .then((nextRecord) => {
-                        setRecord(nextRecord);
+                        setStoredRecord(nextRecord);
                         setLoadError("");
                       })
                       .catch((error) => {

@@ -4,9 +4,15 @@ import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import { Platform } from "react-native";
 import { getApiBaseUrl } from "../config/api";
+import {
+  captureMobileSessionIdentity,
+  transitionMobileSessionIdentity,
+} from "./authSession";
+import { resetMobileIdentityForSignOut } from "./mobileIdentity";
 
 const MOBILE_AUTH_TOKEN_KEY = "flavor_fusion_mobile_auth_token";
 const ANDROID_CHROME_PACKAGE = "com.android.chrome";
+let volatileAuthToken: string | null = null;
 
 export type MobileAuthSession = {
   userId: string;
@@ -67,18 +73,21 @@ export function parseMobileAuthSessionToken(token: string) {
 }
 
 export async function getMobileAuthToken() {
+  if (volatileAuthToken !== null) {
+    return volatileAuthToken;
+  }
+
   try {
     const token = (await SecureStore.getItemAsync(MOBILE_AUTH_TOKEN_KEY))?.trim() ?? "";
-    if (!token) {
-      return "";
-    }
-    return token;
+    return volatileAuthToken ?? token;
   } catch {
-    return "";
+    return volatileAuthToken ?? "";
   }
 }
 
 export async function clearMobileAuthToken() {
+  volatileAuthToken = "";
+  transitionMobileSessionIdentity(null, { forceRevision: true });
   try {
     await SecureStore.deleteItemAsync(MOBILE_AUTH_TOKEN_KEY);
   } catch {
@@ -87,16 +96,59 @@ export async function clearMobileAuthToken() {
 }
 
 export async function isMobileAuthenticated() {
+  return (await getMobileAuthSession()) !== null;
+}
+
+export async function getMobileAuthRequestContext() {
   const token = await getMobileAuthToken();
-  return token.length > 0;
+  if (!token) {
+    transitionMobileSessionIdentity(null);
+    return {
+      token: "",
+      session: null,
+      identity: captureMobileSessionIdentity(),
+    };
+  }
+
+  const session = parseMobileAuthSessionToken(token);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (!session || session.exp <= nowSeconds) {
+    await clearMobileAuthToken();
+    try {
+      await resetMobileIdentityForSignOut();
+    } catch {
+      // The authenticated state is already cleared; identity rotation is best effort.
+    }
+    return {
+      token: "",
+      session: null,
+      identity: captureMobileSessionIdentity(),
+    };
+  }
+
+  transitionMobileSessionIdentity(session.userId);
+  return {
+    token,
+    session,
+    identity: captureMobileSessionIdentity(),
+  };
 }
 
 export async function getMobileAuthSession() {
-  const token = await getMobileAuthToken();
-  if (!token) {
-    return null;
+  return (await getMobileAuthRequestContext()).session;
+}
+
+async function storeMobileAuthToken(token: string) {
+  const normalizedToken = token.trim();
+  const session = parseMobileAuthSessionToken(normalizedToken);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (!session || session.exp <= nowSeconds) {
+    throw new Error("Login response did not include a valid mobile session.");
   }
-  return parseMobileAuthSessionToken(token);
+
+  await SecureStore.setItemAsync(MOBILE_AUTH_TOKEN_KEY, normalizedToken);
+  volatileAuthToken = normalizedToken;
+  transitionMobileSessionIdentity(session.userId, { forceRevision: true });
 }
 
 export async function loginWithGoogleForMobile() {
@@ -123,7 +175,7 @@ export async function loginWithGoogleForMobile() {
     return false;
   }
 
-  await SecureStore.setItemAsync(MOBILE_AUTH_TOKEN_KEY, token);
+  await storeMobileAuthToken(token);
   return true;
 }
 
@@ -229,6 +281,6 @@ export async function loginWithAppleForMobile() {
     throw new Error("Apple login response did not include a session token.");
   }
 
-  await SecureStore.setItemAsync(MOBILE_AUTH_TOKEN_KEY, token);
+  await storeMobileAuthToken(token);
   return true;
 }

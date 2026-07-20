@@ -1,7 +1,7 @@
 import { BlurView } from "expo-blur";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import * as Sharing from "expo-sharing";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import {
   ActionSheetIOS,
@@ -26,6 +26,7 @@ import { BrandHeader } from "../components/BrandHeader";
 import { SectionHeader } from "../components/SectionHeader";
 import { useMobileCookbook } from "../context/mobileCookbook";
 import { sampleGeneratedRecipeRecord } from "../data/sampleGeneratedRecipe";
+import { useMobileSessionIdentity } from "../hooks/useMobileSessionIdentity";
 import { useResponsiveFlags } from "../hooks/useResponsiveFlags";
 import type { HomeStackParamList } from "../navigation/types";
 import { DIETARY_OPTIONS } from "../config/recipeOptions";
@@ -44,6 +45,12 @@ import {
   loginWithAppleForMobile,
   loginWithGoogleForMobile,
 } from "../services/auth";
+import {
+  captureMobileSessionIdentity,
+  getWorkspaceSessionDisposition,
+  isMobileSessionChangedError,
+  type MobileSessionIdentity,
+} from "../services/authSession";
 import { createAuthenticatedRerollContinuation } from "../services/rerollContinuation";
 import { styles } from "../styles/appStyles";
 import type { FuseRequest, GeneratedRecipeRecord } from "../types/recipe";
@@ -244,13 +251,22 @@ export function RecipeWorkspaceScreen({
 }: NativeStackScreenProps<HomeStackParamList, "RecipeWorkspace">) {
   const { isCompactScreen, isVeryCompactScreen } = useResponsiveFlags();
   const { saveRecord } = useMobileCookbook();
+  const sessionIdentity = useMobileSessionIdentity();
+  const initialRecord = route.params?.initialRecord ?? null;
+  const initialRecordOwner = initialRecord
+    ? route.params?.initialRecordOwner ?? sessionIdentity
+    : null;
   const recipeCardRef = useRef<View>(null);
   const [captureCardSize, setCaptureCardSize] = useState({ width: 0, height: 0 });
   const [isSharingImage, setIsSharingImage] = useState(false);
   const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const [shoppingChecks, setShoppingChecks] = useState<Record<string, boolean>>({});
-  const [liveRecipeRecord, setLiveRecipeRecord] = useState<GeneratedRecipeRecord | null>(null);
+  const [liveRecipeRecord, setLiveRecipeRecord] = useState<GeneratedRecipeRecord | null>(
+    initialRecord,
+  );
+  const [workspaceOwnerIdentity, setWorkspaceOwnerIdentity] =
+    useState<MobileSessionIdentity | null>(initialRecordOwner);
   const [pendingSourceInput, setPendingSourceInput] = useState<FuseRequest | null>(null);
   const [isInitialFusePending, setIsInitialFusePending] = useState(false);
   const [pendingEllipsisCount, setPendingEllipsisCount] = useState(1);
@@ -263,16 +279,28 @@ export function RecipeWorkspaceScreen({
   const [isSavingCookbook, setIsSavingCookbook] = useState(false);
   const [isPurchasingCredits, setIsPurchasingCredits] = useState(false);
   const isPurchasingCreditsRef = useRef(false);
+  const workspaceOwnerIdentityRef = useRef<MobileSessionIdentity | null>(initialRecordOwner);
+  const pendingSignedOutContinuationRef = useRef(false);
   const rerollContinuation = useRef(createAuthenticatedRerollContinuation()).current;
   const startedPendingRequestIdsRef = useRef<Set<string>>(new Set());
   const loaderSpin = useRef(new Animated.Value(0)).current;
   const loaderPulse = useRef(new Animated.Value(1)).current;
   const loaderGlowOpacity = useRef(new Animated.Value(0.35)).current;
-  const activeRecord = liveRecipeRecord ?? sampleGeneratedRecipeRecord;
+  const workspaceDisposition = workspaceOwnerIdentity
+    ? getWorkspaceSessionDisposition(
+        workspaceOwnerIdentity,
+        sessionIdentity,
+        pendingSignedOutContinuationRef.current,
+      )
+    : "retain";
+  const canRenderWorkspaceContent = workspaceDisposition === "retain";
+  const visibleLiveRecipeRecord = canRenderWorkspaceContent ? liveRecipeRecord : null;
+  const visiblePendingSourceInput = canRenderWorkspaceContent ? pendingSourceInput : null;
+  const activeRecord = visibleLiveRecipeRecord ?? sampleGeneratedRecipeRecord;
   const activeRecipe = activeRecord.recipe;
   const activeSourceInput =
-    liveRecipeRecord?.sourceInput ?? pendingSourceInput ?? activeRecord.sourceInput;
-  const usingLiveRecipe = liveRecipeRecord !== null;
+    visibleLiveRecipeRecord?.sourceInput ?? visiblePendingSourceInput ?? activeRecord.sourceInput;
+  const usingLiveRecipe = visibleLiveRecipeRecord !== null;
   const shouldShowSpiceLevel =
     activeSourceInput.mealType !== "dessert" && activeSourceInput.mealType !== "beverage";
   const shareMessage = useMemo(() => formatRecipeShareText(activeRecipe), [activeRecipe]);
@@ -294,6 +322,35 @@ export function RecipeWorkspaceScreen({
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
   });
+
+  const setOwnedWorkspaceRecord = useCallback(
+    (record: GeneratedRecipeRecord, owner = captureMobileSessionIdentity()) => {
+      workspaceOwnerIdentityRef.current = owner;
+      setWorkspaceOwnerIdentity(owner);
+      setLiveRecipeRecord(record);
+    },
+    [],
+  );
+
+  const clearOwnedWorkspace = useCallback(() => {
+    workspaceOwnerIdentityRef.current = null;
+    pendingSignedOutContinuationRef.current = false;
+    setWorkspaceOwnerIdentity(null);
+    setLiveRecipeRecord(null);
+    setPendingSourceInput(null);
+    setPreviewImageUrl(null);
+    setImageError("");
+    setIsImageLoading(false);
+    setIsInitialFusePending(false);
+    setIsLoadingLiveRecipe(false);
+    setIsSavingCookbook(false);
+    setIsPurchasingCredits(false);
+    isPurchasingCreditsRef.current = false;
+    setIsImageViewerOpen(false);
+    setIsActionsMenuOpen(false);
+    setShoppingChecks({});
+    startedPendingRequestIdsRef.current.clear();
+  }, []);
 
   const getCreditPackOptions = useCallback(async () => {
     const configuredFallback = getConfiguredCreditProductIdsForPlatform().map((productId) => ({
@@ -426,6 +483,32 @@ export function RecipeWorkspaceScreen({
     [navigation],
   );
 
+  useLayoutEffect(() => {
+    const hasOwnedWorkspaceContent = Boolean(liveRecipeRecord || pendingSourceInput);
+    if (!hasOwnedWorkspaceContent || !workspaceOwnerIdentity) {
+      return;
+    }
+    if (
+      getWorkspaceSessionDisposition(
+        workspaceOwnerIdentity,
+        sessionIdentity,
+        pendingSignedOutContinuationRef.current,
+      ) === "retain"
+    ) {
+      return;
+    }
+
+    clearOwnedWorkspace();
+    navigation.popToTop();
+  }, [
+    clearOwnedWorkspace,
+    liveRecipeRecord,
+    navigation,
+    pendingSourceInput,
+    sessionIdentity,
+    workspaceOwnerIdentity,
+  ]);
+
   useEffect(() => {
     // Reset shopping checklist when recipe changes.
     setShoppingChecks({});
@@ -535,13 +618,18 @@ export function RecipeWorkspaceScreen({
       return;
     }
 
-    setLiveRecipeRecord(nextRecord);
+    const owner = route.params?.initialRecordOwner ?? captureMobileSessionIdentity();
+    setOwnedWorkspaceRecord(nextRecord, owner);
     setPendingSourceInput(nextRecord.sourceInput);
     setIsInitialFusePending(false);
     setIsLoadingLiveRecipe(false);
     setPreviewImageUrl(nextRecord.recipe.imageUrl ?? null);
     setImageError("");
-  }, [route.params?.initialRecord]);
+  }, [
+    route.params?.initialRecord,
+    route.params?.initialRecordOwner,
+    setOwnedWorkspaceRecord,
+  ]);
 
   useEffect(() => {
     // Initial generation path: fetch live recipe from Home form input.
@@ -556,6 +644,9 @@ export function RecipeWorkspaceScreen({
     startedPendingRequestIdsRef.current.add(pendingRequest.requestId);
 
     let cancelled = false;
+    const requestOwner = pendingRequest.owner ?? captureMobileSessionIdentity();
+    workspaceOwnerIdentityRef.current = requestOwner;
+    setWorkspaceOwnerIdentity(requestOwner);
     setPendingSourceInput(pendingRequest.input);
     setLiveRecipeRecord(null);
     setPreviewImageUrl(null);
@@ -590,11 +681,14 @@ export function RecipeWorkspaceScreen({
           return;
         }
 
-        setLiveRecipeRecord(nextRecord);
+        setOwnedWorkspaceRecord(nextRecord, requestOwner);
         setPendingSourceInput(nextRecord.sourceInput);
         void upsertDashboardFusionHistory(nextRecord);
       } catch (error) {
         if (cancelled) {
+          return;
+        }
+        if (isMobileSessionChangedError(error)) {
           return;
         }
 
@@ -638,13 +732,14 @@ export function RecipeWorkspaceScreen({
     hasCreditsOrFreeAction,
     redirectToHomeCreditGate,
     route.params?.pendingRequest,
+    setOwnedWorkspaceRecord,
   ]);
 
   useEffect(() => {
     // Image loading pipeline:
     // 1) use built-in recipe image when available
     // 2) else call /api/fuse-image with retry/backoff
-    if (isInitialFusePending && !liveRecipeRecord) {
+    if (isInitialFusePending && !visibleLiveRecipeRecord) {
       setPreviewImageUrl(null);
       setImageError("");
       setIsImageLoading(false);
@@ -703,6 +798,9 @@ export function RecipeWorkspaceScreen({
               error instanceof Error && error.message.trim().length > 0
                 ? error.message
                 : "Image unavailable";
+            if (isMobileSessionChangedError(error)) {
+              return;
+            }
             if (cancelled) {
               return;
             }
@@ -737,7 +835,7 @@ export function RecipeWorkspaceScreen({
     activeSourceInput.mealType,
     imageReloadVersion,
     isInitialFusePending,
-    liveRecipeRecord,
+    visibleLiveRecipeRecord,
   ]);
 
   function handleRetryRecipeVisual() {
@@ -839,12 +937,27 @@ export function RecipeWorkspaceScreen({
       return;
     }
 
+    const startingIdentity = captureMobileSessionIdentity();
+    const startingOwner = workspaceOwnerIdentityRef.current;
+    pendingSignedOutContinuationRef.current =
+      startingIdentity.userId === null &&
+      (startingOwner === null || startingOwner.userId === null);
     setIsLoadingLiveRecipe(true);
     try {
       const outcome = await rerollContinuation.run({
         isAuthenticated: isMobileAuthenticated,
         authenticate: promptLoginForReroll,
         requestReroll: async (actionKind) => {
+          const requestIdentity = captureMobileSessionIdentity();
+          if (
+            pendingSignedOutContinuationRef.current &&
+            requestIdentity.userId !== null &&
+            (workspaceOwnerIdentityRef.current === null ||
+              workspaceOwnerIdentityRef.current.userId === null)
+          ) {
+            workspaceOwnerIdentityRef.current = requestIdentity;
+            setWorkspaceOwnerIdentity(requestIdentity);
+          }
           const allowedBySnapshot = await hasCreditsOrFreeAction(actionKind);
           if (!allowedBySnapshot) {
             const purchasedCredits = await handleCreditRecoveryPurchase();
@@ -871,18 +984,24 @@ export function RecipeWorkspaceScreen({
       }
 
       const nextRecord = outcome.value;
-      setLiveRecipeRecord(nextRecord);
+      setOwnedWorkspaceRecord(nextRecord);
       void upsertDashboardFusionHistory(nextRecord);
     } catch (error) {
+      if (isMobileSessionChangedError(error)) {
+        return;
+      }
       if (isInsufficientCreditsError(error)) {
         const purchasedCredits = await handleCreditRecoveryPurchase();
         if (purchasedCredits) {
           try {
             const retriedRecord = await fetchLiveRecipeRecord(activeRecord.sourceInput, "reroll");
-            setLiveRecipeRecord(retriedRecord);
+            setOwnedWorkspaceRecord(retriedRecord);
             void upsertDashboardFusionHistory(retriedRecord);
             return;
           } catch (retryError) {
+            if (isMobileSessionChangedError(retryError)) {
+              return;
+            }
             const retryMessage =
               retryError instanceof Error && retryError.message.trim().length > 0
                 ? retryError.message
@@ -905,9 +1024,12 @@ export function RecipeWorkspaceScreen({
         Alert.alert("Login required", message);
         return;
       }
+      workspaceOwnerIdentityRef.current = null;
+      setWorkspaceOwnerIdentity(null);
       setLiveRecipeRecord(null);
       Alert.alert("Live recipe unavailable", message);
     } finally {
+      pendingSignedOutContinuationRef.current = false;
       setIsLoadingLiveRecipe(false);
     }
   }

@@ -6,7 +6,12 @@ import type {
   RecipeFusion,
   SpiceLevel,
 } from "../types/recipe";
-import { getMobileAuthToken } from "./auth";
+import { getMobileAuthRequestContext } from "./auth";
+import {
+  isMobileSessionIdentityCurrent,
+  MobileSessionChangedError,
+  type MobileSessionIdentity,
+} from "./authSession";
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
 import { clearInvalidMobileSession, isInvalidAuthPayload } from "./sessionInvalidation";
 
@@ -83,11 +88,15 @@ function isRecipeFusion(value: unknown): value is RecipeFusion {
   );
 }
 
-async function readErrorMessage(response: Response) {
+async function readErrorMessage(response: Response, identity: MobileSessionIdentity) {
   try {
     const payload = (await response.json()) as FuseErrorPayload;
-    if (response.status === 401 && isInvalidAuthPayload(payload)) {
-      await clearInvalidMobileSession();
+    if (
+      response.status === 401 &&
+      isInvalidAuthPayload(payload) &&
+      isMobileSessionIdentityCurrent(identity)
+    ) {
+      await clearInvalidMobileSession(identity);
     }
     return new FuseRequestError(response.status, payload, "The live recipe request failed.");
   } catch {
@@ -100,8 +109,8 @@ export async function fetchLiveRecipeRecord(
   action: FuseActionKind = "fuse",
   requestId?: string,
 ): Promise<GeneratedRecipeRecord> {
-  const authToken = await getMobileAuthToken();
-  if (!authToken) {
+  const authContext = await getMobileAuthRequestContext();
+  if (!authContext.token) {
     throw new FuseRequestError(
       401,
       {
@@ -114,12 +123,15 @@ export async function fetchLiveRecipeRecord(
 
   const mobileAnonId = await getMobileAnonymousId();
   const mobileDeviceKey = await getMobileDeviceKey();
+  if (!isMobileSessionIdentityCurrent(authContext.identity)) {
+    throw new MobileSessionChangedError();
+  }
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "x-flavor-fusion-anon-id": mobileAnonId,
     "x-flavor-fusion-device-key": mobileDeviceKey,
     "x-flavor-fusion-action": action,
-    authorization: `Bearer ${authToken}`,
+    authorization: `Bearer ${authContext.token}`,
   };
   if (typeof requestId === "string" && requestId.trim().length > 0) {
     headers["x-flavor-fusion-request-id"] = requestId.trim();
@@ -129,16 +141,26 @@ export async function fetchLiveRecipeRecord(
     headers,
     body: JSON.stringify(input),
   });
+  if (!isMobileSessionIdentityCurrent(authContext.identity)) {
+    throw new MobileSessionChangedError();
+  }
   const canonicalAnonId = response.headers.get("x-flavor-fusion-anon-id")?.trim();
   if (canonicalAnonId) {
     await setMobileAnonymousId(canonicalAnonId);
   }
 
   if (!response.ok) {
-    throw await readErrorMessage(response);
+    const requestError = await readErrorMessage(response, authContext.identity);
+    if (!isMobileSessionIdentityCurrent(authContext.identity)) {
+      throw new MobileSessionChangedError();
+    }
+    throw requestError;
   }
 
   const payload = (await response.json()) as unknown;
+  if (!isMobileSessionIdentityCurrent(authContext.identity)) {
+    throw new MobileSessionChangedError();
+  }
   if (!isRecipeFusion(payload)) {
     throw new Error("The live recipe response was not in the expected format.");
   }

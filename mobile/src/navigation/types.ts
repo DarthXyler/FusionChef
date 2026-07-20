@@ -6,6 +6,7 @@ import type {
   FuseRequest,
   GeneratedRecipeRecord,
 } from "../types/recipe";
+import type { MobileSessionIdentity } from "../services/authSession";
 
 export type HomeStackParamList = {
   DashboardHome: undefined;
@@ -22,9 +23,11 @@ export type HomeStackParamList = {
   RecipeWorkspace:
     | {
         initialRecord?: GeneratedRecipeRecord;
+        initialRecordOwner?: MobileSessionIdentity;
         pendingRequest?: {
           input: FuseRequest;
           requestId: string;
+          owner?: MobileSessionIdentity;
         };
       }
     | undefined;

@@ -2,17 +2,19 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useFocusEffect, type NavigationProp } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppCreditHeader } from "../components/AppCreditHeader";
 import { useMobileCookbook } from "../context/mobileCookbook";
+import { useMobileSessionIdentity } from "../hooks/useMobileSessionIdentity";
 import type { HomeStackParamList, RootTabParamList } from "../navigation/types";
 import {
   cookbookSummaryToDashboardFusion,
   readDashboardFusionHistory,
   type DashboardFusionSummary,
 } from "../services/dashboardHistory";
+import { isMobileSessionIdentityCurrent } from "../services/authSession";
 import { styles } from "../styles/appStyles";
 
 type RecentAction = "save" | "favorite" | "toTry";
@@ -42,7 +44,9 @@ export function RecentFusionsScreen({
   navigation,
 }: NativeStackScreenProps<HomeStackParamList, "RecentFusions">) {
   const { summaries, saveRecord, updateRecipeFlags } = useMobileCookbook();
+  const sessionIdentity = useMobileSessionIdentity();
   const [history, setHistory] = useState<DashboardFusionSummary[]>([]);
+  const [historyRevision, setHistoryRevision] = useState(sessionIdentity.revision);
   const [busyActionById, setBusyActionById] = useState<Record<string, RecentAction | undefined>>({});
 
   const savedById = useMemo(() => {
@@ -51,8 +55,10 @@ export function RecentFusionsScreen({
   }, [summaries]);
 
   const recentFusionItems = useMemo(() => {
+    const currentHistory =
+      historyRevision === sessionIdentity.revision ? history : [];
     const byId = new Map<string, DashboardFusionSummary>();
-    for (const item of history) {
+    for (const item of currentHistory) {
       byId.set(item.id, item);
     }
     for (const item of summaries.map(cookbookSummaryToDashboardFusion)) {
@@ -67,12 +73,24 @@ export function RecentFusionsScreen({
     return [...byId.values()]
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
       .slice(0, 12);
-  }, [history, summaries]);
+  }, [history, historyRevision, sessionIdentity.revision, summaries]);
 
   const loadHistory = useCallback(async () => {
+    const expectedIdentity = sessionIdentity;
     const nextHistory = await readDashboardFusionHistory();
+    if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
+      return;
+    }
     setHistory(nextHistory);
-  }, []);
+    setHistoryRevision(expectedIdentity.revision);
+  }, [sessionIdentity]);
+
+  useEffect(() => {
+    setHistory([]);
+    setHistoryRevision(sessionIdentity.revision);
+    setBusyActionById({});
+    void loadHistory().catch(() => {});
+  }, [loadHistory, sessionIdentity.revision]);
 
   useFocusEffect(
     useCallback(() => {
@@ -97,6 +115,7 @@ export function RecentFusionsScreen({
     if (item.record) {
       navigation.navigate("RecipeWorkspace", {
         initialRecord: item.record,
+        initialRecordOwner: sessionIdentity,
       });
       return;
     }
@@ -111,6 +130,7 @@ export function RecentFusionsScreen({
     if (busyActionById[item.id]) {
       return;
     }
+    const expectedIdentity = sessionIdentity;
 
     const savedSummary = savedById.get(item.id);
     if (!savedSummary && !item.record) {
@@ -134,21 +154,26 @@ export function RecentFusionsScreen({
         await updateRecipeFlags(item.id, { isToTry: !(savedSummary?.isToTry === true) });
       }
 
-      if (action === "save") {
+      if (action === "save" && isMobileSessionIdentityCurrent(expectedIdentity)) {
         Alert.alert("Saved", "Recipe added to your cookbook.");
       }
     } catch (error) {
+      if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
+        return;
+      }
       const message =
         error instanceof Error && error.message.trim().length > 0
           ? error.message
           : "Could not update this recipe.";
       Alert.alert("Update failed", message);
     } finally {
-      setBusyActionById((current) => {
-        const next = { ...current };
-        delete next[item.id];
-        return next;
-      });
+      if (isMobileSessionIdentityCurrent(expectedIdentity)) {
+        setBusyActionById((current) => {
+          const next = { ...current };
+          delete next[item.id];
+          return next;
+        });
+      }
     }
   }
 

@@ -1,9 +1,21 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getApiBaseUrl } from "../config/api";
-import { getMobileAuthSession, getMobileAuthToken } from "./auth";
+import { selectAccountOwnedValue } from "./accountOwnership";
+import { getMobileAuthRequestContext } from "./auth";
+import {
+  assertMobileSessionIdentityCurrent,
+  assertSameMobileSessionIdentity,
+  isMobileSessionChangedError,
+  isMobileSessionIdentityCurrent,
+  type MobileSessionIdentity,
+} from "./authSession";
 
 const MOBILE_PROFILE_OVERRIDES_KEY = "flavor_fusion_mobile_profile_overrides_v1";
 const MOBILE_PROFILE_OVERRIDES_ACCOUNT_PREFIX = "flavor_fusion_mobile_profile_overrides_v2:";
+const EMPTY_PROFILE_OVERRIDES: MobileProfileOverrides = {
+  displayName: "",
+  photoUri: "",
+};
 
 export type MobileProfileOverrides = {
   displayName: string;
@@ -15,6 +27,12 @@ type ServerProfilePayload = {
     name?: unknown;
     avatarUrl?: unknown;
   };
+};
+
+type ProfileAccountScope = {
+  key: string;
+  token: string;
+  identity: MobileSessionIdentity;
 };
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -31,55 +49,62 @@ function normalizeProfileOverrides(value: unknown): MobileProfileOverrides {
   };
 }
 
-async function getProfileOverridesKeyForCurrentAccount() {
-  const session = await getMobileAuthSession();
-  const userId = session?.userId?.trim() ?? "";
-  return userId ? `${MOBILE_PROFILE_OVERRIDES_ACCOUNT_PREFIX}${userId}` : null;
+async function getProfileAccountScope(
+  expectedIdentity?: MobileSessionIdentity,
+): Promise<ProfileAccountScope | null> {
+  const authContext = await getMobileAuthRequestContext();
+  if (expectedIdentity) {
+    assertSameMobileSessionIdentity(expectedIdentity, authContext.identity);
+  }
+  if (!authContext.session || !isMobileSessionIdentityCurrent(authContext.identity)) {
+    return null;
+  }
+  return {
+    key: `${MOBILE_PROFILE_OVERRIDES_ACCOUNT_PREFIX}${authContext.session.userId}`,
+    token: authContext.token,
+    identity: authContext.identity,
+  };
 }
 
-export async function readMobileProfileOverrides() {
+async function readMobileProfileOverridesForScope(scope: ProfileAccountScope) {
   try {
-    const accountKey = await getProfileOverridesKeyForCurrentAccount();
-    if (!accountKey) {
-      return { displayName: "", photoUri: "" };
+    if (!isMobileSessionIdentityCurrent(scope.identity)) {
+      return EMPTY_PROFILE_OVERRIDES;
     }
 
-    const raw = await AsyncStorage.getItem(accountKey);
+    const raw = await AsyncStorage.getItem(scope.key);
+    if (!isMobileSessionIdentityCurrent(scope.identity)) {
+      return EMPTY_PROFILE_OVERRIDES;
+    }
+    await AsyncStorage.removeItem(MOBILE_PROFILE_OVERRIDES_KEY);
+    if (!isMobileSessionIdentityCurrent(scope.identity)) {
+      return EMPTY_PROFILE_OVERRIDES;
+    }
     if (raw) {
       return normalizeProfileOverrides(JSON.parse(raw));
     }
 
-    const legacyRaw = await AsyncStorage.getItem(MOBILE_PROFILE_OVERRIDES_KEY);
-    if (legacyRaw) {
-      const legacy = normalizeProfileOverrides(JSON.parse(legacyRaw));
-      if (legacy.displayName || legacy.photoUri) {
-        await AsyncStorage.setItem(accountKey, JSON.stringify(legacy));
-      }
-      return legacy;
-    }
-
-    if (!raw) {
-      return { displayName: "", photoUri: "" };
-    }
-    return { displayName: "", photoUri: "" };
+    return selectAccountOwnedValue<MobileProfileOverrides>(null, EMPTY_PROFILE_OVERRIDES);
   } catch {
-    return { displayName: "", photoUri: "" };
+    return EMPTY_PROFILE_OVERRIDES;
   }
 }
 
-async function readServerProfileOverrides() {
-  const authToken = await getMobileAuthToken();
-  if (!authToken) {
-    return null;
-  }
+export async function readMobileProfileOverrides() {
+  const scope = await getProfileAccountScope();
+  return scope
+    ? readMobileProfileOverridesForScope(scope)
+    : EMPTY_PROFILE_OVERRIDES;
+}
 
+async function readServerProfileOverrides(scope: ProfileAccountScope) {
   const response = await fetch(`${getApiBaseUrl()}/api/auth/profile`, {
     method: "GET",
     headers: {
-      authorization: `Bearer ${authToken}`,
+      authorization: `Bearer ${scope.token}`,
     },
   });
-  if (!response.ok) {
+  if (!response.ok || !isMobileSessionIdentityCurrent(scope.identity)) {
     return null;
   }
 
@@ -95,48 +120,75 @@ async function readServerProfileOverrides() {
 }
 
 export async function readMobileProfile() {
+  const scope = await getProfileAccountScope();
+  if (!scope) {
+    return EMPTY_PROFILE_OVERRIDES;
+  }
   const [localProfile, serverProfile] = await Promise.all([
-    readMobileProfileOverrides(),
-    readServerProfileOverrides(),
+    readMobileProfileOverridesForScope(scope),
+    readServerProfileOverrides(scope),
   ]);
+  if (!isMobileSessionIdentityCurrent(scope.identity)) {
+    return EMPTY_PROFILE_OVERRIDES;
+  }
   return {
     displayName: localProfile.displayName || serverProfile?.displayName || "",
     photoUri: localProfile.photoUri || serverProfile?.photoUri || "",
   } satisfies MobileProfileOverrides;
 }
 
-export async function saveMobileProfileOverrides(overrides: MobileProfileOverrides) {
+async function saveMobileProfileOverridesForScope(
+  overrides: MobileProfileOverrides,
+  scope: ProfileAccountScope,
+) {
   const normalized = normalizeProfileOverrides(overrides);
-  const accountKey = await getProfileOverridesKeyForCurrentAccount();
-  if (accountKey) {
-    await AsyncStorage.setItem(accountKey, JSON.stringify(normalized));
-  }
+  assertMobileSessionIdentityCurrent(scope.identity);
+  await AsyncStorage.setItem(scope.key, JSON.stringify(normalized));
+  assertMobileSessionIdentityCurrent(scope.identity);
   return normalized;
 }
 
-export async function saveMobileProfile(overrides: MobileProfileOverrides) {
-  const normalized = await saveMobileProfileOverrides(overrides);
-  const authToken = await getMobileAuthToken();
-  if (!authToken) {
-    return normalized;
+export async function saveMobileProfileOverrides(
+  overrides: MobileProfileOverrides,
+  expectedIdentity: MobileSessionIdentity,
+) {
+  const scope = await getProfileAccountScope(expectedIdentity);
+  if (!scope) {
+    throw new Error("Sign in to save profile changes.");
   }
+  return saveMobileProfileOverridesForScope(overrides, scope);
+}
+
+export async function saveMobileProfile(
+  overrides: MobileProfileOverrides,
+  expectedIdentity: MobileSessionIdentity,
+) {
+  const scope = await getProfileAccountScope(expectedIdentity);
+  const normalized = normalizeProfileOverrides(overrides);
+  if (!scope) {
+    throw new Error("Sign in to save profile changes.");
+  }
+  await saveMobileProfileOverridesForScope(normalized, scope);
+  assertMobileSessionIdentityCurrent(expectedIdentity);
 
   try {
     const response = await fetch(`${getApiBaseUrl()}/api/auth/profile`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        authorization: `Bearer ${authToken}`,
+        authorization: `Bearer ${scope.token}`,
       },
       body: JSON.stringify({
         name: normalized.displayName,
         avatarUrl: normalized.photoUri,
       }),
     });
+    assertMobileSessionIdentityCurrent(expectedIdentity);
     if (!response.ok) {
       return normalized;
     }
     const payload = (await response.json()) as ServerProfilePayload;
+    assertMobileSessionIdentityCurrent(expectedIdentity);
     const serverProfile = payload.profile;
     if (!serverProfile) {
       return normalized;
@@ -149,34 +201,27 @@ export async function saveMobileProfile(overrides: MobileProfileOverrides) {
           ? serverProfile.avatarUrl.trim()
           : normalized.photoUri,
     } satisfies MobileProfileOverrides;
-  } catch {
+  } catch (error) {
+    if (isMobileSessionChangedError(error)) {
+      throw error;
+    }
     return normalized;
   }
 }
 
 export async function migrateLegacyProfileOverridesToCurrentAccount() {
-  const accountKey = await getProfileOverridesKeyForCurrentAccount();
-  if (!accountKey) {
-    return { displayName: "", photoUri: "" };
-  }
-
-  const existingRaw = await AsyncStorage.getItem(accountKey);
-  if (existingRaw) {
-    await AsyncStorage.removeItem(MOBILE_PROFILE_OVERRIDES_KEY);
-    return normalizeProfileOverrides(JSON.parse(existingRaw));
-  }
-
-  const legacyRaw = await AsyncStorage.getItem(MOBILE_PROFILE_OVERRIDES_KEY);
-  if (!legacyRaw) {
-    return { displayName: "", photoUri: "" };
-  }
-
-  const legacy = normalizeProfileOverrides(JSON.parse(legacyRaw));
-  if (legacy.displayName || legacy.photoUri) {
-    await AsyncStorage.setItem(accountKey, JSON.stringify(legacy));
-  }
+  const scope = await getProfileAccountScope();
   await AsyncStorage.removeItem(MOBILE_PROFILE_OVERRIDES_KEY);
-  return legacy;
+  if (!scope || !isMobileSessionIdentityCurrent(scope.identity)) {
+    return EMPTY_PROFILE_OVERRIDES;
+  }
+  const existingRaw = await AsyncStorage.getItem(scope.key);
+  if (!isMobileSessionIdentityCurrent(scope.identity)) {
+    return EMPTY_PROFILE_OVERRIDES;
+  }
+  return existingRaw
+    ? normalizeProfileOverrides(JSON.parse(existingRaw))
+    : EMPTY_PROFILE_OVERRIDES;
 }
 
 export async function clearLegacyMobileProfileOverrides() {

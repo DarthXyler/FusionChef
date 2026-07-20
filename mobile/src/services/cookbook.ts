@@ -8,11 +8,16 @@ import type {
   RecipeFusion,
 } from "../types/recipe";
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
-import { getMobileAuthToken } from "./auth";
+import { getMobileAuthRequestContext } from "./auth";
+import { buildAccountStorageKey } from "./accountOwnership";
+import {
+  isMobileSessionIdentityCurrent,
+  type MobileSessionIdentity,
+} from "./authSession";
 import { clearInvalidMobileSession, isInvalidAuthPayload } from "./sessionInvalidation";
 
-const COOKBOOK_SUMMARY_CACHE_VERSION = "v1";
-const COOKBOOK_DETAIL_CACHE_VERSION = "v1";
+const COOKBOOK_SUMMARY_CACHE_VERSION = "v2";
+const COOKBOOK_DETAIL_CACHE_VERSION = "v2";
 const COOKBOOK_PAGE_SIZE = 15;
 
 export const EMPTY_COOKBOOK_STATS: CookbookStats = {
@@ -37,6 +42,17 @@ type CookbookSummaryCachePayload = {
 type CookbookDetailCachePayload = {
   fetchedAt: string;
   record: CookbookRecipeRecord;
+};
+
+type CookbookAccountScope = {
+  userId: string;
+  identity: MobileSessionIdentity;
+};
+
+type CookbookRequestContext = {
+  headers: Record<string, string>;
+  accountScope: CookbookAccountScope | null;
+  identity: MobileSessionIdentity;
 };
 
 function isNonEmptyString(value: unknown): value is string {
@@ -148,9 +164,24 @@ function isCookbookDetailCachePayload(value: unknown): value is CookbookDetailCa
   return isNonEmptyString(candidate.fetchedAt) && isCookbookRecipeRecord(candidate.record);
 }
 
-async function buildCookbookHeaders(extraHeaders?: Record<string, string>) {
-  const mobileAnonId = await getMobileAnonymousId();
-  const mobileDeviceKey = await getMobileDeviceKey();
+async function buildCookbookRequestContext(
+  extraHeaders?: Record<string, string>,
+  expectedIdentity?: MobileSessionIdentity,
+): Promise<CookbookRequestContext> {
+  const authContext = await getMobileAuthRequestContext();
+  const [mobileAnonId, mobileDeviceKey] = await Promise.all([
+    getMobileAnonymousId(),
+    getMobileDeviceKey(),
+  ]);
+  if (
+    !isMobileSessionIdentityCurrent(authContext.identity) ||
+    (expectedIdentity &&
+      (expectedIdentity.revision !== authContext.identity.revision ||
+        expectedIdentity.userId !== authContext.identity.userId))
+  ) {
+    throw new Error("Mobile account changed while the cookbook request was starting.");
+  }
+
   // Every cookbook request sends both account auth and device identity.
   // The server uses them to attach old anonymous records to the signed-in user.
   const headers: Record<string, string> = {
@@ -159,14 +190,28 @@ async function buildCookbookHeaders(extraHeaders?: Record<string, string>) {
     "x-flavor-fusion-device-key": mobileDeviceKey,
     ...extraHeaders,
   };
-  const authToken = await getMobileAuthToken();
-  if (authToken) {
-    headers.authorization = `Bearer ${authToken}`;
+  if (authContext.token) {
+    headers.authorization = `Bearer ${authContext.token}`;
   }
-  return headers;
+  return {
+    headers,
+    identity: authContext.identity,
+    accountScope: authContext.session
+      ? {
+          userId: authContext.session.userId,
+          identity: authContext.identity,
+        }
+      : null,
+  };
 }
 
-async function syncAnonymousIdFromResponse(response: Response) {
+async function syncAnonymousIdFromResponse(
+  response: Response,
+  identity: MobileSessionIdentity,
+) {
+  if (!isMobileSessionIdentityCurrent(identity)) {
+    return;
+  }
   const canonicalAnonId = response.headers.get("x-flavor-fusion-anon-id")?.trim();
   if (!canonicalAnonId) {
     return;
@@ -176,22 +221,44 @@ async function syncAnonymousIdFromResponse(response: Response) {
   await setMobileAnonymousId(canonicalAnonId);
 }
 
-async function getCookbookSummariesCacheKey() {
-  const mobileAnonId = await getMobileAnonymousId();
-  return `flavor_fusion_mobile_cookbook_summaries_${COOKBOOK_SUMMARY_CACHE_VERSION}:${mobileAnonId}`;
+function getCookbookSummariesCacheKey(userId: string) {
+  return buildAccountStorageKey(
+    `flavor_fusion_mobile_cookbook_summaries_${COOKBOOK_SUMMARY_CACHE_VERSION}`,
+    userId,
+  );
 }
 
-async function getCookbookDetailCacheKey(recipeId: string) {
-  const mobileAnonId = await getMobileAnonymousId();
-  return `flavor_fusion_mobile_cookbook_detail_${COOKBOOK_DETAIL_CACHE_VERSION}:${mobileAnonId}:${recipeId}`;
+function getCookbookDetailCacheKey(userId: string, recipeId: string) {
+  return buildAccountStorageKey(
+    `flavor_fusion_mobile_cookbook_detail_${COOKBOOK_DETAIL_CACHE_VERSION}`,
+    userId,
+    recipeId,
+  );
+}
+
+async function getCurrentCookbookAccountScope(): Promise<CookbookAccountScope | null> {
+  const authContext = await getMobileAuthRequestContext();
+  if (!authContext.session || !isMobileSessionIdentityCurrent(authContext.identity)) {
+    return null;
+  }
+  return {
+    userId: authContext.session.userId,
+    identity: authContext.identity,
+  };
 }
 
 function sortCookbookSummaries(summaries: CookbookRecipeSummary[]) {
   return [...summaries].sort((left, right) => Date.parse(right.savedAt) - Date.parse(left.savedAt));
 }
 
-async function writeCookbookSummariesCache(summaries: CookbookRecipeSummary[]) {
-  const key = await getCookbookSummariesCacheKey();
+async function writeCookbookSummariesCache(
+  summaries: CookbookRecipeSummary[],
+  scope: CookbookAccountScope,
+) {
+  if (!isMobileSessionIdentityCurrent(scope.identity)) {
+    return;
+  }
+  const key = getCookbookSummariesCacheKey(scope.userId);
   const payload: CookbookSummaryCachePayload = {
     fetchedAt: new Date().toISOString(),
     recipes: sortCookbookSummaries(summaries),
@@ -199,26 +266,34 @@ async function writeCookbookSummariesCache(summaries: CookbookRecipeSummary[]) {
   await AsyncStorage.setItem(key, JSON.stringify(payload));
 }
 
-export async function cacheCookbookSummaries(summaries: CookbookRecipeSummary[]) {
-  await writeCookbookSummariesCache(summaries);
-}
-
-async function upsertCookbookSummaryCache(summary: CookbookRecipeSummary) {
-  const current = await readCachedCookbookSummaries();
+async function upsertCookbookSummaryCache(
+  summary: CookbookRecipeSummary,
+  scope: CookbookAccountScope,
+) {
+  const current = await readCachedCookbookSummariesForScope(scope);
   const next = sortCookbookSummaries([
     summary,
     ...current.filter((entry) => entry.recipeId !== summary.recipeId),
   ]);
-  await writeCookbookSummariesCache(next);
+  await writeCookbookSummariesCache(next, scope);
 }
 
-async function removeCookbookSummaryCache(recipeId: string) {
-  const current = await readCachedCookbookSummaries();
-  await writeCookbookSummariesCache(current.filter((entry) => entry.recipeId !== recipeId));
+async function removeCookbookSummaryCache(recipeId: string, scope: CookbookAccountScope) {
+  const current = await readCachedCookbookSummariesForScope(scope);
+  await writeCookbookSummariesCache(
+    current.filter((entry) => entry.recipeId !== recipeId),
+    scope,
+  );
 }
 
-async function writeCookbookDetailCache(record: CookbookRecipeRecord) {
-  const key = await getCookbookDetailCacheKey(record.recipe.id);
+async function writeCookbookDetailCache(
+  record: CookbookRecipeRecord,
+  scope: CookbookAccountScope,
+) {
+  if (!isMobileSessionIdentityCurrent(scope.identity)) {
+    return;
+  }
+  const key = getCookbookDetailCacheKey(scope.userId, record.recipe.id);
   const payload: CookbookDetailCachePayload = {
     fetchedAt: new Date().toISOString(),
     record,
@@ -226,16 +301,27 @@ async function writeCookbookDetailCache(record: CookbookRecipeRecord) {
   await AsyncStorage.setItem(key, JSON.stringify(payload));
 }
 
-async function removeCookbookDetailCache(recipeId: string) {
-  const key = await getCookbookDetailCacheKey(recipeId);
+async function removeCookbookDetailCache(recipeId: string, scope: CookbookAccountScope) {
+  if (!isMobileSessionIdentityCurrent(scope.identity)) {
+    return;
+  }
+  const key = getCookbookDetailCacheKey(scope.userId, recipeId);
   await AsyncStorage.removeItem(key);
 }
 
-async function readErrorMessage(response: Response, fallback: string) {
+async function readErrorMessage(
+  response: Response,
+  fallback: string,
+  identity?: MobileSessionIdentity,
+) {
   try {
     const payload = (await response.json()) as { error?: unknown; reason?: unknown };
-    if (response.status === 401 && isInvalidAuthPayload(payload)) {
-      await clearInvalidMobileSession();
+    if (
+      response.status === 401 &&
+      isInvalidAuthPayload(payload) &&
+      (!identity || isMobileSessionIdentityCurrent(identity))
+    ) {
+      await clearInvalidMobileSession(identity);
     }
     return typeof payload.error === "string" && payload.error.trim().length > 0
       ? payload.error
@@ -250,8 +336,9 @@ async function uploadRecipeImageDataUrl(
   title: string,
   recipeId: string,
   saveAttemptId: string,
+  authToken: string,
+  identity: MobileSessionIdentity,
 ) {
-  const authToken = await getMobileAuthToken();
   const idempotencyKey = `mobile-recipe-image-upload-${recipeId}-${hashForIdempotency(
     `${hashForIdempotency(imageDataUrl)}:${saveAttemptId}`,
   )}`;
@@ -269,8 +356,13 @@ async function uploadRecipeImageDataUrl(
     }),
   });
 
+  if (!isMobileSessionIdentityCurrent(identity)) {
+    throw new Error("Mobile account changed while the recipe image was uploading.");
+  }
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response, "Could not upload recipe image."));
+    throw new Error(
+      await readErrorMessage(response, "Could not upload recipe image.", identity),
+    );
   }
 
   const payload = (await response.json()) as { imageUrl?: unknown };
@@ -280,9 +372,8 @@ async function uploadRecipeImageDataUrl(
   return payload.imageUrl.trim();
 }
 
-async function cleanupUploadedRecipeImage(imageUrl: string) {
+async function cleanupUploadedRecipeImage(imageUrl: string, authToken: string) {
   try {
-    const authToken = await getMobileAuthToken();
     await fetch(`${getApiBaseUrl()}/api/r2-delete`, {
       method: "POST",
       headers: {
@@ -309,11 +400,16 @@ export function buildCookbookSummary(record: CookbookRecipeRecord): CookbookReci
   };
 }
 
-export async function readCachedCookbookSummaries(): Promise<CookbookRecipeSummary[]> {
+async function readCachedCookbookSummariesForScope(
+  scope: CookbookAccountScope,
+): Promise<CookbookRecipeSummary[]> {
   try {
-    const key = await getCookbookSummariesCacheKey();
+    if (!isMobileSessionIdentityCurrent(scope.identity)) {
+      return [];
+    }
+    const key = getCookbookSummariesCacheKey(scope.userId);
     const raw = await AsyncStorage.getItem(key);
-    if (!raw) {
+    if (!raw || !isMobileSessionIdentityCurrent(scope.identity)) {
       return [];
     }
 
@@ -328,13 +424,22 @@ export async function readCachedCookbookSummaries(): Promise<CookbookRecipeSumma
   }
 }
 
-export async function readCachedCookbookRecipe(
+export async function readCachedCookbookSummaries(): Promise<CookbookRecipeSummary[]> {
+  const scope = await getCurrentCookbookAccountScope();
+  return scope ? readCachedCookbookSummariesForScope(scope) : [];
+}
+
+async function readCachedCookbookRecipeForScope(
   recipeId: string,
+  scope: CookbookAccountScope,
 ): Promise<CookbookRecipeRecord | null> {
   try {
-    const key = await getCookbookDetailCacheKey(recipeId);
+    if (!isMobileSessionIdentityCurrent(scope.identity)) {
+      return null;
+    }
+    const key = getCookbookDetailCacheKey(scope.userId, recipeId);
     const raw = await AsyncStorage.getItem(key);
-    if (!raw) {
+    if (!raw || !isMobileSessionIdentityCurrent(scope.identity)) {
       return null;
     }
 
@@ -349,14 +454,30 @@ export async function readCachedCookbookRecipe(
   }
 }
 
+export async function readCachedCookbookRecipe(
+  recipeId: string,
+): Promise<CookbookRecipeRecord | null> {
+  const scope = await getCurrentCookbookAccountScope();
+  return scope ? readCachedCookbookRecipeForScope(recipeId, scope) : null;
+}
+
 export async function saveCookbookRecipe(
   record: GeneratedRecipeRecord | CookbookRecipeRecord,
 ): Promise<CookbookRecipeRecord> {
+  const authContext = await getMobileAuthRequestContext();
+  const operationIdentity = authContext.identity;
   const originalImageUrl = record.recipe.imageUrl?.trim() ?? "";
   const savedAt = "savedAt" in record ? record.savedAt : new Date().toISOString();
   let uploadedImageUrl: string | null = null;
   const imageUrl = originalImageUrl.startsWith("data:image/")
-    ? await uploadRecipeImageDataUrl(originalImageUrl, record.recipe.title, record.recipe.id, savedAt)
+    ? await uploadRecipeImageDataUrl(
+        originalImageUrl,
+        record.recipe.title,
+        record.recipe.id,
+        savedAt,
+        authContext.token,
+        operationIdentity,
+      )
     : originalImageUrl;
   if (originalImageUrl.startsWith("data:image/")) {
     uploadedImageUrl = imageUrl;
@@ -375,19 +496,34 @@ export async function saveCookbookRecipe(
   )}`;
 
   let savedRecord: CookbookRecipeRecord;
+  let requestContext: CookbookRequestContext | null = null;
   try {
+    requestContext = await buildCookbookRequestContext(
+      {
+        "idempotency-key": saveIdempotencyKey,
+      },
+      operationIdentity,
+    );
     // Saving is idempotent by recipe ID, so tapping Save twice should not create
     // duplicate cookbook rows.
     const response = await fetch(`${getApiBaseUrl()}/api/cookbook`, {
       method: "POST",
-      headers: await buildCookbookHeaders({
-        "idempotency-key": saveIdempotencyKey,
-      }),
+      headers: requestContext.headers,
       body: JSON.stringify(savePayload),
     });
 
+    if (!isMobileSessionIdentityCurrent(operationIdentity)) {
+      if (response.ok) {
+        // The server may already have committed the recipe. Leave its image for
+        // that account instead of deleting a potentially active R2 reference.
+        uploadedImageUrl = null;
+      }
+      throw new Error("Mobile account changed while the recipe was saving.");
+    }
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response, "Could not save recipe."));
+      throw new Error(
+        await readErrorMessage(response, "Could not save recipe.", operationIdentity),
+      );
     }
 
     const payload = (await response.json()) as { record?: unknown };
@@ -395,17 +531,22 @@ export async function saveCookbookRecipe(
       throw new Error("The saved recipe response was not in the expected format.");
     }
 
-    await syncAnonymousIdFromResponse(response);
+    await syncAnonymousIdFromResponse(response, operationIdentity);
     savedRecord = payload.record;
   } catch (error) {
     if (uploadedImageUrl) {
-      void cleanupUploadedRecipeImage(uploadedImageUrl);
+      void cleanupUploadedRecipeImage(uploadedImageUrl, authContext.token);
     }
     throw error;
   }
 
-  await writeCookbookDetailCache(savedRecord);
-  await upsertCookbookSummaryCache(buildCookbookSummary(savedRecord));
+  if (requestContext.accountScope) {
+    await writeCookbookDetailCache(savedRecord, requestContext.accountScope);
+    await upsertCookbookSummaryCache(
+      buildCookbookSummary(savedRecord),
+      requestContext.accountScope,
+    );
+  }
   return savedRecord;
 }
 
@@ -417,15 +558,21 @@ export async function fetchCookbookSummaries(cursor?: string | null): Promise<Co
     params.set("cursor", cursor);
   }
 
+  const requestContext = await buildCookbookRequestContext();
   const response = await fetch(`${getApiBaseUrl()}/api/cookbook?${params.toString()}`, {
     method: "GET",
-    headers: await buildCookbookHeaders(),
+    headers: requestContext.headers,
   });
 
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response, "Could not load cookbook."));
+  if (!isMobileSessionIdentityCurrent(requestContext.identity)) {
+    throw new Error("Mobile account changed while the cookbook was loading.");
   }
-  await syncAnonymousIdFromResponse(response);
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response, "Could not load cookbook.", requestContext.identity),
+    );
+  }
+  await syncAnonymousIdFromResponse(response, requestContext.identity);
 
   const payload = (await response.json()) as {
     recipes?: unknown;
@@ -439,8 +586,8 @@ export async function fetchCookbookSummaries(cursor?: string | null): Promise<Co
   }
 
   const summaries = sortCookbookSummaries(payload.recipes.filter(isCookbookRecipeSummary));
-  if (!cursor) {
-    await writeCookbookSummariesCache(summaries);
+  if (!cursor && requestContext.accountScope) {
+    await writeCookbookSummariesCache(summaries, requestContext.accountScope);
   }
   return {
     recipes: summaries,
@@ -457,64 +604,94 @@ export async function fetchCookbookSummaries(cursor?: string | null): Promise<Co
 }
 
 export async function fetchCookbookRecipe(recipeId: string): Promise<CookbookRecipeRecord> {
+  const requestContext = await buildCookbookRequestContext();
   const response = await fetch(`${getApiBaseUrl()}/api/cookbook/${encodeURIComponent(recipeId)}`, {
     method: "GET",
-    headers: await buildCookbookHeaders(),
+    headers: requestContext.headers,
   });
 
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response, "Could not load recipe."));
+  if (!isMobileSessionIdentityCurrent(requestContext.identity)) {
+    throw new Error("Mobile account changed while the recipe was loading.");
   }
-  await syncAnonymousIdFromResponse(response);
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response, "Could not load recipe.", requestContext.identity),
+    );
+  }
+  await syncAnonymousIdFromResponse(response, requestContext.identity);
 
   const payload = (await response.json()) as { record?: unknown };
   if (!isCookbookRecipeRecord(payload.record)) {
     throw new Error("The cookbook detail response was not in the expected format.");
   }
 
-  await writeCookbookDetailCache(payload.record);
-  await upsertCookbookSummaryCache(buildCookbookSummary(payload.record));
+  if (requestContext.accountScope) {
+    await writeCookbookDetailCache(payload.record, requestContext.accountScope);
+    await upsertCookbookSummaryCache(
+      buildCookbookSummary(payload.record),
+      requestContext.accountScope,
+    );
+  }
   return payload.record;
 }
 
 export async function deleteCookbookRecipe(recipeId: string): Promise<void> {
+  const requestContext = await buildCookbookRequestContext();
   const response = await fetch(`${getApiBaseUrl()}/api/cookbook/${encodeURIComponent(recipeId)}`, {
     method: "DELETE",
-    headers: await buildCookbookHeaders(),
+    headers: requestContext.headers,
   });
 
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response, "Could not delete recipe."));
+  if (!isMobileSessionIdentityCurrent(requestContext.identity)) {
+    throw new Error("Mobile account changed while the recipe was deleting.");
   }
-  await syncAnonymousIdFromResponse(response);
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response, "Could not delete recipe.", requestContext.identity),
+    );
+  }
+  await syncAnonymousIdFromResponse(response, requestContext.identity);
 
-  await Promise.all([
-    removeCookbookDetailCache(recipeId),
-    removeCookbookSummaryCache(recipeId),
-  ]);
+  if (requestContext.accountScope) {
+    await Promise.all([
+      removeCookbookDetailCache(recipeId, requestContext.accountScope),
+      removeCookbookSummaryCache(recipeId, requestContext.accountScope),
+    ]);
+  }
 }
 
 export async function updateCookbookRecipeFlags(
   recipeId: string,
   flags: { isFavorite?: boolean; isToTry?: boolean },
 ): Promise<CookbookRecipeRecord> {
+  const requestContext = await buildCookbookRequestContext();
   const response = await fetch(`${getApiBaseUrl()}/api/cookbook/${encodeURIComponent(recipeId)}`, {
     method: "PATCH",
-    headers: await buildCookbookHeaders(),
+    headers: requestContext.headers,
     body: JSON.stringify(flags),
   });
 
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response, "Could not update recipe."));
+  if (!isMobileSessionIdentityCurrent(requestContext.identity)) {
+    throw new Error("Mobile account changed while the recipe was updating.");
   }
-  await syncAnonymousIdFromResponse(response);
+  if (!response.ok) {
+    throw new Error(
+      await readErrorMessage(response, "Could not update recipe.", requestContext.identity),
+    );
+  }
+  await syncAnonymousIdFromResponse(response, requestContext.identity);
 
   const payload = (await response.json()) as { record?: unknown };
   if (!isCookbookRecipeRecord(payload.record)) {
     throw new Error("The updated recipe response was not in the expected format.");
   }
 
-  await writeCookbookDetailCache(payload.record);
-  await upsertCookbookSummaryCache(buildCookbookSummary(payload.record));
+  if (requestContext.accountScope) {
+    await writeCookbookDetailCache(payload.record, requestContext.accountScope);
+    await upsertCookbookSummaryCache(
+      buildCookbookSummary(payload.record),
+      requestContext.accountScope,
+    );
+  }
   return payload.record;
 }

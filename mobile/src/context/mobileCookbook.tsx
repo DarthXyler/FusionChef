@@ -2,7 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from "react";
 import {
   buildCookbookSummary,
-  cacheCookbookSummaries,
   deleteCookbookRecipe,
   EMPTY_COOKBOOK_STATS,
   fetchCookbookRecipe,
@@ -12,8 +11,14 @@ import {
   saveCookbookRecipe,
   updateCookbookRecipeFlags,
 } from "../services/cookbook";
-import { getMobileAuthToken } from "../services/auth";
+import { getMobileAuthRequestContext, getMobileAuthSession } from "../services/auth";
+import {
+  captureMobileSessionIdentity,
+  isMobileSessionIdentityCurrent,
+  type MobileSessionIdentity,
+} from "../services/authSession";
 import { upsertDashboardFusionHistory } from "../services/dashboardHistory";
+import { useMobileSessionIdentity } from "../hooks/useMobileSessionIdentity";
 import type { CookbookRecipeRecord, CookbookRecipeSummary, CookbookStats, GeneratedRecipeRecord } from "../types/recipe";
 import type { MobileCookbookContextValue } from "../navigation/types";
 
@@ -61,6 +66,14 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
   const [nextCookbookCursor, setNextCookbookCursor] = useState<string | null>(null);
   const [isShowingCachedSummaries, setIsShowingCachedSummaries] = useState(false);
   const [summarySyncError, setSummarySyncError] = useState("");
+  const sessionIdentity = useMobileSessionIdentity();
+  const [stateOwnerRevision, setStateOwnerRevision] = useState(sessionIdentity.revision);
+  const isStateOwnedByCurrentSession = stateOwnerRevision === sessionIdentity.revision;
+
+  const canCommitForIdentity = useCallback(
+    (identity: MobileSessionIdentity) => isMobileSessionIdentityCurrent(identity),
+    [],
+  );
 
   const upsertCookbookRecordState = useCallback((record: CookbookRecipeRecord) => {
     // Any save, refresh, flag update, or detail load eventually comes through here,
@@ -85,16 +98,12 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
           (nextSummary.isToTry && !(previousSummary?.isToTry === true) ? 1 : 0) -
           (!nextSummary.isToTry && previousSummary?.isToTry === true ? 1 : 0),
       }));
-      void cacheCookbookSummaries(next);
       return next.sort((left, right) => Date.parse(right.savedAt) - Date.parse(left.savedAt));
     });
   }, []);
 
   const replaceSummariesWithFirstPage = useCallback((incoming: CookbookRecipeSummary[]) => {
-    setCookbookSummaries(() => {
-      void cacheCookbookSummaries(incoming);
-      return incoming;
-    });
+    setCookbookSummaries(incoming);
   }, []);
 
   const resetLocalState = useCallback(() => {
@@ -109,57 +118,46 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
     setNextCookbookCursor(null);
     setIsShowingCachedSummaries(false);
     setSummarySyncError("");
+    setStateOwnerRevision(captureMobileSessionIdentity().revision);
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
-    // Show cached cookbook entries quickly while the network request catches up.
-    void (async () => {
-      const authToken = await getMobileAuthToken();
-      if (!authToken) {
-        return [];
+    const expectedIdentity = sessionIdentity;
+    resetLocalState();
+    if (!expectedIdentity.initialized || !expectedIdentity.userId) {
+      if (!expectedIdentity.initialized) {
+        void getMobileAuthSession();
       }
-      return readCachedCookbookSummaries();
-    })().then((cachedSummaries) => {
-      if (cancelled || cachedSummaries.length === 0) {
+      return;
+    }
+
+    void readCachedCookbookSummaries().then((cachedSummaries) => {
+      if (!canCommitForIdentity(expectedIdentity) || cachedSummaries.length === 0) {
         return;
       }
-
-      setCookbookSummaries((current) => {
-        if (current.length === 0) {
-          setIsShowingCachedSummaries(true);
-          return cachedSummaries;
-        }
-
-        const merged = [
-          ...current,
-          ...cachedSummaries.filter(
-            (cachedEntry) =>
-              !current.some((currentEntry) => currentEntry.recipeId === cachedEntry.recipeId),
-          ),
-        ];
-
-        setIsShowingCachedSummaries(true);
-        return merged.sort((left, right) => Date.parse(right.savedAt) - Date.parse(left.savedAt));
-      });
+      setCookbookSummaries(cachedSummaries);
+      setIsShowingCachedSummaries(true);
+      setStateOwnerRevision(expectedIdentity.revision);
     });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [canCommitForIdentity, resetLocalState, sessionIdentity]);
 
   const loadSummaries = useCallback(async () => {
+    const authContext = await getMobileAuthRequestContext();
+    const requestIdentity = authContext.identity;
+    if (!canCommitForIdentity(requestIdentity)) {
+      return;
+    }
     setIsCookbookLoading(true);
     try {
-      const authToken = await getMobileAuthToken();
-      if (!authToken) {
+      if (!authContext.session) {
         resetLocalState();
         setHasLoadedCookbook(true);
         return;
       }
       const page = await fetchCookbookSummaries();
+      if (!canCommitForIdentity(requestIdentity)) {
+        return;
+      }
       replaceSummariesWithFirstPage(page.recipes);
       setCookbookStats(page.stats);
       setHasLoadedCookbook(true);
@@ -168,6 +166,9 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       setIsShowingCachedSummaries(false);
       setSummarySyncError("");
     } catch (error) {
+      if (!canCommitForIdentity(requestIdentity)) {
+        return;
+      }
       const message =
         error instanceof Error && error.message.trim().length > 0
           ? error.message
@@ -175,20 +176,29 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       setSummarySyncError(message);
       throw error;
     } finally {
-      setIsCookbookLoading(false);
+      if (canCommitForIdentity(requestIdentity)) {
+        setIsCookbookLoading(false);
+      }
     }
-  }, [replaceSummariesWithFirstPage, resetLocalState]);
+  }, [canCommitForIdentity, replaceSummariesWithFirstPage, resetLocalState]);
 
   const refreshSummaries = useCallback(async () => {
+    const authContext = await getMobileAuthRequestContext();
+    const requestIdentity = authContext.identity;
+    if (!canCommitForIdentity(requestIdentity)) {
+      return;
+    }
     setIsCookbookRefreshing(true);
     try {
-      const authToken = await getMobileAuthToken();
-      if (!authToken) {
+      if (!authContext.session) {
         resetLocalState();
         setHasLoadedCookbook(true);
         return;
       }
       const page = await fetchCookbookSummaries();
+      if (!canCommitForIdentity(requestIdentity)) {
+        return;
+      }
       replaceSummariesWithFirstPage(page.recipes);
       setCookbookStats(page.stats);
       setHasLoadedCookbook(true);
@@ -197,6 +207,9 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       setIsShowingCachedSummaries(false);
       setSummarySyncError("");
     } catch (error) {
+      if (!canCommitForIdentity(requestIdentity)) {
+        return;
+      }
       const message =
         error instanceof Error && error.message.trim().length > 0
           ? error.message
@@ -204,74 +217,116 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       setSummarySyncError(message);
       throw error;
     } finally {
-      setIsCookbookRefreshing(false);
+      if (canCommitForIdentity(requestIdentity)) {
+        setIsCookbookRefreshing(false);
+      }
     }
-  }, [replaceSummariesWithFirstPage, resetLocalState]);
+  }, [canCommitForIdentity, replaceSummariesWithFirstPage, resetLocalState]);
 
   const loadMoreSummaries = useCallback(async () => {
     if (!hasLoadedCookbook || !hasMoreCookbook || !nextCookbookCursor || isCookbookLoadingMore) {
       return;
     }
 
+    const requestIdentity = captureMobileSessionIdentity();
     setIsCookbookLoadingMore(true);
     try {
       const page = await fetchCookbookSummaries(nextCookbookCursor);
+      if (!canCommitForIdentity(requestIdentity)) {
+        return;
+      }
       setCookbookSummaries((current) => {
-        const next = mergeCookbookSummaries(current, page.recipes);
-        void cacheCookbookSummaries(next);
-        return next;
+        return mergeCookbookSummaries(current, page.recipes);
       });
       setCookbookStats(page.stats);
       setHasMoreCookbook(page.hasMore);
       setNextCookbookCursor(page.nextCursor);
       setSummarySyncError("");
     } finally {
-      setIsCookbookLoadingMore(false);
+      if (canCommitForIdentity(requestIdentity)) {
+        setIsCookbookLoadingMore(false);
+      }
     }
-  }, [hasLoadedCookbook, hasMoreCookbook, isCookbookLoadingMore, nextCookbookCursor]);
+  }, [
+    canCommitForIdentity,
+    hasLoadedCookbook,
+    hasMoreCookbook,
+    isCookbookLoadingMore,
+    nextCookbookCursor,
+  ]);
 
   const loadRecord = useCallback(
     async (recipeId: string) => {
-      const cached = cookbookRecordCache[recipeId];
+      const requestIdentity = captureMobileSessionIdentity();
+      const cached =
+        stateOwnerRevision === requestIdentity.revision
+          ? cookbookRecordCache[recipeId]
+          : undefined;
       if (cached) {
         return cached;
       }
 
       const cachedDetail = await readCachedCookbookRecipe(recipeId);
+      if (!canCommitForIdentity(requestIdentity)) {
+        throw new Error("Mobile account changed while the recipe was loading.");
+      }
       if (cachedDetail) {
         upsertCookbookRecordState(cachedDetail);
         return cachedDetail;
       }
 
       const record = await fetchCookbookRecipe(recipeId);
+      if (!canCommitForIdentity(requestIdentity)) {
+        throw new Error("Mobile account changed while the recipe was loading.");
+      }
       upsertCookbookRecordState(record);
       return record;
     },
-    [cookbookRecordCache, upsertCookbookRecordState],
+    [
+      canCommitForIdentity,
+      cookbookRecordCache,
+      stateOwnerRevision,
+      upsertCookbookRecordState,
+    ],
   );
 
   const refreshRecord = useCallback(
     async (recipeId: string) => {
+      const requestIdentity = captureMobileSessionIdentity();
       const record = await fetchCookbookRecipe(recipeId);
+      if (!canCommitForIdentity(requestIdentity)) {
+        throw new Error("Mobile account changed while the recipe was refreshing.");
+      }
       upsertCookbookRecordState(record);
       return record;
     },
-    [upsertCookbookRecordState],
+    [canCommitForIdentity, upsertCookbookRecordState],
   );
 
   const saveRecord = useCallback(
     async (record: GeneratedRecipeRecord) => {
+      const requestIdentity = captureMobileSessionIdentity();
       const savedRecord = await saveCookbookRecipe(record);
+      if (!canCommitForIdentity(requestIdentity)) {
+        throw new Error("Mobile account changed while the recipe was saving.");
+      }
       upsertCookbookRecordState(savedRecord);
       setSummarySyncError("");
       return savedRecord;
     },
-    [upsertCookbookRecordState],
+    [canCommitForIdentity, upsertCookbookRecordState],
   );
 
   const deleteRecord = useCallback(async (recipeId: string) => {
-    const deletedRecord = cookbookRecordCache[recipeId];
+    const requestIdentity = captureMobileSessionIdentity();
+    const deletedRecord =
+      stateOwnerRevision === requestIdentity.revision
+        ? cookbookRecordCache[recipeId]
+        : undefined;
     await deleteCookbookRecipe(recipeId);
+    if (!canCommitForIdentity(requestIdentity)) {
+      throw new Error("Mobile account changed while the recipe was deleting.");
+    }
     if (deletedRecord) {
       void upsertDashboardFusionHistory({
         recipe: deletedRecord.recipe,
@@ -294,15 +349,16 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
           toTryRecipes: Math.max(0, stats.toTryRecipes - (removed.isToTry ? 1 : 0)),
         }));
       }
-      void cacheCookbookSummaries(next);
       return next;
     });
     setSummarySyncError("");
-  }, [cookbookRecordCache]);
+  }, [canCommitForIdentity, cookbookRecordCache, stateOwnerRevision]);
 
   const updateRecipeFlags = useCallback(
     async (recipeId: string, flags: { isFavorite?: boolean; isToTry?: boolean }) => {
-      const currentRecord = cookbookRecordCache[recipeId];
+      const requestIdentity = captureMobileSessionIdentity();
+      const ownsCurrentState = stateOwnerRevision === requestIdentity.revision;
+      const currentRecord = ownsCurrentState ? cookbookRecordCache[recipeId] : undefined;
       // Update the button state immediately, then roll back if the API call fails.
       if (currentRecord) {
         upsertCookbookRecordState({
@@ -310,7 +366,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
           isFavorite: flags.isFavorite ?? currentRecord.isFavorite,
           isToTry: flags.isToTry ?? currentRecord.isToTry,
         });
-      } else {
+      } else if (ownsCurrentState) {
         setCookbookSummaries((current) => {
           const next = current.map((summary) =>
             summary.recipeId === recipeId
@@ -321,17 +377,22 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
                 }
               : summary,
           );
-          void cacheCookbookSummaries(next);
           return next;
         });
       }
 
       try {
         const updated = await updateCookbookRecipeFlags(recipeId, flags);
+        if (!canCommitForIdentity(requestIdentity)) {
+          throw new Error("Mobile account changed while the recipe was updating.");
+        }
         upsertCookbookRecordState(updated);
         setSummarySyncError("");
         return updated;
       } catch (error) {
+        if (!canCommitForIdentity(requestIdentity)) {
+          throw error;
+        }
         if (currentRecord) {
           upsertCookbookRecordState(currentRecord);
         } else {
@@ -340,25 +401,33 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
         throw error;
       }
     },
-    [cookbookRecordCache, refreshSummaries, upsertCookbookRecordState],
+    [
+      canCommitForIdentity,
+      cookbookRecordCache,
+      refreshSummaries,
+      stateOwnerRevision,
+      upsertCookbookRecordState,
+    ],
   );
 
   const value = useMemo<MobileCookbookContextValue>(
     () => ({
-      summaries: cookbookSummaries,
-      stats: cookbookStats,
-      isLoading: isCookbookLoading,
-      isRefreshing: isCookbookRefreshing,
-      isLoadingMore: isCookbookLoadingMore,
-      hasLoaded: hasLoadedCookbook,
-      hasMore: hasMoreCookbook,
-      isShowingCachedSummaries,
-      summarySyncError,
+      summaries: isStateOwnedByCurrentSession ? cookbookSummaries : [],
+      stats: isStateOwnedByCurrentSession ? cookbookStats : EMPTY_COOKBOOK_STATS,
+      isLoading: isStateOwnedByCurrentSession ? isCookbookLoading : false,
+      isRefreshing: isStateOwnedByCurrentSession ? isCookbookRefreshing : false,
+      isLoadingMore: isStateOwnedByCurrentSession ? isCookbookLoadingMore : false,
+      hasLoaded: isStateOwnedByCurrentSession ? hasLoadedCookbook : false,
+      hasMore: isStateOwnedByCurrentSession ? hasMoreCookbook : false,
+      isShowingCachedSummaries:
+        isStateOwnedByCurrentSession && isShowingCachedSummaries,
+      summarySyncError: isStateOwnedByCurrentSession ? summarySyncError : "",
       loadSummaries,
       refreshSummaries,
       loadMoreSummaries,
       saveRecord,
-      getRecord: (recipeId: string) => cookbookRecordCache[recipeId],
+      getRecord: (recipeId: string) =>
+        isStateOwnedByCurrentSession ? cookbookRecordCache[recipeId] : undefined,
       loadRecord,
       refreshRecord,
       updateRecipeFlags,
@@ -376,6 +445,7 @@ export function MobileCookbookProvider({ children }: { children: ReactNode }) {
       isCookbookLoading,
       isCookbookLoadingMore,
       isCookbookRefreshing,
+      isStateOwnedByCurrentSession,
       loadRecord,
       loadMoreSummaries,
       loadSummaries,

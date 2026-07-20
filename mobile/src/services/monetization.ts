@@ -1,7 +1,13 @@
 import { Platform } from "react-native";
 import { getApiBaseUrl } from "../config/api";
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
-import { getMobileAuthToken } from "./auth";
+import { getMobileAuthRequestContext, getMobileAuthToken } from "./auth";
+import {
+  getMobileSessionIdentity,
+  isMobileSessionIdentityCurrent,
+  subscribeToMobileSessionIdentity,
+  type MobileSessionIdentity,
+} from "./authSession";
 import { clearInvalidMobileSession, isInvalidAuthPayload } from "./sessionInvalidation";
 
 type IapResponse = {
@@ -105,6 +111,7 @@ let cachedAccountSnapshot:
   | {
       value: MonetizationAccountSnapshot;
       fetchedAtMs: number;
+      sessionRevision: number;
     }
   | null = null;
 const accountSnapshotListeners = new Set<(snapshot: MonetizationAccountSnapshot) => void>();
@@ -156,9 +163,11 @@ function isLoginRequiredPayload(payload: unknown) {
 
 function setSignedOutAccountSnapshot() {
   const snapshot = buildSignedOutAccountSnapshot();
+  const identity = getMobileSessionIdentity();
   cachedAccountSnapshot = {
     value: snapshot,
     fetchedAtMs: Date.now(),
+    sessionRevision: identity.revision,
   };
   notifyAccountSnapshotListeners(snapshot);
   return snapshot;
@@ -235,15 +244,19 @@ function extractErrorMessage(payload: Record<string, unknown>, fallback: string)
   return fallback;
 }
 
-async function handleInvalidAuthResponse(response: Response, payload: unknown) {
+async function handleInvalidAuthResponse(
+  response: Response,
+  payload: unknown,
+  identity?: MobileSessionIdentity,
+) {
   if (response.status !== 401 || !isInvalidAuthPayload(payload)) {
     return;
   }
-  await clearInvalidMobileSession();
+  await clearInvalidMobileSession(identity);
   resetMonetizationAccountSnapshotForSignedOutSession();
 }
 
-async function withIdentityHeaders() {
+async function withIdentityHeaders(authTokenOverride?: string) {
   const [mobileAnonId, mobileDeviceKey] = await Promise.all([
     getMobileAnonymousId(),
     getMobileDeviceKey(),
@@ -252,7 +265,10 @@ async function withIdentityHeaders() {
     "x-flavor-fusion-anon-id": mobileAnonId,
     "x-flavor-fusion-device-key": mobileDeviceKey,
   };
-  const authToken = await getMobileAuthToken();
+  const authToken =
+    typeof authTokenOverride === "string"
+      ? authTokenOverride
+      : await getMobileAuthToken();
   if (authToken) {
     headers.authorization = `Bearer ${authToken}`;
   }
@@ -354,6 +370,10 @@ function notifyAccountSnapshotListeners(snapshot: MonetizationAccountSnapshot) {
   });
 }
 
+subscribeToMobileSessionIdentity(() => {
+  setSignedOutAccountSnapshot();
+});
+
 export async function fetchMonetizationAccountSnapshot(options?: {
   preferCache?: boolean;
   forceRefresh?: boolean;
@@ -361,22 +381,25 @@ export async function fetchMonetizationAccountSnapshot(options?: {
   const preferCache = options?.preferCache === true;
   const forceRefresh = options?.forceRefresh === true;
   const now = Date.now();
+  const authContext = await getMobileAuthRequestContext();
+  const requestIdentity = authContext.identity;
 
   if (
     !forceRefresh &&
     preferCache &&
     cachedAccountSnapshot &&
+    cachedAccountSnapshot.sessionRevision === requestIdentity.revision &&
     now - cachedAccountSnapshot.fetchedAtMs <= ACCOUNT_SNAPSHOT_CACHE_TTL_MS
   ) {
     return cachedAccountSnapshot.value;
   }
 
-  const authToken = await getMobileAuthToken();
-  if (!authToken) {
-    return setSignedOutAccountSnapshot();
+  const identityHeaders = await withIdentityHeaders(authContext.token);
+  if (!isMobileSessionIdentityCurrent(requestIdentity)) {
+    return cachedAccountSnapshot?.sessionRevision === getMobileSessionIdentity().revision
+      ? cachedAccountSnapshot.value
+      : buildSignedOutAccountSnapshot();
   }
-
-  const identityHeaders = await withIdentityHeaders();
   const response = await fetch(`${getApiBaseUrl()}/api/monetization/account`, {
     method: "GET",
     headers: {
@@ -384,16 +407,26 @@ export async function fetchMonetizationAccountSnapshot(options?: {
       "Content-Type": "application/json",
     },
   });
+  if (!isMobileSessionIdentityCurrent(requestIdentity)) {
+    return cachedAccountSnapshot?.sessionRevision === getMobileSessionIdentity().revision
+      ? cachedAccountSnapshot.value
+      : buildSignedOutAccountSnapshot();
+  }
   const canonicalAnonId = response.headers.get("x-flavor-fusion-anon-id")?.trim();
   if (canonicalAnonId) {
     await setMobileAnonymousId(canonicalAnonId);
   }
   const payload = (await response.json()) as MonetizationAccountPayload;
+  if (!isMobileSessionIdentityCurrent(requestIdentity)) {
+    return cachedAccountSnapshot?.sessionRevision === getMobileSessionIdentity().revision
+      ? cachedAccountSnapshot.value
+      : buildSignedOutAccountSnapshot();
+  }
   if (!response.ok) {
     if (response.status === 401 && isLoginRequiredPayload(payload)) {
       return setSignedOutAccountSnapshot();
     }
-    await handleInvalidAuthResponse(response, payload);
+    await handleInvalidAuthResponse(response, payload, requestIdentity);
     const message = extractErrorMessage(
       payload as Record<string, unknown>,
       "Could not load monetization account.",
@@ -428,9 +461,15 @@ export async function fetchMonetizationAccountSnapshot(options?: {
     pricingPackages: parsePricingPackages(payload.pricingPackages),
   } satisfies MonetizationAccountSnapshot;
 
+  if (!isMobileSessionIdentityCurrent(requestIdentity)) {
+    return cachedAccountSnapshot?.sessionRevision === getMobileSessionIdentity().revision
+      ? cachedAccountSnapshot.value
+      : buildSignedOutAccountSnapshot();
+  }
   cachedAccountSnapshot = {
     value: snapshot,
     fetchedAtMs: now,
+    sessionRevision: requestIdentity.revision,
   };
   notifyAccountSnapshotListeners(snapshot);
   return snapshot;

@@ -2,13 +2,15 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useFocusEffect, type NavigationProp } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Image, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppCreditHeader } from "../components/AppCreditHeader";
 import { useMobileCookbook } from "../context/mobileCookbook";
+import { useMobileSessionIdentity } from "../hooks/useMobileSessionIdentity";
 import type { HomeStackParamList, RootTabParamList } from "../navigation/types";
-import { getMobileAuthSession } from "../services/auth";
+import { getMobileAuthRequestContext } from "../services/auth";
+import { isMobileSessionIdentityCurrent } from "../services/authSession";
 import {
   cookbookSummaryToDashboardFusion,
   readDashboardFusionHistory,
@@ -46,20 +48,30 @@ export function DashboardHomeScreen({
   navigation,
 }: NativeStackScreenProps<HomeStackParamList, "DashboardHome">) {
   const { summaries, stats, loadSummaries, hasLoaded } = useMobileCookbook();
+  const sessionIdentity = useMobileSessionIdentity();
   const [displayName, setDisplayName] = useState("Chef");
   const [recentFusions, setRecentFusions] = useState<DashboardFusionSummary[]>([]);
+  const [dashboardRevision, setDashboardRevision] = useState(sessionIdentity.revision);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const ownsDashboardState = dashboardRevision === sessionIdentity.revision;
+  const visibleDisplayName = ownsDashboardState ? displayName : "Chef";
 
   const loadDashboard = useCallback(
     async (options?: { forceRefreshCredits?: boolean }) => {
-      const [session, overrides, history] = await Promise.all([
-        getMobileAuthSession(),
+      const authContext = await getMobileAuthRequestContext();
+      const session = authContext.session;
+      const expectedIdentity = authContext.identity;
+      const [overrides, history] = await Promise.all([
         readMobileProfileOverrides(),
         readDashboardFusionHistory(),
       ]);
+      if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
+        return;
+      }
       const nextName = overrides.displayName || session?.name || session?.email || "Chef";
       setDisplayName(getFirstName(nextName));
       setRecentFusions(history);
+      setDashboardRevision(expectedIdentity.revision);
 
       if (!hasLoaded) {
         void loadSummaries().catch(() => {});
@@ -74,6 +86,13 @@ export function DashboardHomeScreen({
     [hasLoaded, loadSummaries],
   );
 
+  useEffect(() => {
+    setDisplayName("Chef");
+    setRecentFusions([]);
+    setDashboardRevision(sessionIdentity.revision);
+    setIsRefreshing(false);
+  }, [sessionIdentity.revision]);
+
   useFocusEffect(
     useCallback(() => {
       void loadDashboard().catch(() => {});
@@ -81,24 +100,28 @@ export function DashboardHomeScreen({
   );
 
   const handleRefresh = useCallback(async () => {
+    const expectedIdentity = sessionIdentity;
     setIsRefreshing(true);
     try {
       await Promise.all([loadDashboard({ forceRefreshCredits: true }), loadSummaries()]);
     } finally {
-      setIsRefreshing(false);
+      if (isMobileSessionIdentityCurrent(expectedIdentity)) {
+        setIsRefreshing(false);
+      }
     }
-  }, [loadDashboard, loadSummaries]);
+  }, [loadDashboard, loadSummaries, sessionIdentity]);
 
   const dashboardRecipes = useMemo(() => {
     const cookbookItems = summaries.slice(0, 4).map(cookbookSummaryToDashboardFusion);
+    const currentRecentFusions = ownsDashboardState ? recentFusions : [];
     const byId = new Map<string, DashboardFusionSummary>();
-    for (const item of [...recentFusions, ...cookbookItems]) {
+    for (const item of [...currentRecentFusions, ...cookbookItems]) {
       byId.set(item.id, item);
     }
     return [...byId.values()]
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
       .slice(0, 2);
-  }, [recentFusions, summaries]);
+  }, [ownsDashboardState, recentFusions, summaries]);
 
   function openCreate(params?: { importPhoto?: boolean }) {
     const parentNavigation = navigation.getParent<NavigationProp<RootTabParamList>>();
@@ -141,6 +164,7 @@ export function DashboardHomeScreen({
     if (item.record) {
       navigation.navigate("RecipeWorkspace", {
         initialRecord: item.record,
+        initialRecordOwner: sessionIdentity,
       });
       return;
     }
@@ -173,7 +197,7 @@ export function DashboardHomeScreen({
 
           <View style={styles.dashboardGreetingBlock}>
             <Text style={styles.dashboardGreeting}>
-              {getGreeting()}, {displayName}!
+              {getGreeting()}, {visibleDisplayName}!
             </Text>
             <Text style={styles.dashboardGreetingCopy}>Let&apos;s create something amazing today.</Text>
           </View>

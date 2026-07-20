@@ -35,6 +35,7 @@ import {
   loginWithAppleForMobile,
   loginWithGoogleForMobile,
 } from "../services/auth";
+import { captureMobileSessionIdentity } from "../services/authSession";
 import { GENERAL_SUPPORT_URL } from "../config/links";
 import {
   fetchMonetizationAccountSnapshot,
@@ -694,6 +695,7 @@ export function HomeScreen({
       pendingRequest: {
         input,
         requestId: generateRequestId(),
+        owner: captureMobileSessionIdentity(),
       },
     });
   }

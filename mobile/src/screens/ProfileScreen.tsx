@@ -23,13 +23,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { BrandHeader } from "../components/BrandHeader";
 import { CreditPill } from "../components/CreditPill";
 import { useMobileCookbook } from "../context/mobileCookbook";
+import { useMobileSessionIdentity } from "../hooks/useMobileSessionIdentity";
 import type { RootTabParamList } from "../navigation/types";
 import {
-  getMobileAuthSession,
+  getMobileAuthRequestContext,
   loginWithAppleForMobile,
   loginWithGoogleForMobile,
   type MobileAuthSession,
 } from "../services/auth";
+import {
+  captureMobileSessionIdentity,
+  isMobileSessionChangedError,
+  isMobileSessionIdentityCurrent,
+} from "../services/authSession";
 import {
   fetchMonetizationAccountSnapshot,
   getAvailableCreditProductIdsForPlatform,
@@ -167,6 +173,7 @@ function ProfileAvatar({
 
 export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, "Profile">) {
   const { resetLocalState, refreshSummaries, stats } = useMobileCookbook();
+  const sessionIdentity = useMobileSessionIdentity();
   const [session, setSession] = useState<MobileAuthSession | null>(null);
   const [profileOverrides, setProfileOverrides] = useState<MobileProfileOverrides>({
     displayName: "",
@@ -189,49 +196,70 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   const [draftName, setDraftName] = useState("");
   const [draftPhotoUri, setDraftPhotoUri] = useState("");
   const [failedPhotoUri, setFailedPhotoUri] = useState("");
+  const [profileRevision, setProfileRevision] = useState(sessionIdentity.revision);
 
-  const displayName = profileOverrides.displayName || session?.name || "Welcome, Chef";
-  const email = session?.email ?? "";
+  const ownsProfileState = profileRevision === sessionIdentity.revision;
+  const visibleSession = ownsProfileState ? session : null;
+  const visibleProfileOverrides = ownsProfileState
+    ? profileOverrides
+    : { displayName: "", photoUri: "" };
+  const visibleAccountSnapshot = ownsProfileState ? accountSnapshot : null;
+  const displayName =
+    visibleProfileOverrides.displayName || visibleSession?.name || "Welcome, Chef";
+  const email = visibleSession?.email ?? "";
   const overridePhotoUri =
-    profileOverrides.photoUri && profileOverrides.photoUri !== failedPhotoUri
-      ? profileOverrides.photoUri
+    visibleProfileOverrides.photoUri && visibleProfileOverrides.photoUri !== failedPhotoUri
+      ? visibleProfileOverrides.photoUri
       : "";
   const sessionPhotoUri =
-    session?.avatarUrl && session.avatarUrl !== failedPhotoUri ? session.avatarUrl : "";
+    visibleSession?.avatarUrl && visibleSession.avatarUrl !== failedPhotoUri
+      ? visibleSession.avatarUrl
+      : "";
   const profilePhotoUri = overridePhotoUri || sessionPhotoUri;
-  const isSignedIn = session !== null;
-  const availableCredits = accountSnapshot?.balance.availableCredits ?? 0;
-  const freeFuseRemaining = accountSnapshot?.freeRemaining.fuse ?? 0;
-  const freeRerollRemaining = accountSnapshot?.freeRemaining.reroll ?? 0;
-  const fuseCreditCost = accountSnapshot?.actionCosts.fuse ?? 3;
-  const rerollCreditCost = accountSnapshot?.actionCosts.reroll ?? 1;
+  const isSignedIn = visibleSession !== null;
+  const availableCredits = visibleAccountSnapshot?.balance.availableCredits ?? 0;
+  const freeFuseRemaining = visibleAccountSnapshot?.freeRemaining.fuse ?? 0;
+  const freeRerollRemaining = visibleAccountSnapshot?.freeRemaining.reroll ?? 0;
+  const fuseCreditCost = visibleAccountSnapshot?.actionCosts.fuse ?? 3;
+  const rerollCreditCost = visibleAccountSnapshot?.actionCosts.reroll ?? 1;
   const fuseCreditCostLabel = formatCreditCount(fuseCreditCost);
   const rerollCreditCostLabel = formatCreditCount(rerollCreditCost);
   const appVersion =
     Constants.expoConfig?.version || Constants.manifest2?.extra?.expoClient?.version || "2.0.0";
 
   const loadProfile = useCallback(async () => {
+    let expectedIdentity = captureMobileSessionIdentity();
     setIsLoading(true);
     try {
-      const [nextSession, nextOverrides] = await Promise.all([
-        getMobileAuthSession(),
-        readMobileProfile(),
-      ]);
+      const authContext = await getMobileAuthRequestContext();
+      const nextSession = authContext.session;
+      expectedIdentity = authContext.identity;
+      const nextOverrides = await readMobileProfile();
+      if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
+        return;
+      }
       setSession(nextSession);
       setProfileOverrides(nextOverrides);
       setFailedPhotoUri("");
+      setProfileRevision(expectedIdentity.revision);
       if (!nextSession) {
         setAccountSnapshot(null);
         return;
       }
       try {
         const snapshot = await fetchMonetizationAccountSnapshot({ preferCache: true });
-        setAccountSnapshot(snapshot);
+        if (isMobileSessionIdentityCurrent(expectedIdentity)) {
+          setAccountSnapshot(snapshot);
+        }
       } catch {
-        setAccountSnapshot(null);
+        if (isMobileSessionIdentityCurrent(expectedIdentity)) {
+          setAccountSnapshot(null);
+        }
       }
     } finally {
-      setIsLoading(false);
+      if (isMobileSessionIdentityCurrent(expectedIdentity)) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
@@ -242,23 +270,43 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   }, [profilePhotoUri]);
 
   const handleRefreshProfile = useCallback(async () => {
+    const expectedIdentity = sessionIdentity;
     setIsRefreshingProfile(true);
     try {
       await Promise.all([loadProfile(), refreshSummaries()]);
     } catch (error) {
+      if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
+        return;
+      }
       const message =
         error instanceof Error && error.message.trim().length > 0
           ? error.message
           : "Could not refresh profile right now.";
       Alert.alert("Refresh failed", message);
     } finally {
-      setIsRefreshingProfile(false);
+      if (isMobileSessionIdentityCurrent(expectedIdentity)) {
+        setIsRefreshingProfile(false);
+      }
     }
-  }, [loadProfile, refreshSummaries]);
+  }, [loadProfile, refreshSummaries, sessionIdentity]);
 
   useEffect(() => {
+    setSession(null);
+    setProfileOverrides({ displayName: "", photoUri: "" });
+    setAccountSnapshot(null);
+    setProfileRevision(sessionIdentity.revision);
+    setFailedPhotoUri("");
+    setIsEditOpen(false);
+    setIsCreditSheetOpen(false);
+    setCreditPackOptions([]);
+    setSelectedCreditPackId("");
+    setCreditPurchaseMessage("");
+    setIsRefreshingProfile(false);
+    setIsSavingProfile(false);
+    setDraftName("");
+    setDraftPhotoUri("");
     void loadProfile();
-  }, [loadProfile]);
+  }, [loadProfile, sessionIdentity.revision]);
 
   const syncAccountOwnedStateAfterLogin = useCallback(async () => {
     resetLocalState();
@@ -572,6 +620,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   }, [displayName, profilePhotoUri]);
 
   const handleChoosePhoto = useCallback(async () => {
+    const expectedIdentity = captureMobileSessionIdentity();
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert("Photo access needed", "Allow photo library access to choose a profile photo.");
@@ -584,19 +633,37 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       quality: 0.85,
     });
     if (!result.canceled && result.assets[0]?.uri) {
+      if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
+        return;
+      }
       const nextPhotoUri = result.assets[0].uri;
       if (isEditOpen) {
         setDraftPhotoUri(nextPhotoUri);
         return;
       }
       try {
-        const uploadedPhotoUri = await uploadProfilePhoto(nextPhotoUri, `${displayName || "profile"} profile photo`);
-        const nextOverrides = await saveMobileProfile({
-          ...profileOverrides,
-          photoUri: uploadedPhotoUri,
-        });
-        setProfileOverrides(nextOverrides);
+        const uploadedPhotoUri = await uploadProfilePhoto(
+          nextPhotoUri,
+          `${displayName || "profile"} profile photo`,
+          expectedIdentity,
+        );
+        if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
+          return;
+        }
+        const nextOverrides = await saveMobileProfile(
+          {
+            ...profileOverrides,
+            photoUri: uploadedPhotoUri,
+          },
+          expectedIdentity,
+        );
+        if (isMobileSessionIdentityCurrent(expectedIdentity)) {
+          setProfileOverrides(nextOverrides);
+        }
       } catch (error) {
+        if (isMobileSessionChangedError(error)) {
+          return;
+        }
         const message =
           error instanceof Error && error.message.trim().length > 0
             ? error.message
@@ -607,6 +674,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
   }, [displayName, isEditOpen, profileOverrides]);
 
   const handleTakePhoto = useCallback(async () => {
+    const expectedIdentity = captureMobileSessionIdentity();
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       Alert.alert("Camera access needed", "Allow camera access to take a profile photo.");
@@ -618,19 +686,37 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       quality: 0.85,
     });
     if (!result.canceled && result.assets[0]?.uri) {
+      if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
+        return;
+      }
       const nextPhotoUri = result.assets[0].uri;
       if (isEditOpen) {
         setDraftPhotoUri(nextPhotoUri);
         return;
       }
       try {
-        const uploadedPhotoUri = await uploadProfilePhoto(nextPhotoUri, `${displayName || "profile"} profile photo`);
-        const nextOverrides = await saveMobileProfile({
-          ...profileOverrides,
-          photoUri: uploadedPhotoUri,
-        });
-        setProfileOverrides(nextOverrides);
+        const uploadedPhotoUri = await uploadProfilePhoto(
+          nextPhotoUri,
+          `${displayName || "profile"} profile photo`,
+          expectedIdentity,
+        );
+        if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
+          return;
+        }
+        const nextOverrides = await saveMobileProfile(
+          {
+            ...profileOverrides,
+            photoUri: uploadedPhotoUri,
+          },
+          expectedIdentity,
+        );
+        if (isMobileSessionIdentityCurrent(expectedIdentity)) {
+          setProfileOverrides(nextOverrides);
+        }
       } catch (error) {
+        if (isMobileSessionChangedError(error)) {
+          return;
+        }
         const message =
           error instanceof Error && error.message.trim().length > 0
             ? error.message
@@ -645,27 +731,46 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
       return;
     }
     setIsSavingProfile(true);
+    const expectedIdentity = captureMobileSessionIdentity();
     try {
       const trimmedName = draftName.trim();
       const trimmedPhotoUri = draftPhotoUri.trim();
       const nextPhotoUri =
         trimmedPhotoUri && !trimmedPhotoUri.startsWith("http")
-          ? await uploadProfilePhoto(trimmedPhotoUri, `${trimmedName || displayName || "profile"} profile photo`)
+          ? await uploadProfilePhoto(
+              trimmedPhotoUri,
+              `${trimmedName || displayName || "profile"} profile photo`,
+              expectedIdentity,
+            )
           : trimmedPhotoUri;
-      const nextOverrides = await saveMobileProfile({
-        displayName: trimmedName,
-        photoUri: nextPhotoUri,
-      });
+      if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
+        return;
+      }
+      const nextOverrides = await saveMobileProfile(
+        {
+          displayName: trimmedName,
+          photoUri: nextPhotoUri,
+        },
+        expectedIdentity,
+      );
+      if (!isMobileSessionIdentityCurrent(expectedIdentity)) {
+        return;
+      }
       setProfileOverrides(nextOverrides);
       setIsEditOpen(false);
     } catch (error) {
+      if (isMobileSessionChangedError(error)) {
+        return;
+      }
       const message =
         error instanceof Error && error.message.trim().length > 0
           ? error.message
           : "Could not save profile changes.";
       Alert.alert("Profile not saved", message);
     } finally {
-      setIsSavingProfile(false);
+      if (isMobileSessionIdentityCurrent(expectedIdentity)) {
+        setIsSavingProfile(false);
+      }
     }
   }, [displayName, draftName, draftPhotoUri, isSavingProfile]);
 
@@ -1084,7 +1189,7 @@ export function ProfileScreen({ route }: BottomTabScreenProps<RootTabParamList, 
               <TextInput
                 autoCapitalize="words"
                 onChangeText={setDraftName}
-                placeholder={session?.name || "Your name"}
+                placeholder={visibleSession?.name || "Your name"}
                 placeholderTextColor="#9ca3af"
                 style={styles.profileNameInput}
                 value={draftName}
