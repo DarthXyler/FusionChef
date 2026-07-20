@@ -8,12 +8,20 @@ import {
 import { getMobileAnonymousId, getMobileDeviceKey, setMobileAnonymousId } from "./mobileIdentity";
 import { getMobileAuthRequestContext, getMobileAuthToken } from "./auth";
 import {
+  assertMobileSessionIdentityCurrent,
   captureMobileSessionIdentity,
   getMobileSessionIdentity,
   isMobileSessionIdentityCurrent,
   subscribeToMobileSessionIdentity,
   type MobileSessionIdentity,
 } from "./authSession";
+import {
+  buildPurchaseVerificationHeaders,
+  createPurchaseAccountBinding,
+  isPurchaseAccountBindingCurrent,
+  type PurchaseAccountBinding,
+  type PurchaseAccountProvider,
+} from "./purchaseAccountBinding";
 import { clearInvalidMobileSession, isInvalidAuthPayload } from "./sessionInvalidation";
 
 type IapResponse = {
@@ -48,7 +56,7 @@ type ExpoIapModule = {
 
 let cachedExpoIapModule: ExpoIapModule | null | undefined;
 
-type PurchaseProvider = "apple_app_store" | "google_play";
+type PurchaseProvider = PurchaseAccountProvider;
 
 type VerifyPurchasePayload = {
   purchase?: unknown;
@@ -261,8 +269,10 @@ async function handleInvalidAuthResponse(
   if (response.status !== 401 || !isInvalidAuthPayload(payload)) {
     return;
   }
-  await clearInvalidMobileSession(identity);
-  resetMonetizationAccountSnapshotForSignedOutSession();
+  const didClearSession = await clearInvalidMobileSession(identity);
+  if (didClearSession) {
+    resetMonetizationAccountSnapshotForSignedOutSession();
+  }
 }
 
 async function withIdentityHeaders(authTokenOverride?: string) {
@@ -282,6 +292,29 @@ async function withIdentityHeaders(authTokenOverride?: string) {
     headers.authorization = `Bearer ${authToken}`;
   }
   return headers;
+}
+
+async function capturePurchaseAccountContext<TProvider extends PurchaseProvider>(
+  provider: TProvider,
+) {
+  const authContext = await getMobileAuthRequestContext();
+  if (!authContext.session || !authContext.token || !authContext.identity.userId) {
+    throw new Error("Sign in to purchase credits.");
+  }
+  const [anonymousId, deviceKey] = await Promise.all([
+    getMobileAnonymousId(),
+    getMobileDeviceKey(),
+  ]);
+  assertMobileSessionIdentityCurrent(authContext.identity);
+  return createPurchaseAccountBinding({
+    provider,
+    userId: authContext.session.userId,
+    identity: authContext.identity,
+    authToken: authContext.token,
+    anonymousId,
+    deviceKey,
+    idempotencyKey: generateIdempotencyKey(),
+  });
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -576,14 +609,15 @@ export function refreshMonetizationAccountAfterMutation(options?: {
 async function verifyApplePurchase(params: {
   productId: string;
   appleTransactionId: string;
+  purchaseContext: PurchaseAccountBinding<"apple_app_store">;
 }) {
-  const identityHeaders = await withIdentityHeaders();
+  const identityHeaders = buildPurchaseVerificationHeaders(params.purchaseContext);
   const response = await fetch(`${getApiBaseUrl()}/api/monetization/purchases/verify`, {
     method: "POST",
     headers: {
       ...identityHeaders,
       "Content-Type": "application/json",
-      "idempotency-key": generateIdempotencyKey(),
+      "idempotency-key": params.purchaseContext.idempotencyKey,
     },
     body: JSON.stringify({
       provider: "apple_app_store",
@@ -592,13 +626,16 @@ async function verifyApplePurchase(params: {
     }),
   });
   const canonicalAnonId = response.headers.get("x-flavor-fusion-anon-id")?.trim();
-  if (canonicalAnonId) {
+  if (
+    canonicalAnonId &&
+    isPurchaseAccountBindingCurrent(params.purchaseContext, getMobileSessionIdentity())
+  ) {
     await setMobileAnonymousId(canonicalAnonId);
   }
 
   const payload = (await response.json()) as VerifyPurchasePayload;
   if (!response.ok) {
-    await handleInvalidAuthResponse(response, payload);
+    await handleInvalidAuthResponse(response, payload, params.purchaseContext.identity);
     throw new Error(
       extractErrorMessage(payload as Record<string, unknown>, "Purchase verification failed."),
     );
@@ -613,14 +650,15 @@ async function verifyApplePurchase(params: {
 async function verifyGooglePurchase(params: {
   productId: string;
   googlePurchaseToken: string;
+  purchaseContext: PurchaseAccountBinding<"google_play">;
 }) {
-  const identityHeaders = await withIdentityHeaders();
+  const identityHeaders = buildPurchaseVerificationHeaders(params.purchaseContext);
   const response = await fetch(`${getApiBaseUrl()}/api/monetization/purchases/verify`, {
     method: "POST",
     headers: {
       ...identityHeaders,
       "Content-Type": "application/json",
-      "idempotency-key": generateIdempotencyKey(),
+      "idempotency-key": params.purchaseContext.idempotencyKey,
     },
     body: JSON.stringify({
       provider: "google_play",
@@ -630,13 +668,16 @@ async function verifyGooglePurchase(params: {
     }),
   });
   const canonicalAnonId = response.headers.get("x-flavor-fusion-anon-id")?.trim();
-  if (canonicalAnonId) {
+  if (
+    canonicalAnonId &&
+    isPurchaseAccountBindingCurrent(params.purchaseContext, getMobileSessionIdentity())
+  ) {
     await setMobileAnonymousId(canonicalAnonId);
   }
 
   const payload = (await response.json()) as VerifyPurchasePayload;
   if (!response.ok) {
-    await handleInvalidAuthResponse(response, payload);
+    await handleInvalidAuthResponse(response, payload, params.purchaseContext.identity);
     throw new Error(
       extractErrorMessage(
         payload as Record<string, unknown>,
@@ -791,6 +832,7 @@ export async function purchaseAppleCredits(
     throw new Error("This purchase method is unavailable on this device.");
   }
 
+  const purchaseContext = await capturePurchaseAccountContext("apple_app_store");
   const iap = await ensureIapConnected();
 
   const productQuery = await iap.getProductsAsync([productId]);
@@ -823,7 +865,6 @@ export async function purchaseAppleCredits(
     purchase = recoveredPurchase;
   }
   options?.onStatus?.("Adding credits...");
-  const verificationIdentity = captureMobileSessionIdentity();
   const transactionId = purchase.orderId?.trim();
   if (!transactionId) {
     throw new Error("Purchase completed but no transaction id was returned.");
@@ -832,9 +873,10 @@ export async function purchaseAppleCredits(
   const verification = await verifyApplePurchase({
     productId,
     appleTransactionId: transactionId,
+    purchaseContext,
   });
   refreshMonetizationAccountAfterMutation({
-    expectedIdentity: verificationIdentity,
+    expectedIdentity: purchaseContext.identity,
     verifiedBalance: verification.balance,
   });
   await iap.finishTransactionAsync(purchase, true);
@@ -904,6 +946,7 @@ export async function purchaseGoogleCredits(
     throw new Error("Google Play purchases are only available on Android.");
   }
 
+  const purchaseContext = await capturePurchaseAccountContext("google_play");
   const iap = await ensureGoogleIapConnected();
   const products = await iap.fetchProducts({ skus: [productId], type: "in-app" });
   const matchedProduct = products?.find((product) => product.id === productId);
@@ -949,13 +992,13 @@ export async function purchaseGoogleCredits(
   }
 
   options?.onStatus?.("Adding credits...");
-  const verificationIdentity = captureMobileSessionIdentity();
   const verification = await verifyGooglePurchase({
     productId,
     googlePurchaseToken,
+    purchaseContext,
   });
   refreshMonetizationAccountAfterMutation({
-    expectedIdentity: verificationIdentity,
+    expectedIdentity: purchaseContext.identity,
     verifiedBalance: verification.balance,
   });
   try {
