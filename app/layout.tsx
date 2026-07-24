@@ -107,6 +107,7 @@ export default function RootLayout({
                 <p className="font-extrabold uppercase text-emerald-700">Company</p>
                 <Link className="hover:text-emerald-700" href="/contact">Contact</Link>
                 <Link className="hover:text-emerald-700" href="/privacy">Privacy Policy</Link>
+                <Link className="hover:text-emerald-700" href="/delete-account">Delete account</Link>
                 <Link className="hover:text-emerald-700" href="/terms">Terms</Link>
                 <Link className="hover:text-emerald-700" href="/refund-policy">Purchases and refunds</Link>
               </nav>
