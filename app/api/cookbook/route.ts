@@ -21,6 +21,7 @@ import {
   getIdempotencyKeyFromHeaders,
   type IdempotencyContext,
 } from "@/lib/idempotency";
+import { recordCookbookSaveActivitySafely } from "@/lib/product-activity";
 
 const MAX_COOKBOOK_BODY_BYTES = 500_000;
 const COOKBOOK_CACHE_CONTROL = "private, max-age=60, stale-while-revalidate=120";
@@ -192,8 +193,9 @@ export async function POST(request: NextRequest) {
     }
 
     const identity = await resolveCookbookIdentity(request);
+    const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
     const idempotency = await beginIdempotentRequest({
-      key: getIdempotencyKeyFromHeaders(request.headers),
+      key: idempotencyKey,
       scope: `cookbook-save:${identity.anonUserId}`,
       requestPayload: body,
     });
@@ -236,6 +238,10 @@ export async function POST(request: NextRequest) {
     if (!record) {
       return NextResponse.json({ error: "Could not save cookbook recipe." }, { status: 500 });
     }
+    await recordCookbookSaveActivitySafely({
+      authUserId: authValidation.session?.userId,
+      idempotencyKey,
+    });
 
     const responseBody = { record };
     if (idempotencyContext) {

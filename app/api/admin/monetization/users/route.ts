@@ -12,6 +12,7 @@ import {
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
 import { grantCredits } from "@/lib/monetization-ledger";
+import { ensureProductActivitySchema } from "@/lib/product-activity";
 import {
   logMonetizationAudit,
   requireMonetizationAdmin,
@@ -306,6 +307,7 @@ async function ensureAdminUserSchemas() {
     `CREATE INDEX IF NOT EXISTS idx_account_deletion_events_email_hash
      ON account_deletion_events (email_hash)`,
   );
+  await ensureProductActivitySchema();
 }
 
 function rowToResolvedUser(row: Record<string, unknown>): ResolvedUser {
@@ -984,6 +986,11 @@ async function deleteReadyAccounts(params: {
         sql: `DELETE FROM auth_identity_links
               WHERE auth_user_id IN (${authPlaceholders}) OR canonical_anon_user_id = ?`,
         args: [...authUserIds, canonical],
+      },
+      {
+        sql: `DELETE FROM product_activity_events
+              WHERE auth_user_id IN (${authPlaceholders})`,
+        args: authUserIds,
       },
       { sql: `DELETE FROM auth_users WHERE id IN (${authPlaceholders})`, args: authUserIds },
     ], 30_000);
