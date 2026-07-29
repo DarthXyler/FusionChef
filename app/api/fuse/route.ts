@@ -9,7 +9,8 @@ import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
 import { buildInactiveAuthResponse, buildLoginRequiredResponse } from "@/lib/auth-api";
 import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
-import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
+import { resolveCookbookIdentityForProductRequest } from "@/lib/cookbook-identity";
+import type { CookbookIdentity } from "@/lib/cookbook-identity-core";
 import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
 import {
   commitReservedCredits,
@@ -694,7 +695,7 @@ export async function POST(request: NextRequest) {
   const requestStartedAt = Date.now();
   const stageTimings: FuseStageTiming[] = [];
   const monetizationActionKind = getMonetizationActionKind(request);
-  let identity: Awaited<ReturnType<typeof resolveCookbookIdentity>> | null = null;
+  let identity: CookbookIdentity | null = null;
   let reservedCreditReservationId: string | null = null;
 
   const respond = (body: unknown, status = 200) => {
@@ -770,7 +771,14 @@ export async function POST(request: NextRequest) {
     }
 
     const input = normalizeFuseRequest(body);
-    identity = await resolveCookbookIdentity(request);
+    const identityResolution = await resolveCookbookIdentityForProductRequest(request, {
+      authUserId: authValidation.session.userId,
+      requestId,
+    });
+    if (!identityResolution.ok) {
+      return identityResolution.response;
+    }
+    identity = identityResolution.identity;
     const monetizationPreflight = await preflightFuseMonetization({
       anonUserId: identity.anonUserId,
       actionKind: monetizationActionKind,

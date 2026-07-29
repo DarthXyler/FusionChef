@@ -3,7 +3,7 @@
  * GET: returns paginated cookbook summaries for the current anonymous browser identity.
  * POST: saves/upserts one cookbook recipe.
  */
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import type { CookbookRecipeRecord } from "@/lib/types";
 import type { FuseRequest, RecipeFusion } from "@/lib/types";
@@ -13,7 +13,7 @@ import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
 import { buildInactiveAuthResponse } from "@/lib/auth-api";
 import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import { getCookbookStats, listCookbookRecipeSummaries, upsertCookbookRecord } from "@/lib/cookbook-db";
-import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
+import { resolveCookbookIdentityForProductRequest } from "@/lib/cookbook-identity";
 import {
   beginIdempotentRequest,
   clearIdempotentRequest,
@@ -103,6 +103,7 @@ function parsePositiveInt(value: string | null, fallback: number) {
 }
 
 export async function GET(request: NextRequest) {
+  const requestId = randomUUID();
   try {
     // Listing endpoint with rate limiting + anonymous identity cookie.
     const limited = await enforceRateLimit(request, {
@@ -121,7 +122,14 @@ export async function GET(request: NextRequest) {
       return inactiveAuthResponse;
     }
 
-    const identity = await resolveCookbookIdentity(request);
+    const identityResolution = await resolveCookbookIdentityForProductRequest(request, {
+      authUserId: authValidation.session?.userId ?? null,
+      requestId,
+    });
+    if (!identityResolution.ok) {
+      return identityResolution.response;
+    }
+    const identity = identityResolution.identity;
     const cursor = request.nextUrl.searchParams.get("cursor")?.trim() || undefined;
     const pageSize = Math.min(
       parsePositiveInt(
@@ -166,6 +174,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   let idempotencyContext: IdempotencyContext | null = null;
+  const requestId = randomUUID();
   try {
     // Save endpoint with rate limiting + idempotency.
     const limited = await enforceRateLimit(request, {
@@ -192,7 +201,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
     }
 
-    const identity = await resolveCookbookIdentity(request);
+    const identityResolution = await resolveCookbookIdentityForProductRequest(request, {
+      authUserId: authValidation.session?.userId ?? null,
+      requestId,
+    });
+    if (!identityResolution.ok) {
+      return identityResolution.response;
+    }
+    const identity = identityResolution.identity;
     const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
     const idempotency = await beginIdempotentRequest({
       key: idempotencyKey,

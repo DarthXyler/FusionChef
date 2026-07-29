@@ -7,7 +7,7 @@ import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
 import { buildInactiveAuthResponse } from "@/lib/auth-api";
 import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
-import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
+import { resolveCookbookIdentityForProductRequest } from "@/lib/cookbook-identity";
 import {
   beginIdempotentRequest,
   clearIdempotentRequest,
@@ -130,7 +130,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "idempotency-key header is required." }, { status: 400 });
     }
 
-    const identity = await resolveCookbookIdentity(request);
+    const identityResolution = await resolveCookbookIdentityForProductRequest(request, {
+      authUserId: authSession.userId,
+      requestId,
+    });
+    if (!identityResolution.ok) {
+      return identityResolution.response;
+    }
+    const identity = identityResolution.identity;
     const body = parseVerifyBody((await request.json()) as unknown);
     const responseWithIdentity = (payload: unknown, status = 200) => {
       const response = NextResponse.json(payload, { status });

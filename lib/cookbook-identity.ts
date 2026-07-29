@@ -1,71 +1,67 @@
 import type { NextRequest } from "next/server";
 import { randomUUID } from "crypto";
 import { getAnonymousIdentity } from "@/lib/anon-user";
-import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import { mergeCookbookAnonymousUsers } from "@/lib/cookbook-db";
+import {
+  asIdentityResolutionError,
+  createRetryableIdentityInitializer,
+  failClosedIdentityResolution,
+  resolveCookbookIdentityCore,
+  type CookbookIdentity,
+} from "@/lib/cookbook-identity-core";
 import { executeTurso } from "@/lib/turso";
 
 const MOBILE_DEVICE_KEY_HEADER = "x-flavor-fusion-device-key";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-type CookbookIdentity = {
-  anonUserId: string;
-  shouldSetCookie: boolean;
+export type CookbookIdentityResolutionContext = {
+  authUserId: string | null;
+  requestId?: string;
 };
-
-let identitySchemaReady: Promise<void> | null = null;
 
 function isValidUuid(value: string | null | undefined): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value.trim());
 }
 
-async function ensureIdentitySchema() {
-  if (identitySchemaReady) {
-    return identitySchemaReady;
-  }
-
-  identitySchemaReady = (async () => {
-    await executeTurso({
-      sql: `CREATE TABLE IF NOT EXISTS mobile_identity_links (
+const ensureIdentitySchema = createRetryableIdentityInitializer(async () => {
+  await executeTurso({
+    sql: `CREATE TABLE IF NOT EXISTS mobile_identity_links (
               device_key TEXT PRIMARY KEY,
               canonical_anon_user_id TEXT NOT NULL,
               created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
               updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
             )`,
-    });
-    await executeTurso({
-      sql: `CREATE INDEX IF NOT EXISTS idx_mobile_identity_links_canonical
+  });
+  await executeTurso({
+    sql: `CREATE INDEX IF NOT EXISTS idx_mobile_identity_links_canonical
             ON mobile_identity_links (canonical_anon_user_id)`,
-    });
-    await executeTurso({
-      sql: `CREATE TABLE IF NOT EXISTS mobile_identity_aliases (
+  });
+  await executeTurso({
+    sql: `CREATE TABLE IF NOT EXISTS mobile_identity_aliases (
               anon_user_id TEXT PRIMARY KEY,
               canonical_anon_user_id TEXT NOT NULL,
               created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
               updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
             )`,
-    });
-    await executeTurso({
-      sql: `CREATE INDEX IF NOT EXISTS idx_mobile_identity_aliases_canonical
+  });
+  await executeTurso({
+    sql: `CREATE INDEX IF NOT EXISTS idx_mobile_identity_aliases_canonical
             ON mobile_identity_aliases (canonical_anon_user_id)`,
-    });
-    await executeTurso({
-      sql: `CREATE TABLE IF NOT EXISTS auth_identity_links (
+  });
+  await executeTurso({
+    sql: `CREATE TABLE IF NOT EXISTS auth_identity_links (
               auth_user_id TEXT PRIMARY KEY,
               canonical_anon_user_id TEXT NOT NULL,
               created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
               updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
             )`,
-    });
-    await executeTurso({
-      sql: `CREATE INDEX IF NOT EXISTS idx_auth_identity_links_canonical
+  });
+  await executeTurso({
+    sql: `CREATE INDEX IF NOT EXISTS idx_auth_identity_links_canonical
             ON auth_identity_links (canonical_anon_user_id)`,
-    });
-  })();
-
-  return identitySchemaReady;
-}
+  });
+});
 
 async function readCanonicalIdForDevice(deviceKey: string) {
   const result = await executeTurso({
@@ -220,17 +216,6 @@ async function getCookbookRecordCount(anonUserId: string) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
-function uniqueValidIds(ids: Array<string | null | undefined>) {
-  const seen = new Set<string>();
-  for (const id of ids) {
-    if (!isValidUuid(id)) {
-      continue;
-    }
-    seen.add(id.trim());
-  }
-  return [...seen];
-}
-
 async function pickCanonicalAnonId(candidateIds: string[], preferredId: string | null) {
   if (candidateIds.length === 1) {
     return candidateIds[0];
@@ -283,62 +268,63 @@ async function filterCandidatesForSignedOutUser(candidateIds: string[]) {
   return safeCandidates;
 }
 
-export async function resolveCookbookIdentity(request: NextRequest): Promise<CookbookIdentity> {
-  const baseIdentity = getAnonymousIdentity(request);
-  const rawDeviceKey = request.headers.get(MOBILE_DEVICE_KEY_HEADER)?.trim();
-  const deviceKey = isValidUuid(rawDeviceKey) ? rawDeviceKey : null;
-  const { session: authSession } = await getActiveAuthSessionFromRequest(request);
-  const authUserId = authSession?.userId?.trim() ?? "";
-  if (!deviceKey && !authUserId) {
-    return baseIdentity;
-  }
+function logIdentityResolutionFailure(
+  error: ReturnType<typeof asIdentityResolutionError>,
+  requestId: string | undefined,
+) {
+  const safeRequestId = requestId?.trim().slice(0, 128);
+  const cause = error.cause;
+  console.warn(
+    "[cookbook-identity]",
+    JSON.stringify({
+      event: "identity_resolution_failed",
+      stage: error.stage,
+      ...(safeRequestId ? { requestId: safeRequestId } : {}),
+      errorName: cause instanceof Error ? cause.name : "unknown",
+    }),
+  );
+}
 
+export async function resolveCookbookIdentity(
+  request: NextRequest,
+  context: CookbookIdentityResolutionContext,
+): Promise<CookbookIdentity> {
   try {
-    await ensureIdentitySchema();
-    // The app has old anonymous records and new signed-in accounts.
-    // This block chooses one permanent owner ID, then moves older records into it.
-    const linkedCanonical = deviceKey ? await readCanonicalIdForDevice(deviceKey) : null;
-    const authCanonical = authUserId ? await readCanonicalIdForAuthUser(authUserId) : null;
-    const aliasCanonical = await resolveAliasCanonicalId(baseIdentity.anonUserId);
-    const rawCandidateIds = uniqueValidIds([
-      linkedCanonical,
-      authCanonical,
-      aliasCanonical,
-      baseIdentity.anonUserId,
-    ]);
-    const candidateIds = authUserId
-      ? await filterCandidatesForAuthUser(rawCandidateIds, authUserId)
-      : await filterCandidatesForSignedOutUser(rawCandidateIds);
-    const safeCandidateIds =
-      candidateIds.length > 0 ? candidateIds : uniqueValidIds([authCanonical, randomUUID()]);
-    // A signed-in account must keep its own owner ID. Shared phones can still send
-    // an old device key, but that key must not pull another account's cookbook/credits.
-    const canonicalAnonUserId = authCanonical
-      ? authCanonical
-      : await pickCanonicalAnonId(safeCandidateIds, linkedCanonical);
-
-    for (const candidateId of safeCandidateIds) {
-      if (candidateId === canonicalAnonUserId) {
-        continue;
-      }
-      // Keep user data rather than deleting it: old anonymous cookbook rows are merged
-      // into the account/device identity that will be used from now on.
-      await mergeCookbookAnonymousUsers(candidateId, canonicalAnonUserId);
-      await upsertAliasForAnonId(candidateId, canonicalAnonUserId);
-    }
-
-    await upsertAliasForAnonId(canonicalAnonUserId, canonicalAnonUserId);
-    if (deviceKey) {
-      await upsertCanonicalIdForDevice(deviceKey, canonicalAnonUserId);
-    }
-    if (authUserId) {
-      await upsertCanonicalIdForAuthUser(authUserId, canonicalAnonUserId);
-    }
-    return {
-      anonUserId: canonicalAnonUserId,
-      shouldSetCookie: baseIdentity.shouldSetCookie,
-    };
-  } catch {
-    return baseIdentity;
+    const rawDeviceKey = request.headers.get(MOBILE_DEVICE_KEY_HEADER)?.trim();
+    const deviceKey = isValidUuid(rawDeviceKey) ? rawDeviceKey : null;
+    return await resolveCookbookIdentityCore(
+      {
+        authUserId: context.authUserId,
+        deviceKey,
+      },
+      {
+        getBaseIdentity: () => getAnonymousIdentity(request),
+        ensureSchema: ensureIdentitySchema,
+        readCanonicalIdForDevice,
+        readCanonicalIdForAuthUser,
+        resolveAliasCanonicalId,
+        filterCandidatesForAuthUser,
+        filterCandidatesForSignedOutUser,
+        pickCanonicalAnonId,
+        mergeCookbookAnonymousUsers,
+        upsertAliasForAnonId,
+        upsertCanonicalIdForDevice,
+        upsertCanonicalIdForAuthUser,
+        createAnonymousId: randomUUID,
+      },
+    );
+  } catch (error) {
+    const resolutionError = asIdentityResolutionError(error);
+    logIdentityResolutionFailure(resolutionError, context.requestId);
+    throw resolutionError;
   }
+}
+
+export async function resolveCookbookIdentityForProductRequest(
+  request: NextRequest,
+  context: CookbookIdentityResolutionContext,
+) {
+  return failClosedIdentityResolution(() =>
+    resolveCookbookIdentity(request, context),
+  );
 }

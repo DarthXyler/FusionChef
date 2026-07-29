@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test:admin-users": "node --test lib/admin-user-link-status.test.mjs lib/admin-user-engagement.test.mjs",
+    "test:identity": "node --test lib/cookbook-identity.test.mjs",
     "test:product-activity": "node --test lib/product-activity.test.mjs",
     "test:monetization:turso": "node scripts/regression-monetization-turso.mjs",
     "migrate:product-activity": "node scripts/apply-turso-migration.mjs migrations/20260729_001_create_product_activity_events.sql",

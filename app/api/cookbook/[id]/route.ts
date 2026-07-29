@@ -3,7 +3,7 @@
  * GET: returns one saved recipe record for the current anonymous user.
  * DELETE: removes one recipe and its R2 image (if owned by this app).
  */
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit } from "@/lib/api-security";
 import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
@@ -14,7 +14,7 @@ import {
   getCookbookRecord,
   updateCookbookRecipeFlags,
 } from "@/lib/cookbook-db";
-import { resolveCookbookIdentity } from "@/lib/cookbook-identity";
+import { resolveCookbookIdentityForProductRequest } from "@/lib/cookbook-identity";
 import { deleteR2ImageByPublicUrl, getR2ObjectKeyFromPublicUrl } from "@/lib/r2-storage";
 
 const COOKBOOK_CACHE_CONTROL = "private, max-age=60, stale-while-revalidate=120";
@@ -60,6 +60,7 @@ function withCookbookIdentityHeader(response: NextResponse, anonUserId: string) 
 }
 
 export async function GET(request: NextRequest, context: RouteContext) {
+  const requestId = randomUUID();
   try {
     // Detail fetch endpoint with ETag-based conditional responses.
     const limited = await enforceRateLimit(request, {
@@ -83,7 +84,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Recipe id is required." }, { status: 400 });
     }
 
-    const identity = await resolveCookbookIdentity(request);
+    const identityResolution = await resolveCookbookIdentityForProductRequest(request, {
+      authUserId: authValidation.session?.userId ?? null,
+      requestId,
+    });
+    if (!identityResolution.ok) {
+      return identityResolution.response;
+    }
+    const identity = identityResolution.identity;
     const record = await getCookbookRecord(identity.anonUserId, recipeId);
     if (!record) {
       const response = NextResponse.json({ error: "Recipe not found." }, { status: 404 });
@@ -112,6 +120,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 }
 
 export async function DELETE(request: NextRequest, context: RouteContext) {
+  const requestId = randomUUID();
   try {
     // Hard-delete recipe from DB and remove linked cloud image.
     const limited = await enforceRateLimit(request, {
@@ -134,7 +143,14 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Recipe id is required." }, { status: 400 });
     }
 
-    const identity = await resolveCookbookIdentity(request);
+    const identityResolution = await resolveCookbookIdentityForProductRequest(request, {
+      authUserId: authValidation.session?.userId ?? null,
+      requestId,
+    });
+    if (!identityResolution.ok) {
+      return identityResolution.response;
+    }
+    const identity = identityResolution.identity;
     const result = await deleteCookbookRecordAndReturnImageUrl(identity.anonUserId, recipeId);
     if (!result.deleted) {
       const response = NextResponse.json({ error: "Recipe not found." }, { status: 404 });
@@ -177,6 +193,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
+  const requestId = randomUUID();
   try {
     const limited = await enforceRateLimit(request, {
       bucket: "api-cookbook-update",
@@ -210,7 +227,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "No supported cookbook fields were provided." }, { status: 400 });
     }
 
-    const identity = await resolveCookbookIdentity(request);
+    const identityResolution = await resolveCookbookIdentityForProductRequest(request, {
+      authUserId: authValidation.session?.userId ?? null,
+      requestId,
+    });
+    if (!identityResolution.ok) {
+      return identityResolution.response;
+    }
+    const identity = identityResolution.identity;
     const record = await updateCookbookRecipeFlags(identity.anonUserId, recipeId, flags);
     if (!record) {
       const response = NextResponse.json({ error: "Recipe not found." }, { status: 404 });
