@@ -23,6 +23,7 @@ import {
   getTodayDailyMonetizationUsage,
   recordDailyMonetizationUsage,
 } from "@/lib/monetization-operations";
+import { recordSuccessfulGenerationActivitySafely } from "@/lib/product-activity";
 import {
   isLikelyRecipeOrFoodName,
   RECIPE_INPUT_GUIDANCE_MESSAGE,
@@ -853,6 +854,11 @@ export async function POST(request: NextRequest) {
         success: true,
         usedRepair: false,
       });
+      await recordSuccessfulGenerationActivitySafely({
+        authUserId: authValidation.session?.userId,
+        actionKind: monetizationActionKind,
+        requestId,
+      });
       logFuseTiming({
         requestId,
         event: "request_succeeded",
@@ -918,6 +924,11 @@ export async function POST(request: NextRequest) {
       totalDurationMs,
       success: true,
       usedRepair: true,
+    });
+    await recordSuccessfulGenerationActivitySafely({
+      authUserId: authValidation.session?.userId,
+      actionKind: monetizationActionKind,
+      requestId,
     });
     logFuseTiming({
       requestId,

@@ -22,6 +22,7 @@ import {
   getPurchaseByProviderTransaction,
   updatePurchaseRecord,
 } from "@/lib/monetization-purchases";
+import { recordVerifiedPurchaseActivitySafely } from "@/lib/product-activity";
 import {
   ProviderVerificationError,
   verifyProviderPurchase,
@@ -334,6 +335,12 @@ export async function POST(request: NextRequest) {
       revokedAt: null,
       payload: verification.payload,
       riskFlags: verification.riskFlags,
+    });
+    await recordVerifiedPurchaseActivitySafely({
+      authUserId: authSession.userId,
+      provider: body.provider,
+      providerTransactionId: record.providerTransactionId,
+      verifiedAt: record.verifiedAt,
     });
 
     if (verification.riskFlags.length > 0) {
