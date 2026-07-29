@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   DEFAULT_ADMIN_USER_LINK_SELECTION,
   buildAdminUsersQuery,
+  getAdminUserAccountSetupLabel,
   toggleAdminUserLinkSelection,
   type AdminUserLinkSelection,
   type AdminUserRowLinkStatus,
@@ -1000,7 +1001,7 @@ export function AdminMonetizationConfigPanel({
         "Last Activity",
         "lastLoginAt",
         "createdAt",
-        "Link Status",
+        "Account Setup",
       ];
       const rows: string[] = [headers.join(",")];
       let cursor: string | null = null;
@@ -1033,7 +1034,7 @@ export function AdminMonetizationConfigPanel({
               user.lastActivityAt || "Never",
               user.lastLoginAt,
               user.createdAt,
-              user.linkStatus === "linked" ? "Linked" : "Unlinked",
+              getAdminUserAccountSetupLabel(user.linkStatus),
             ]
               .map(csvEscape)
               .join(","),
@@ -2150,35 +2151,6 @@ export function AdminMonetizationConfigPanel({
               <option value="admin">Admins</option>
             </select>
           </label>
-          <fieldset className="space-y-1 text-sm font-semibold text-emerald-900">
-            <legend>Link Status</legend>
-            <div className="flex min-h-[46px] items-center gap-4 rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3">
-              {(["linked", "unlinked"] as const).map((status) => {
-                const otherStatus = status === "linked" ? "unlinked" : "linked";
-                const isOnlySelected =
-                  userLinkSelection[status] && !userLinkSelection[otherStatus];
-                return (
-                  <label
-                    key={status}
-                    className="flex cursor-pointer items-center gap-2 font-medium text-zinc-900"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={userLinkSelection[status]}
-                      disabled={isOnlySelected}
-                      onChange={() =>
-                        setUserLinkSelection((current) =>
-                          toggleAdminUserLinkSelection(current, status),
-                        )
-                      }
-                      className="size-4 accent-emerald-600 disabled:cursor-not-allowed"
-                    />
-                    {status === "linked" ? "Linked" : "Unlinked"}
-                  </label>
-                );
-              })}
-            </div>
-          </fieldset>
           <label className="space-y-1 text-sm font-semibold text-emerald-900">
             Min credits
             <input
@@ -2210,6 +2182,44 @@ export function AdminMonetizationConfigPanel({
           </label>
         </div>
 
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Technical diagnostics
+          </p>
+          <fieldset className="mt-2 text-sm font-semibold text-emerald-900">
+            <legend>Account Setup</legend>
+            <p className="mt-1 text-xs font-normal text-zinc-600">
+              Shows whether the signed-in account is correctly connected to its app data.
+            </p>
+            <div className="mt-3 flex min-h-[46px] items-center gap-4 rounded-2xl border border-zinc-300 bg-white px-4 py-3">
+              {(["linked", "unlinked"] as const).map((status) => {
+                const otherStatus = status === "linked" ? "unlinked" : "linked";
+                const isOnlySelected =
+                  userLinkSelection[status] && !userLinkSelection[otherStatus];
+                return (
+                  <label
+                    key={status}
+                    className="flex cursor-pointer items-center gap-2 font-medium text-zinc-900"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={userLinkSelection[status]}
+                      disabled={isOnlySelected}
+                      onChange={() =>
+                        setUserLinkSelection((current) =>
+                          toggleAdminUserLinkSelection(current, status),
+                        )
+                      }
+                      className="size-4 accent-emerald-600 disabled:cursor-not-allowed"
+                    />
+                    {getAdminUserAccountSetupLabel(status)}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        </div>
+
         <div className="overflow-hidden rounded-2xl border border-zinc-200">
           <div className="max-h-[460px] overflow-auto">
             <table className="min-w-full text-left text-sm">
@@ -2219,7 +2229,7 @@ export function AdminMonetizationConfigPanel({
                   <th className="px-3 py-2">User Type</th>
                   <th className="px-3 py-2">Activity Status</th>
                   <th className="px-3 py-2">Last Activity</th>
-                  <th className="px-3 py-2">Link Status</th>
+                  <th className="px-3 py-2">Account Setup</th>
                   <th className="px-3 py-2">Credits</th>
                   <th className="px-3 py-2">Purchases</th>
                   <th className="px-3 py-2">Cookbook</th>
@@ -2271,7 +2281,7 @@ export function AdminMonetizationConfigPanel({
                             : "inline-flex rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700"
                         }
                       >
-                        {user.linkStatus === "linked" ? "Linked" : "Unlinked"}
+                        {getAdminUserAccountSetupLabel(user.linkStatus)}
                       </span>
                     </td>
                     <td className="px-3 py-2 font-semibold">{user.availableCredits}</td>
@@ -2495,7 +2505,7 @@ export function AdminMonetizationConfigPanel({
                     </p>
                     {target.linkedAuthUsers.length > 1 ? (
                       <p className="mt-1 text-red-700">
-                        Linked accounts: {target.linkedAuthUsers.map((linked) => linked.email).join(", ")}
+                        Associated accounts: {target.linkedAuthUsers.map((linked) => linked.email).join(", ")}
                       </p>
                     ) : null}
                   </div>

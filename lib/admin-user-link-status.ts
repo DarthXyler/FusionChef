@@ -36,6 +36,12 @@ export function getAdminUserLinkStatus(
   return canonicalAnonUserId.trim() ? "linked" : "unlinked";
 }
 
+export function getAdminUserAccountSetupLabel(
+  status: AdminUserRowLinkStatus,
+) {
+  return status === "linked" ? "Complete" : "Needs attention";
+}
+
 export function getAdminUserLinkFilter(
   selection: AdminUserLinkSelection,
 ): AdminUserLinkStatus {
