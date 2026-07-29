@@ -8,6 +8,12 @@ import {
   type AdminUserLinkSelection,
   type AdminUserRowLinkStatus,
 } from "@/lib/admin-user-link-status";
+import {
+  getAdminUserActivityStatusLabel,
+  getAdminUserTypeLabel,
+  type AdminUserActivityStatus,
+  type AdminUserType,
+} from "@/lib/admin-user-engagement";
 
 type EnforcementMode = "off" | "observe" | "enforce";
 type PackageKey = "pack_1" | "pack_2" | "pack_3";
@@ -116,6 +122,9 @@ type AdminUserRow = {
   pendingCredits: number;
   purchaseCount: number;
   cookbookCount: number;
+  userType: AdminUserType;
+  activityStatus: AdminUserActivityStatus;
+  lastActivityAt: string;
   lastLoginAt: string;
   createdAt: string;
 };
@@ -548,6 +557,13 @@ function isAdminUserRow(value: unknown): value is AdminUserRow {
     typeof candidate.pendingCredits === "number" &&
     typeof candidate.purchaseCount === "number" &&
     typeof candidate.cookbookCount === "number" &&
+    (candidate.userType === "free_only" ||
+      candidate.userType === "paying" ||
+      candidate.userType === "no_activity") &&
+    (candidate.activityStatus === "active" ||
+      candidate.activityStatus === "inactive" ||
+      candidate.activityStatus === "never_active") &&
+    typeof candidate.lastActivityAt === "string" &&
     typeof candidate.lastLoginAt === "string"
   );
 }
@@ -810,6 +826,8 @@ export function AdminMonetizationConfigPanel({
   const [userRoleFilter, setUserRoleFilter] = useState("all");
   const [userPaymentFilter, setUserPaymentFilter] = useState("all");
   const [userCookbookFilter, setUserCookbookFilter] = useState("all");
+  const [userTypeFilter, setUserTypeFilter] = useState("all");
+  const [userActivityStatusFilter, setUserActivityStatusFilter] = useState("all");
   const [userLinkSelection, setUserLinkSelection] = useState<AdminUserLinkSelection>(
     DEFAULT_ADMIN_USER_LINK_SELECTION,
   );
@@ -924,6 +942,8 @@ export function AdminMonetizationConfigPanel({
       role: userRoleFilter,
       payment: userPaymentFilter,
       cookbook: userCookbookFilter,
+      userType: userTypeFilter,
+      activityStatus: userActivityStatusFilter,
       linkSelection: userLinkSelection,
       minCredits: userMinCredits,
       maxCredits: userMaxCredits,
@@ -975,6 +995,9 @@ export function AdminMonetizationConfigPanel({
         "pendingCredits",
         "purchaseCount",
         "cookbookCount",
+        "User Type",
+        "Activity Status",
+        "Last Activity",
         "lastLoginAt",
         "createdAt",
         "Link Status",
@@ -1005,6 +1028,9 @@ export function AdminMonetizationConfigPanel({
               user.pendingCredits,
               user.purchaseCount,
               user.cookbookCount,
+              getAdminUserTypeLabel(user.userType),
+              getAdminUserActivityStatusLabel(user.activityStatus),
+              user.lastActivityAt || "Never",
               user.lastLoginAt,
               user.createdAt,
               user.linkStatus === "linked" ? "Linked" : "Unlinked",
@@ -2024,7 +2050,12 @@ export function AdminMonetizationConfigPanel({
           <div>
             <h2 className="text-lg font-semibold text-emerald-900">Users</h2>
             <p className="text-sm text-zinc-700">
-              Search logged-in users, export filtered lists in pages, and dry-run bulk credit grants before committing.
+              All signed-in users. Search and export filtered lists, or dry-run bulk credit grants before committing.
+            </p>
+            <p className="mt-1 max-w-3xl text-xs text-zinc-500">
+              Activity classifications are authoritative from durable activity tracking onward.
+              Older fusion and reroll history may be incomplete, so “Never active” means no recorded
+              durable activity; verified purchase history is included when available.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -2058,7 +2089,33 @@ export function AdminMonetizationConfigPanel({
             />
           </label>
           <label className="space-y-1 text-sm font-semibold text-emerald-900">
-            Payment
+            User Type
+            <select
+              value={userTypeFilter}
+              onChange={(event) => setUserTypeFilter(event.target.value)}
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            >
+              <option value="all">All types</option>
+              <option value="free_only">Free-only</option>
+              <option value="paying">Paying</option>
+              <option value="no_activity">No activity</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-sm font-semibold text-emerald-900">
+            Activity Status
+            <select
+              value={userActivityStatusFilter}
+              onChange={(event) => setUserActivityStatusFilter(event.target.value)}
+              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+            >
+              <option value="all">All activity</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="never_active">Never active</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-sm font-semibold text-emerald-900">
+            Payment Records
             <select
               value={userPaymentFilter}
               onChange={(event) => setUserPaymentFilter(event.target.value)}
@@ -2094,7 +2151,7 @@ export function AdminMonetizationConfigPanel({
             </select>
           </label>
           <fieldset className="space-y-1 text-sm font-semibold text-emerald-900">
-            <legend>Link status</legend>
+            <legend>Link Status</legend>
             <div className="flex min-h-[46px] items-center gap-4 rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3">
               {(["linked", "unlinked"] as const).map((status) => {
                 const otherStatus = status === "linked" ? "unlinked" : "linked";
@@ -2159,7 +2216,10 @@ export function AdminMonetizationConfigPanel({
               <thead className="sticky top-0 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
                 <tr>
                   <th className="px-3 py-2">User</th>
-                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">User Type</th>
+                  <th className="px-3 py-2">Activity Status</th>
+                  <th className="px-3 py-2">Last Activity</th>
+                  <th className="px-3 py-2">Link Status</th>
                   <th className="px-3 py-2">Credits</th>
                   <th className="px-3 py-2">Purchases</th>
                   <th className="px-3 py-2">Cookbook</th>
@@ -2173,6 +2233,35 @@ export function AdminMonetizationConfigPanel({
                     <td className="px-3 py-2">
                       <p className="font-semibold text-zinc-950">{user.email}</p>
                       <p className="text-xs text-zinc-500">{user.name || user.role}</p>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={
+                          user.userType === "paying"
+                            ? "inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-800"
+                            : user.userType === "free_only"
+                              ? "inline-flex rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-800"
+                              : "inline-flex rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700"
+                        }
+                      >
+                        {getAdminUserTypeLabel(user.userType)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={
+                          user.activityStatus === "active"
+                            ? "inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800"
+                            : user.activityStatus === "inactive"
+                              ? "inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800"
+                              : "inline-flex rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700"
+                        }
+                      >
+                        {getAdminUserActivityStatusLabel(user.activityStatus)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {user.lastActivityAt ? toIsoLabel(user.lastActivityAt) : "Never"}
                     </td>
                     <td className="px-3 py-2">
                       <span
@@ -2194,7 +2283,7 @@ export function AdminMonetizationConfigPanel({
                 ))}
                 {users.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-6 text-center text-zinc-500" colSpan={7}>
+                    <td className="px-3 py-6 text-center text-zinc-500" colSpan={10}>
                       No users loaded for the current filters.
                     </td>
                   </tr>

@@ -9,6 +9,21 @@ import {
   parseAdminUserLinkStatus,
   type AdminUserRowLinkStatus,
 } from "@/lib/admin-user-link-status";
+import {
+  ADMIN_USER_ACTIVITY_STATUS_SQL,
+  ADMIN_USER_ENGAGEMENT_CTES_SQL,
+  ADMIN_USER_ENGAGEMENT_JOINS_SQL,
+  ADMIN_USER_INACTIVITY_DAYS,
+  ADMIN_USER_LAST_ACTIVITY_SQL,
+  ADMIN_USER_TYPE_SQL,
+  getAdminUserActivityCutoffIso,
+  getAdminUserActivityStatusWhereClause,
+  getAdminUserTypeWhereClause,
+  parseAdminUserActivityStatusFilter,
+  parseAdminUserTypeFilter,
+  type AdminUserActivityStatus,
+  type AdminUserType,
+} from "@/lib/admin-user-engagement";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
 import { grantCredits } from "@/lib/monetization-ledger";
@@ -48,6 +63,9 @@ type ResolvedUser = {
   pendingCredits: number;
   purchaseCount: number;
   cookbookCount: number;
+  userType: AdminUserType;
+  activityStatus: AdminUserActivityStatus;
+  lastActivityAt: string;
 };
 
 type BatchGrantTarget = {
@@ -130,13 +148,20 @@ function parseCursor(value: string | null) {
     }
     const lastLoginAt = asString(parsed.lastLoginAt);
     const authUserId = asString(parsed.authUserId);
-    return lastLoginAt && authUserId ? { lastLoginAt, authUserId } : null;
+    const activityCutoff = asString(parsed.activityCutoff);
+    return lastLoginAt && authUserId && Number.isFinite(Date.parse(activityCutoff))
+      ? { lastLoginAt, authUserId, activityCutoff }
+      : null;
   } catch {
     return null;
   }
 }
 
-function encodeCursor(row: { lastLoginAt: string; authUserId: string }) {
+function encodeCursor(row: {
+  lastLoginAt: string;
+  authUserId: string;
+  activityCutoff: string;
+}) {
   return Buffer.from(JSON.stringify(row), "utf8").toString("base64url");
 }
 
@@ -324,11 +349,15 @@ function rowToResolvedUser(row: Record<string, unknown>): ResolvedUser {
     pendingCredits: asInteger(row.pending_credits),
     purchaseCount: asInteger(row.purchase_count),
     cookbookCount: asInteger(row.cookbook_count),
+    userType: asString(row.user_type) as AdminUserType,
+    activityStatus: asString(row.activity_status) as AdminUserActivityStatus,
+    lastActivityAt: asString(row.last_activity_at),
   };
 }
 
 function buildUserSelectSql(whereSql: string) {
-  return `SELECT
+  return `${ADMIN_USER_ENGAGEMENT_CTES_SQL}
+    SELECT
       u.id AS auth_user_id,
       u.email,
       u.normalized_email,
@@ -350,10 +379,14 @@ function buildUserSelectSql(whereSql: string) {
         SELECT COUNT(*)
         FROM cookbook_recipes cr
         WHERE cr.anon_user_id = ail.canonical_anon_user_id
-      ), 0) AS cookbook_count
+      ), 0) AS cookbook_count,
+      ${ADMIN_USER_TYPE_SQL} AS user_type,
+      ${ADMIN_USER_ACTIVITY_STATUS_SQL} AS activity_status,
+      ${ADMIN_USER_LAST_ACTIVITY_SQL} AS last_activity_at
     FROM auth_users u
     LEFT JOIN auth_identity_links ail ON ail.auth_user_id = u.id
     LEFT JOIN credit_balances cb ON cb.anon_user_id = ail.canonical_anon_user_id
+    ${ADMIN_USER_ENGAGEMENT_JOINS_SQL}
     ${whereSql}`;
 }
 
@@ -399,15 +432,21 @@ export async function GET(request: NextRequest) {
     const role = params.get("role") ?? "all";
     const payment = params.get("payment") ?? "all";
     const cookbook = params.get("cookbook") ?? "all";
+    const userType = parseAdminUserTypeFilter(params.get("userType"));
+    const activityStatus = parseAdminUserActivityStatusFilter(params.get("activityStatus"));
     const linkStatus = parseAdminUserLinkStatus(params.get("linkStatus"));
     const minCredits = params.get("minCredits");
     const maxCredits = params.get("maxCredits");
     const lastLoginSince = params.get("lastLoginSince")?.trim() ?? "";
 
-    // Admin users can be filtered by identity, payment state, cookbook usage,
-    // credits, and login recency without loading everyone into memory.
+    // The cursor freezes the inactivity cutoff so pagination and CSV export do
+    // not change classification while an admin is traversing the result set.
+    const activityCutoff = cursor?.activityCutoff ?? getAdminUserActivityCutoffIso();
+
+    // Admin users can be filtered by engagement, identity, payment state,
+    // cookbook usage, credits, and login recency without loading everyone into memory.
     const where: string[] = ["1 = 1"];
-    const args: Array<string | number> = [];
+    const args: Array<string | number> = [activityCutoff];
 
     if (cursor) {
       where.push("(u.last_login_at < ? OR (u.last_login_at = ? AND u.id < ?))");
@@ -423,6 +462,14 @@ export async function GET(request: NextRequest) {
     if (role === "user" || role === "admin") {
       where.push("u.role = ?");
       args.push(role);
+    }
+    const userTypeWhere = getAdminUserTypeWhereClause(userType);
+    if (userTypeWhere) {
+      where.push(`(${userTypeWhere})`);
+    }
+    const activityStatusWhere = getAdminUserActivityStatusWhereClause(activityStatus);
+    if (activityStatusWhere) {
+      where.push(`(${activityStatusWhere})`);
     }
     if (linkStatus === "linked") {
       where.push("ail.canonical_anon_user_id IS NOT NULL");
@@ -489,6 +536,7 @@ export async function GET(request: NextRequest) {
           ? encodeCursor({
               lastLoginAt: asString(last.last_login_at),
               authUserId: asString(last.auth_user_id),
+              activityCutoff,
             })
           : null,
       filters: {
@@ -496,11 +544,15 @@ export async function GET(request: NextRequest) {
         role,
         payment,
         cookbook,
+        userType,
+        activityStatus,
         linkStatus,
         minCredits,
         maxCredits,
         lastLoginSince,
       },
+      inactivityThresholdDays: ADMIN_USER_INACTIVITY_DAYS,
+      activityCutoff,
       maxPageSize: MAX_LIST_LIMIT,
     });
     withNoStore(response);
@@ -587,7 +639,7 @@ async function fetchResolvedUsers(column: "normalized_email" | "id" | "canonical
         : `u.${column} IN (${placeholders})`;
     const result = await executeTurso({
       sql: buildUserSelectSql(`WHERE ${where}`),
-      args: chunk,
+      args: [getAdminUserActivityCutoffIso(), ...chunk],
     });
     for (const row of result.rows) {
       const record = rowToResolvedUser(row as Record<string, unknown>);

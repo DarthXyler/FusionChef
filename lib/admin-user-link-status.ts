@@ -13,6 +13,8 @@ export type AdminUsersQueryFilters = {
   role: string;
   payment: string;
   cookbook: string;
+  userType: string;
+  activityStatus: string;
   linkSelection: AdminUserLinkSelection;
   minCredits: string;
   maxCredits: string;
@@ -64,6 +66,8 @@ export function buildAdminUsersQuery({
   role,
   payment,
   cookbook,
+  userType,
+  activityStatus,
   linkSelection,
   minCredits,
   maxCredits,
@@ -80,6 +84,8 @@ export function buildAdminUsersQuery({
   params.set("role", role);
   params.set("payment", payment);
   params.set("cookbook", cookbook);
+  params.set("userType", userType);
+  params.set("activityStatus", activityStatus);
   params.set("linkStatus", getAdminUserLinkFilter(linkSelection));
   if (minCredits.trim()) {
     params.set("minCredits", minCredits.trim());
