@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test:admin-users": "node --test lib/admin-user-link-status.test.mjs",
     "test:monetization:turso": "node scripts/regression-monetization-turso.mjs",
     "image:ab-test": "node scripts/fuse-image-ab-test.mjs"
   },

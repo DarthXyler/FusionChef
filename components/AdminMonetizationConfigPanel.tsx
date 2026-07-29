@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  DEFAULT_ADMIN_USER_LINK_SELECTION,
+  buildAdminUsersQuery,
+  toggleAdminUserLinkSelection,
+  type AdminUserLinkSelection,
+  type AdminUserRowLinkStatus,
+} from "@/lib/admin-user-link-status";
 
 type EnforcementMode = "off" | "observe" | "enforce";
 type PackageKey = "pack_1" | "pack_2" | "pack_3";
@@ -104,6 +111,7 @@ type AdminUserRow = {
   name: string;
   role: string;
   canonicalAnonUserId: string;
+  linkStatus: AdminUserRowLinkStatus;
   availableCredits: number;
   pendingCredits: number;
   purchaseCount: number;
@@ -535,6 +543,7 @@ function isAdminUserRow(value: unknown): value is AdminUserRow {
     typeof candidate.name === "string" &&
     typeof candidate.role === "string" &&
     typeof candidate.canonicalAnonUserId === "string" &&
+    (candidate.linkStatus === "linked" || candidate.linkStatus === "unlinked") &&
     typeof candidate.availableCredits === "number" &&
     typeof candidate.pendingCredits === "number" &&
     typeof candidate.purchaseCount === "number" &&
@@ -801,7 +810,9 @@ export function AdminMonetizationConfigPanel({
   const [userRoleFilter, setUserRoleFilter] = useState("all");
   const [userPaymentFilter, setUserPaymentFilter] = useState("all");
   const [userCookbookFilter, setUserCookbookFilter] = useState("all");
-  const [userLinkFilter, setUserLinkFilter] = useState("linked");
+  const [userLinkSelection, setUserLinkSelection] = useState<AdminUserLinkSelection>(
+    DEFAULT_ADMIN_USER_LINK_SELECTION,
+  );
   const [userMinCredits, setUserMinCredits] = useState("");
   const [userMaxCredits, setUserMaxCredits] = useState("");
   const [userLastLoginSince, setUserLastLoginSince] = useState("");
@@ -906,28 +917,18 @@ export function AdminMonetizationConfigPanel({
   }
 
   function buildUsersQuery(cursor?: string | null, limit = 100) {
-    const params = new URLSearchParams();
-    params.set("limit", String(limit));
-    if (cursor) {
-      params.set("cursor", cursor);
-    }
-    if (userSearch.trim()) {
-      params.set("search", userSearch.trim());
-    }
-    params.set("role", userRoleFilter);
-    params.set("payment", userPaymentFilter);
-    params.set("cookbook", userCookbookFilter);
-    params.set("linkStatus", userLinkFilter);
-    if (userMinCredits.trim()) {
-      params.set("minCredits", userMinCredits.trim());
-    }
-    if (userMaxCredits.trim()) {
-      params.set("maxCredits", userMaxCredits.trim());
-    }
-    if (userLastLoginSince.trim()) {
-      params.set("lastLoginSince", userLastLoginSince.trim());
-    }
-    return params.toString();
+    return buildAdminUsersQuery({
+      cursor,
+      limit,
+      search: userSearch,
+      role: userRoleFilter,
+      payment: userPaymentFilter,
+      cookbook: userCookbookFilter,
+      linkSelection: userLinkSelection,
+      minCredits: userMinCredits,
+      maxCredits: userMaxCredits,
+      lastLoginSince: userLastLoginSince,
+    });
   }
 
   async function loadUsers(options?: { append?: boolean; cursor?: string | null }) {
@@ -976,6 +977,7 @@ export function AdminMonetizationConfigPanel({
         "cookbookCount",
         "lastLoginAt",
         "createdAt",
+        "Link Status",
       ];
       const rows: string[] = [headers.join(",")];
       let cursor: string | null = null;
@@ -1005,6 +1007,7 @@ export function AdminMonetizationConfigPanel({
               user.cookbookCount,
               user.lastLoginAt,
               user.createdAt,
+              user.linkStatus === "linked" ? "Linked" : "Unlinked",
             ]
               .map(csvEscape)
               .join(","),
@@ -2090,18 +2093,35 @@ export function AdminMonetizationConfigPanel({
               <option value="admin">Admins</option>
             </select>
           </label>
-          <label className="space-y-1 text-sm font-semibold text-emerald-900">
-            App Account
-            <select
-              value={userLinkFilter}
-              onChange={(event) => setUserLinkFilter(event.target.value)}
-              className="w-full rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
-            >
-              <option value="linked">Active app users</option>
-              <option value="all">All signed-in users</option>
-              <option value="unlinked">Signed in only</option>
-            </select>
-          </label>
+          <fieldset className="space-y-1 text-sm font-semibold text-emerald-900">
+            <legend>Link status</legend>
+            <div className="flex min-h-[46px] items-center gap-4 rounded-2xl border border-zinc-300 bg-zinc-50 px-4 py-3">
+              {(["linked", "unlinked"] as const).map((status) => {
+                const otherStatus = status === "linked" ? "unlinked" : "linked";
+                const isOnlySelected =
+                  userLinkSelection[status] && !userLinkSelection[otherStatus];
+                return (
+                  <label
+                    key={status}
+                    className="flex cursor-pointer items-center gap-2 font-medium text-zinc-900"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={userLinkSelection[status]}
+                      disabled={isOnlySelected}
+                      onChange={() =>
+                        setUserLinkSelection((current) =>
+                          toggleAdminUserLinkSelection(current, status),
+                        )
+                      }
+                      className="size-4 accent-emerald-600 disabled:cursor-not-allowed"
+                    />
+                    {status === "linked" ? "Linked" : "Unlinked"}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
           <label className="space-y-1 text-sm font-semibold text-emerald-900">
             Min credits
             <input
@@ -2139,6 +2159,7 @@ export function AdminMonetizationConfigPanel({
               <thead className="sticky top-0 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
                 <tr>
                   <th className="px-3 py-2">User</th>
+                  <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Credits</th>
                   <th className="px-3 py-2">Purchases</th>
                   <th className="px-3 py-2">Cookbook</th>
@@ -2153,6 +2174,17 @@ export function AdminMonetizationConfigPanel({
                       <p className="font-semibold text-zinc-950">{user.email}</p>
                       <p className="text-xs text-zinc-500">{user.name || user.role}</p>
                     </td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={
+                          user.linkStatus === "linked"
+                            ? "inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800"
+                            : "inline-flex rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700"
+                        }
+                      >
+                        {user.linkStatus === "linked" ? "Linked" : "Unlinked"}
+                      </span>
+                    </td>
                     <td className="px-3 py-2 font-semibold">{user.availableCredits}</td>
                     <td className="px-3 py-2">{user.purchaseCount}</td>
                     <td className="px-3 py-2">{user.cookbookCount}</td>
@@ -2162,7 +2194,7 @@ export function AdminMonetizationConfigPanel({
                 ))}
                 {users.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-6 text-center text-zinc-500" colSpan={6}>
+                    <td className="px-3 py-6 text-center text-zinc-500" colSpan={7}>
                       No users loaded for the current filters.
                     </td>
                   </tr>

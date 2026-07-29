@@ -4,6 +4,11 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, randomUUID } from "crypto";
+import {
+  getAdminUserLinkStatus,
+  parseAdminUserLinkStatus,
+  type AdminUserRowLinkStatus,
+} from "@/lib/admin-user-link-status";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { getMonetizationRuntimeConfig } from "@/lib/monetization-config";
 import { grantCredits } from "@/lib/monetization-ledger";
@@ -37,6 +42,7 @@ type ResolvedUser = {
   role: string;
   provider: string;
   canonicalAnonUserId: string;
+  linkStatus: AdminUserRowLinkStatus;
   availableCredits: number;
   pendingCredits: number;
   purchaseCount: number;
@@ -311,6 +317,7 @@ function rowToResolvedUser(row: Record<string, unknown>): ResolvedUser {
     role: asString(row.role),
     provider: asString(row.provider),
     canonicalAnonUserId: asString(row.canonical_anon_user_id),
+    linkStatus: getAdminUserLinkStatus(asString(row.canonical_anon_user_id)),
     availableCredits: asInteger(row.available_credits),
     pendingCredits: asInteger(row.pending_credits),
     purchaseCount: asInteger(row.purchase_count),
@@ -390,7 +397,7 @@ export async function GET(request: NextRequest) {
     const role = params.get("role") ?? "all";
     const payment = params.get("payment") ?? "all";
     const cookbook = params.get("cookbook") ?? "all";
-    const linkStatus = params.get("linkStatus") ?? "linked";
+    const linkStatus = parseAdminUserLinkStatus(params.get("linkStatus"));
     const minCredits = params.get("minCredits");
     const maxCredits = params.get("maxCredits");
     const lastLoginSince = params.get("lastLoginSince")?.trim() ?? "";
