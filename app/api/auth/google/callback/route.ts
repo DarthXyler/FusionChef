@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
       redirectUri: getCallbackUrl(request),
     });
     const role = isAdminEmail(profile.email) ? "admin" : "user";
-    const user = await upsertOAuthUser({
+    const persistedUser = await upsertOAuthUser({
       provider: "google",
       providerSubject: profile.subject,
       email: profile.email,
@@ -64,25 +64,25 @@ export async function GET(request: NextRequest) {
       role,
     });
     const token = createAuthSessionToken({
-      userId: user.id,
-      email: user.email,
-      name: user.name,
-      avatarUrl: user.avatarUrl,
-      role: user.role,
+      userId: persistedUser.id,
+      email: persistedUser.email,
+      name: persistedUser.name,
+      avatarUrl: persistedUser.avatarUrl,
+      role: persistedUser.role,
       channel: statePayload.platform === "mobile" ? "mobile" : "web",
     });
 
     if (statePayload.platform === "mobile") {
       const redirectTarget = new URL(statePayload.redirectUri);
       redirectTarget.searchParams.set("token", token);
-      redirectTarget.searchParams.set("role", user.role);
-      redirectTarget.searchParams.set("email", user.email);
+      redirectTarget.searchParams.set("role", persistedUser.role);
+      redirectTarget.searchParams.set("email", persistedUser.email);
       const response = NextResponse.redirect(redirectTarget, { status: 302 });
       return withClearedOauthStateCookie(response);
     }
 
     const webTarget =
-      user.role === "admin"
+      persistedUser.role === "admin"
         ? statePayload.returnTo
         : "/admin/monetization?authError=This+account+is+not+an+admin";
     const response = NextResponse.redirect(`${request.nextUrl.origin}${webTarget}`, {

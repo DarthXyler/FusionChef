@@ -3,7 +3,7 @@
  * New login creates profile automatically; returning login reuses existing profile.
  */
 import { randomUUID } from "crypto";
-import { executeTurso } from "@/lib/turso";
+import { executeTurso } from "./turso.ts";
 
 type OAuthProvider = "google" | "apple";
 
@@ -190,22 +190,11 @@ export async function upsertOAuthUser(params: {
   const normalizedEmail = normalizeEmail(params.email);
   const providerSubject = normalizeSubject(params.providerSubject);
   const name = normalizeName(params.name, normalizedEmail);
+  const hasProvidedName = params.name.trim().length > 0;
   const avatarUrl = normalizeAvatarUrl(params.avatarUrl ?? "");
+  const candidateUserId = randomUUID();
 
-  const existing = await executeTurso({
-    sql: `SELECT id, avatar_url
-          FROM auth_users
-          WHERE provider = ? AND provider_subject = ?
-          LIMIT 1`,
-    args: [params.provider, providerSubject],
-  });
-  const existingId = existing.rows[0]?.id;
-  const existingAvatarUrl =
-    typeof existing.rows[0]?.avatar_url === "string" ? existing.rows[0].avatar_url.trim() : "";
-  const userId = typeof existingId === "string" && existingId.trim().length > 0 ? existingId : randomUUID();
-  const nextAvatarUrl = avatarUrl || existingAvatarUrl;
-
-  await executeTurso({
+  const result = await executeTurso({
     sql: `INSERT INTO auth_users (
             id,
             email,
@@ -221,32 +210,43 @@ export async function upsertOAuthUser(params: {
           ON CONFLICT(provider, provider_subject) DO UPDATE SET
             email = excluded.email,
             normalized_email = excluded.normalized_email,
-            name = excluded.name,
-            avatar_url = excluded.avatar_url,
+            name = CASE
+              WHEN ? = 1 THEN excluded.name
+              ELSE auth_users.name
+            END,
+            avatar_url = CASE
+              WHEN TRIM(excluded.avatar_url) != '' THEN excluded.avatar_url
+              ELSE auth_users.avatar_url
+            END,
             role = excluded.role,
             last_login_at = excluded.last_login_at,
-            updated_at = excluded.updated_at`,
+            updated_at = excluded.updated_at
+          RETURNING
+            id,
+            email,
+            name,
+            avatar_url,
+            provider,
+            provider_subject,
+            role`,
     args: [
-      userId,
+      candidateUserId,
       params.email.trim(),
       normalizedEmail,
       name,
-      nextAvatarUrl,
+      avatarUrl,
       params.provider,
       providerSubject,
       params.role,
       now,
       now,
+      hasProvidedName ? 1 : 0,
     ],
   });
 
-  return {
-    id: userId,
-    email: params.email.trim(),
-    name,
-    avatarUrl: nextAvatarUrl,
-    provider: params.provider,
-    providerSubject,
-    role: params.role,
-  } satisfies AuthUserRecord;
+  const persistedUser = rowToAuthUserRecord(result.rows[0] ?? {});
+  if (!persistedUser) {
+    throw new Error("OAuth user upsert did not return a persisted auth user.");
+  }
+  return persistedUser;
 }

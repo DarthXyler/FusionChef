@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
 
     const fullName = normalizeAppleFullName(body.fullName);
     const role = isAdminEmail(email) ? "admin" : "user";
-    const user = await upsertOAuthUser({
+    const persistedUser = await upsertOAuthUser({
       provider: "apple",
       providerSubject: appleProfile.subject,
       email,
@@ -76,19 +76,19 @@ export async function POST(request: NextRequest) {
       role,
     });
     const token = createAuthSessionToken({
-      userId: user.id,
-      email: user.email,
-      name: user.name,
-      avatarUrl: user.avatarUrl,
-      role: user.role,
+      userId: persistedUser.id,
+      email: persistedUser.email,
+      name: persistedUser.name,
+      avatarUrl: persistedUser.avatarUrl,
+      role: persistedUser.role,
       channel: "mobile",
     });
 
     return NextResponse.json({
       token,
-      role: user.role,
-      email: user.email,
-      name: user.name,
+      role: persistedUser.role,
+      email: persistedUser.email,
+      name: persistedUser.name,
     });
   } catch (error) {
     const message =
