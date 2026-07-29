@@ -16,7 +16,9 @@ export type AdminUsersQueryFilters = {
   cookbook: string;
   userType: string;
   activityStatus: string;
-  linkSelection: AdminUserLinkSelection;
+  accountSetup?: string;
+  issueReason?: string;
+  linkSelection?: AdminUserLinkSelection;
   minCredits: string;
   maxCredits: string;
   lastLoginSince: string;
@@ -35,12 +37,6 @@ export function getAdminUserLinkStatus(
   canonicalAnonUserId: string,
 ): AdminUserRowLinkStatus {
   return canonicalAnonUserId.trim() ? "linked" : "unlinked";
-}
-
-export function getAdminUserAccountSetupLabel(
-  status: AdminUserRowLinkStatus,
-) {
-  return status === "linked" ? "Complete" : "Needs attention";
 }
 
 export function getAdminUserLinkFilter(
@@ -76,6 +72,8 @@ export function buildAdminUsersQuery({
   cookbook,
   userType,
   activityStatus,
+  accountSetup,
+  issueReason,
   linkSelection,
   minCredits,
   maxCredits,
@@ -97,7 +95,14 @@ export function buildAdminUsersQuery({
   params.set("cookbook", cookbook);
   params.set("userType", userType);
   params.set("activityStatus", activityStatus);
-  params.set("linkStatus", getAdminUserLinkFilter(linkSelection));
+  if (accountSetup) {
+    params.set("accountSetup", accountSetup);
+    params.set("issueReason", issueReason || "all");
+  } else if (linkSelection) {
+    // Backward-compatible technical filter for older callers. The normal
+    // admin UI uses accountSetup and issueReason instead.
+    params.set("linkStatus", getAdminUserLinkFilter(linkSelection));
+  }
   if (minCredits.trim()) {
     params.set("minCredits", minCredits.trim());
   }

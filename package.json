@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test:admin-users": "node --test lib/admin-user-link-status.test.mjs lib/admin-user-engagement.test.mjs",
+    "test:admin-users": "node --test lib/admin-user-link-status.test.mjs lib/admin-user-engagement.test.mjs lib/admin-user-identity-health.test.mjs",
     "test:identity": "node --test lib/cookbook-identity.test.mjs",
     "test:product-activity": "node --test lib/product-activity.test.mjs",
     "test:monetization:turso": "node scripts/regression-monetization-turso.mjs",

@@ -2,18 +2,20 @@
 
 import { useEffect, useState } from "react";
 import {
-  DEFAULT_ADMIN_USER_LINK_SELECTION,
   buildAdminUsersQuery,
-  getAdminUserAccountSetupLabel,
-  toggleAdminUserLinkSelection,
-  type AdminUserLinkSelection,
   type AdminUserRowLinkStatus,
 } from "@/lib/admin-user-link-status";
+import {
+  getAdminUserAccountSetupLabel,
+  getAdminUserIdentityIssueLabel,
+  type AdminUserAccountSetup,
+  type AdminUserIdentityIssue,
+  type AdminUserSummary,
+} from "@/lib/admin-user-identity-health";
 import {
   getAdminUserActivityStatusLabel,
   getAdminUserTypeLabel,
   type AdminUserActivityStatus,
-  type AdminUserSummary,
   type AdminUserType,
 } from "@/lib/admin-user-engagement";
 
@@ -120,6 +122,8 @@ type AdminUserRow = {
   role: string;
   canonicalAnonUserId: string;
   linkStatus: AdminUserRowLinkStatus;
+  accountSetup: AdminUserAccountSetup;
+  accountSetupIssue: AdminUserIdentityIssue | null;
   availableCredits: number;
   pendingCredits: number;
   purchaseCount: number;
@@ -315,7 +319,12 @@ const DEFAULT_PANEL_NOTICES: Record<PanelKey, PanelNoticeState> = {
 };
 
 const ADMIN_USER_SUMMARY_METRICS: Array<{
-  key: keyof AdminUserSummary;
+  key:
+    | "totalUsers"
+    | "payingUsers"
+    | "activeUsers"
+    | "inactiveUsers"
+    | "needsAttention";
   label: string;
   valueClassName: string;
 }> = [
@@ -324,6 +333,16 @@ const ADMIN_USER_SUMMARY_METRICS: Array<{
   { key: "activeUsers", label: "Active Users", valueClassName: "text-emerald-800" },
   { key: "inactiveUsers", label: "Inactive Users", valueClassName: "text-amber-800" },
   { key: "needsAttention", label: "Needs Attention", valueClassName: "text-zinc-700" },
+];
+
+const ADMIN_USER_IDENTITY_ISSUE_METRICS: Array<{
+  key: "setupMissing" | "sharedIdentity" | "splitData" | "invalidIdentity";
+  label: string;
+}> = [
+  { key: "setupMissing", label: "Setup missing" },
+  { key: "sharedIdentity", label: "Shared identity" },
+  { key: "splitData", label: "Split data" },
+  { key: "invalidIdentity", label: "Invalid identity" },
 ];
 
 const ADMIN_TABS: Array<{ key: AdminTab; label: string }> = [
@@ -569,6 +588,14 @@ function isAdminUserRow(value: unknown): value is AdminUserRow {
     typeof candidate.role === "string" &&
     typeof candidate.canonicalAnonUserId === "string" &&
     (candidate.linkStatus === "linked" || candidate.linkStatus === "unlinked") &&
+    (candidate.accountSetup === "complete" ||
+      candidate.accountSetup === "needs_attention") &&
+    (candidate.accountSetupIssue === null ||
+      candidate.accountSetupIssue === "setup_missing" ||
+      candidate.accountSetupIssue === "shared_identity" ||
+      candidate.accountSetupIssue === "split_data" ||
+      candidate.accountSetupIssue === "invalid_identity" ||
+      candidate.accountSetupIssue === "unknown_issue") &&
     typeof candidate.availableCredits === "number" &&
     typeof candidate.pendingCredits === "number" &&
     typeof candidate.purchaseCount === "number" &&
@@ -609,7 +636,12 @@ function isAdminUserSummary(value: unknown): value is AdminUserSummary {
     typeof candidate.payingUsers === "number" &&
     typeof candidate.activeUsers === "number" &&
     typeof candidate.inactiveUsers === "number" &&
-    typeof candidate.needsAttention === "number"
+    typeof candidate.needsAttention === "number" &&
+    typeof candidate.completeAccounts === "number" &&
+    typeof candidate.setupMissing === "number" &&
+    typeof candidate.sharedIdentity === "number" &&
+    typeof candidate.splitData === "number" &&
+    typeof candidate.invalidIdentity === "number"
   );
 }
 
@@ -863,9 +895,8 @@ export function AdminMonetizationConfigPanel({
   const [userCookbookFilter, setUserCookbookFilter] = useState("all");
   const [userTypeFilter, setUserTypeFilter] = useState("all");
   const [userActivityStatusFilter, setUserActivityStatusFilter] = useState("all");
-  const [userLinkSelection, setUserLinkSelection] = useState<AdminUserLinkSelection>(
-    DEFAULT_ADMIN_USER_LINK_SELECTION,
-  );
+  const [userAccountSetupFilter, setUserAccountSetupFilter] = useState("all");
+  const [userIdentityIssueFilter, setUserIdentityIssueFilter] = useState("all");
   const [userMinCredits, setUserMinCredits] = useState("");
   const [userMaxCredits, setUserMaxCredits] = useState("");
   const [userLastLoginSince, setUserLastLoginSince] = useState("");
@@ -984,7 +1015,8 @@ export function AdminMonetizationConfigPanel({
       cookbook: userCookbookFilter,
       userType: userTypeFilter,
       activityStatus: userActivityStatusFilter,
-      linkSelection: userLinkSelection,
+      accountSetup: userAccountSetupFilter,
+      issueReason: userIdentityIssueFilter,
       minCredits: userMinCredits,
       maxCredits: userMaxCredits,
       lastLoginSince: userLastLoginSince,
@@ -1067,6 +1099,7 @@ export function AdminMonetizationConfigPanel({
         "lastLoginAt",
         "createdAt",
         "Account Setup",
+        "Account Setup Issue",
       ];
       const rows: string[] = [headers.join(",")];
       let cursor: string | null = null;
@@ -1099,7 +1132,8 @@ export function AdminMonetizationConfigPanel({
               user.lastActivityAt || "Never",
               user.lastLoginAt,
               user.createdAt,
-              getAdminUserAccountSetupLabel(user.linkStatus),
+              getAdminUserAccountSetupLabel(user.accountSetup),
+              getAdminUserIdentityIssueLabel(user.accountSetupIssue),
             ]
               .map(csvEscape)
               .join(","),
@@ -2153,6 +2187,33 @@ export function AdminMonetizationConfigPanel({
                 </div>
               ))}
             </div>
+            <details className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+              <summary className="cursor-pointer text-xs font-semibold text-zinc-700">
+                Account setup issues
+              </summary>
+              <p className="mt-2 text-xs text-zinc-500">
+                Read-only diagnostics. Complete accounts:{" "}
+                {isLoadingUserSummary
+                  ? "..."
+                  : userSummary
+                    ? userSummary.completeAccounts.toLocaleString()
+                    : "—"}
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-zinc-200 bg-zinc-200 sm:grid-cols-4">
+                {ADMIN_USER_IDENTITY_ISSUE_METRICS.map((metric) => (
+                  <div key={metric.key} className="bg-white px-3 py-2">
+                    <p className="text-[11px] font-medium text-zinc-500">{metric.label}</p>
+                    <p className="mt-0.5 text-base font-semibold text-zinc-800">
+                      {isLoadingUserSummary
+                        ? "..."
+                        : userSummary
+                          ? userSummary[metric.key].toLocaleString()
+                          : "—"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </details>
             {userSummaryError ? (
               <p role="status" className="text-xs text-red-700">
                 {userSummaryError}
@@ -2286,38 +2347,51 @@ export function AdminMonetizationConfigPanel({
           <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
             Technical diagnostics
           </p>
-          <fieldset className="mt-2 text-sm font-semibold text-emerald-900">
-            <legend>Account Setup</legend>
+          <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="space-y-1 text-sm font-semibold text-emerald-900">
+              Account Setup
+              <select
+                value={userAccountSetupFilter}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setUserAccountSetupFilter(value);
+                  if (value === "complete") {
+                    setUserIdentityIssueFilter("all");
+                  }
+                }}
+                className="w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+              >
+                <option value="all">All</option>
+                <option value="complete">Complete</option>
+                <option value="needs_attention">Needs attention</option>
+              </select>
+            </label>
+            <label className="space-y-1 text-sm font-semibold text-emerald-900">
+              Issue Reason
+              <select
+                value={userIdentityIssueFilter}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setUserIdentityIssueFilter(value);
+                  if (value !== "all") {
+                    setUserAccountSetupFilter("needs_attention");
+                  }
+                }}
+                className="w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
+              >
+                <option value="all">All issues</option>
+                <option value="setup_missing">Setup missing</option>
+                <option value="shared_identity">Shared identity</option>
+                <option value="split_data">Split data</option>
+                <option value="invalid_identity">Invalid identity</option>
+              </select>
+            </label>
+          </div>
+          <div className="mt-3 text-sm font-semibold text-emerald-900">
             <p className="mt-1 text-xs font-normal text-zinc-600">
-              Shows whether the signed-in account is correctly connected to its app data.
+              Shows whether the signed-in account is safely connected to one consistent set of app data.
             </p>
-            <div className="mt-3 flex min-h-[46px] items-center gap-4 rounded-2xl border border-zinc-300 bg-white px-4 py-3">
-              {(["linked", "unlinked"] as const).map((status) => {
-                const otherStatus = status === "linked" ? "unlinked" : "linked";
-                const isOnlySelected =
-                  userLinkSelection[status] && !userLinkSelection[otherStatus];
-                return (
-                  <label
-                    key={status}
-                    className="flex cursor-pointer items-center gap-2 font-medium text-zinc-900"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={userLinkSelection[status]}
-                      disabled={isOnlySelected}
-                      onChange={() =>
-                        setUserLinkSelection((current) =>
-                          toggleAdminUserLinkSelection(current, status),
-                        )
-                      }
-                      className="size-4 accent-emerald-600 disabled:cursor-not-allowed"
-                    />
-                    {getAdminUserAccountSetupLabel(status)}
-                  </label>
-                );
-              })}
-            </div>
-          </fieldset>
+          </div>
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-zinc-200">
@@ -2376,13 +2450,19 @@ export function AdminMonetizationConfigPanel({
                     <td className="px-3 py-2">
                       <span
                         className={
-                          user.linkStatus === "linked"
+                          user.accountSetup === "complete"
                             ? "inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800"
                             : "inline-flex rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700"
                         }
                       >
-                        {getAdminUserAccountSetupLabel(user.linkStatus)}
+                        {getAdminUserAccountSetupLabel(user.accountSetup)}
                       </span>
+                      {user.accountSetup === "needs_attention" ? (
+                        <p className="mt-1 text-xs font-medium text-amber-800">
+                          {getAdminUserIdentityIssueLabel(user.accountSetupIssue) ||
+                            "Unknown issue"}
+                        </p>
+                      ) : null}
                     </td>
                     <td className="px-3 py-2 font-semibold">{user.availableCredits}</td>
                     <td className="px-3 py-2">{user.purchaseCount}</td>

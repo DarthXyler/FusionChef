@@ -10,12 +10,27 @@ import {
   type AdminUserRowLinkStatus,
 } from "@/lib/admin-user-link-status";
 import {
+  ADMIN_USER_ACCOUNT_SETUP_ISSUE_SQL,
+  ADMIN_USER_ACCOUNT_SETUP_SQL,
+  ADMIN_USER_IDENTITY_HEALTH_CTES_SQL,
+  ADMIN_USER_IDENTITY_HEALTH_JOIN_SQL,
+  ADMIN_USER_SUMMARY_SQL,
+  getAdminUserAccountSetupWhereClause,
+  getAdminUserIdentityIssueWhereClause,
+  parseAdminUserAccountSetup,
+  parseAdminUserAccountSetupFilter,
+  parseAdminUserIdentityIssue,
+  parseAdminUserIdentityIssueFilter,
+  type AdminUserAccountSetup,
+  type AdminUserIdentityIssue,
+  type AdminUserSummary,
+} from "@/lib/admin-user-identity-health";
+import {
   ADMIN_USER_ACTIVITY_STATUS_SQL,
   ADMIN_USER_ENGAGEMENT_CTES_SQL,
   ADMIN_USER_ENGAGEMENT_JOINS_SQL,
   ADMIN_USER_INACTIVITY_DAYS,
   ADMIN_USER_LAST_ACTIVITY_SQL,
-  ADMIN_USER_SUMMARY_SQL,
   ADMIN_USER_TYPE_SQL,
   getAdminUserActivityCutoffIso,
   getAdminUserActivityStatusWhereClause,
@@ -23,7 +38,6 @@ import {
   parseAdminUserActivityStatusFilter,
   parseAdminUserTypeFilter,
   type AdminUserActivityStatus,
-  type AdminUserSummary,
   type AdminUserType,
 } from "@/lib/admin-user-engagement";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
@@ -61,6 +75,8 @@ type ResolvedUser = {
   provider: string;
   canonicalAnonUserId: string;
   linkStatus: AdminUserRowLinkStatus;
+  accountSetup: AdminUserAccountSetup;
+  accountSetupIssue: AdminUserIdentityIssue | null;
   availableCredits: number;
   pendingCredits: number;
   purchaseCount: number;
@@ -347,6 +363,10 @@ function rowToResolvedUser(row: Record<string, unknown>): ResolvedUser {
     provider: asString(row.provider),
     canonicalAnonUserId: asString(row.canonical_anon_user_id),
     linkStatus: getAdminUserLinkStatus(asString(row.canonical_anon_user_id)),
+    accountSetup: parseAdminUserAccountSetup(asString(row.account_setup)),
+    accountSetupIssue: parseAdminUserIdentityIssue(
+      asString(row.account_setup_issue),
+    ),
     availableCredits: asInteger(row.available_credits),
     pendingCredits: asInteger(row.pending_credits),
     purchaseCount: asInteger(row.purchase_count),
@@ -359,6 +379,7 @@ function rowToResolvedUser(row: Record<string, unknown>): ResolvedUser {
 
 function buildUserSelectSql(whereSql: string) {
   return `${ADMIN_USER_ENGAGEMENT_CTES_SQL}
+    ${ADMIN_USER_IDENTITY_HEALTH_CTES_SQL}
     SELECT
       u.id AS auth_user_id,
       u.email,
@@ -384,9 +405,11 @@ function buildUserSelectSql(whereSql: string) {
       ), 0) AS cookbook_count,
       ${ADMIN_USER_TYPE_SQL} AS user_type,
       ${ADMIN_USER_ACTIVITY_STATUS_SQL} AS activity_status,
-      ${ADMIN_USER_LAST_ACTIVITY_SQL} AS last_activity_at
+      ${ADMIN_USER_LAST_ACTIVITY_SQL} AS last_activity_at,
+      ${ADMIN_USER_ACCOUNT_SETUP_SQL} AS account_setup,
+      ${ADMIN_USER_ACCOUNT_SETUP_ISSUE_SQL} AS account_setup_issue
     FROM auth_users u
-    LEFT JOIN auth_identity_links ail ON ail.auth_user_id = u.id
+    ${ADMIN_USER_IDENTITY_HEALTH_JOIN_SQL}
     LEFT JOIN credit_balances cb ON cb.anon_user_id = ail.canonical_anon_user_id
     ${ADMIN_USER_ENGAGEMENT_JOINS_SQL}
     ${whereSql}`;
@@ -404,6 +427,11 @@ async function loadAdminUserSummary(activityCutoff: string): Promise<AdminUserSu
     activeUsers: asInteger(row?.active_users),
     inactiveUsers: asInteger(row?.inactive_users),
     needsAttention: asInteger(row?.needs_attention),
+    completeAccounts: asInteger(row?.complete_accounts),
+    setupMissing: asInteger(row?.setup_missing),
+    sharedIdentity: asInteger(row?.shared_identity),
+    splitData: asInteger(row?.split_data),
+    invalidIdentity: asInteger(row?.invalid_identity),
   };
 }
 
@@ -438,7 +466,6 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    await ensureAdminUserSchemas();
     const params = request.nextUrl.searchParams;
     const includeSummary = params.get("includeSummary") === "true";
     const limit = Math.max(
@@ -452,6 +479,8 @@ export async function GET(request: NextRequest) {
     const cookbook = params.get("cookbook") ?? "all";
     const userType = parseAdminUserTypeFilter(params.get("userType"));
     const activityStatus = parseAdminUserActivityStatusFilter(params.get("activityStatus"));
+    const accountSetup = parseAdminUserAccountSetupFilter(params.get("accountSetup"));
+    const issueReason = parseAdminUserIdentityIssueFilter(params.get("issueReason"));
     const linkStatus = parseAdminUserLinkStatus(params.get("linkStatus"));
     const minCredits = params.get("minCredits");
     const maxCredits = params.get("maxCredits");
@@ -489,9 +518,17 @@ export async function GET(request: NextRequest) {
     if (activityStatusWhere) {
       where.push(`(${activityStatusWhere})`);
     }
-    if (linkStatus === "linked") {
+    const accountSetupWhere = getAdminUserAccountSetupWhereClause(accountSetup);
+    if (accountSetupWhere) {
+      where.push(`(${accountSetupWhere})`);
+    }
+    const issueReasonWhere = getAdminUserIdentityIssueWhereClause(issueReason);
+    if (issueReasonWhere) {
+      where.push(`(${issueReasonWhere})`);
+    }
+    if (!params.has("accountSetup") && linkStatus === "linked") {
       where.push("ail.canonical_anon_user_id IS NOT NULL");
-    } else if (linkStatus === "unlinked") {
+    } else if (!params.has("accountSetup") && linkStatus === "unlinked") {
       where.push("ail.canonical_anon_user_id IS NULL");
     }
     if (payment === "paying") {
@@ -586,6 +623,8 @@ export async function GET(request: NextRequest) {
         cookbook,
         userType,
         activityStatus,
+        accountSetup,
+        issueReason,
         linkStatus,
         minCredits,
         maxCredits,
