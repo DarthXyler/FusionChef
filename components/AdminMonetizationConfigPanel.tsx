@@ -13,6 +13,7 @@ import {
   getAdminUserActivityStatusLabel,
   getAdminUserTypeLabel,
   type AdminUserActivityStatus,
+  type AdminUserSummary,
   type AdminUserType,
 } from "@/lib/admin-user-engagement";
 
@@ -132,6 +133,8 @@ type AdminUserRow = {
 
 type AdminUsersPayload = {
   users: AdminUserRow[];
+  summary: AdminUserSummary | null;
+  summaryError: string;
   hasMore: boolean;
   nextCursor: string | null;
 };
@@ -310,6 +313,18 @@ const DEFAULT_PANEL_NOTICES: Record<PanelKey, PanelNoticeState> = {
   reconciliation: { error: "", success: "" },
   runtimeSettings: { error: "", success: "" },
 };
+
+const ADMIN_USER_SUMMARY_METRICS: Array<{
+  key: keyof AdminUserSummary;
+  label: string;
+  valueClassName: string;
+}> = [
+  { key: "totalUsers", label: "Total Users", valueClassName: "text-zinc-950" },
+  { key: "payingUsers", label: "Paying Users", valueClassName: "text-sky-800" },
+  { key: "activeUsers", label: "Active Users", valueClassName: "text-emerald-800" },
+  { key: "inactiveUsers", label: "Inactive Users", valueClassName: "text-amber-800" },
+  { key: "needsAttention", label: "Needs Attention", valueClassName: "text-zinc-700" },
+];
 
 const ADMIN_TABS: Array<{ key: AdminTab; label: string }> = [
   { key: "access", label: "Access" },
@@ -577,8 +592,24 @@ function isAdminUsersPayload(value: unknown): value is AdminUsersPayload {
   return (
     Array.isArray(candidate.users) &&
     candidate.users.every(isAdminUserRow) &&
+    (candidate.summary === null || isAdminUserSummary(candidate.summary)) &&
+    typeof candidate.summaryError === "string" &&
     typeof candidate.hasMore === "boolean" &&
     (typeof candidate.nextCursor === "string" || candidate.nextCursor === null)
+  );
+}
+
+function isAdminUserSummary(value: unknown): value is AdminUserSummary {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.totalUsers === "number" &&
+    typeof candidate.payingUsers === "number" &&
+    typeof candidate.activeUsers === "number" &&
+    typeof candidate.inactiveUsers === "number" &&
+    typeof candidate.needsAttention === "number"
   );
 }
 
@@ -822,6 +853,9 @@ export function AdminMonetizationConfigPanel({
   const [usersNextCursor, setUsersNextCursor] = useState<string | null>(null);
   const [usersHasMore, setUsersHasMore] = useState(false);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [userSummary, setUserSummary] = useState<AdminUserSummary | null>(null);
+  const [userSummaryError, setUserSummaryError] = useState("");
+  const [isLoadingUserSummary, setIsLoadingUserSummary] = useState(false);
   const [isExportingUsers, setIsExportingUsers] = useState(false);
   const [userSearch, setUserSearch] = useState("");
   const [userRoleFilter, setUserRoleFilter] = useState("all");
@@ -935,10 +969,15 @@ export function AdminMonetizationConfigPanel({
     return headers;
   }
 
-  function buildUsersQuery(cursor?: string | null, limit = 100) {
+  function buildUsersQuery(
+    cursor?: string | null,
+    limit = 100,
+    includeSummary = false,
+  ) {
     return buildAdminUsersQuery({
       cursor,
       limit,
+      includeSummary,
       search: userSearch,
       role: userRoleFilter,
       payment: userPaymentFilter,
@@ -953,14 +992,26 @@ export function AdminMonetizationConfigPanel({
   }
 
   async function loadUsers(options?: { append?: boolean; cursor?: string | null }) {
+    const shouldLoadSummary = !options?.append;
     setIsLoadingUsers(true);
+    if (shouldLoadSummary) {
+      setIsLoadingUserSummary(true);
+      setUserSummaryError("");
+    }
     clearPanelNotice("users");
     try {
-      const response = await fetch(`/api/admin/monetization/users?${buildUsersQuery(options?.cursor)}`, {
-        method: "GET",
-        headers: buildAdminHeaders(),
-        cache: "no-store",
-      });
+      const response = await fetch(
+        `/api/admin/monetization/users?${buildUsersQuery(
+          options?.cursor,
+          100,
+          shouldLoadSummary,
+        )}`,
+        {
+          method: "GET",
+          headers: buildAdminHeaders(),
+          cache: "no-store",
+        },
+      );
       const payload = (await response.json()) as unknown;
       if (!response.ok) {
         throw new Error(
@@ -975,10 +1026,24 @@ export function AdminMonetizationConfigPanel({
       setUsers((current) => (options?.append ? [...current, ...payload.users] : payload.users));
       setUsersNextCursor(payload.nextCursor);
       setUsersHasMore(payload.hasMore);
+      if (shouldLoadSummary) {
+        setUserSummary(payload.summary);
+        setUserSummaryError(
+          payload.summaryError ||
+            (payload.summary ? "" : "Could not load overall user summary."),
+        );
+      }
     } catch (error) {
       setPanelError("users", error instanceof Error ? error.message : "Could not load users.");
+      if (shouldLoadSummary) {
+        setUserSummary(null);
+        setUserSummaryError("Could not load overall user summary.");
+      }
     } finally {
       setIsLoadingUsers(false);
+      if (shouldLoadSummary) {
+        setIsLoadingUserSummary(false);
+      }
     }
   }
 
@@ -2047,7 +2112,7 @@ export function AdminMonetizationConfigPanel({
 
       {activeTab === "users" ? (
       <section className="space-y-5 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-4">
           <div>
             <h2 className="text-lg font-semibold text-emerald-900">Users</h2>
             <p className="text-sm text-zinc-700">
@@ -2058,6 +2123,41 @@ export function AdminMonetizationConfigPanel({
               Older fusion and reroll history may be incomplete, so “Never active” means no recorded
               durable activity; verified purchase history is included when available.
             </p>
+          </div>
+          <div
+            aria-label="Overall user summary"
+            aria-live="polite"
+            className="space-y-2"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                Overall user summary
+              </p>
+              <p className="text-xs text-zinc-500">
+                Global counts; metrics may overlap.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-zinc-200 bg-zinc-200 sm:grid-cols-3 lg:grid-cols-5">
+              {ADMIN_USER_SUMMARY_METRICS.map((metric) => (
+                <div key={metric.key} className="bg-zinc-50 px-3 py-2.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                    {metric.label}
+                  </p>
+                  <p className={`mt-0.5 text-xl font-semibold ${metric.valueClassName}`}>
+                    {isLoadingUserSummary
+                      ? "..."
+                      : userSummary
+                        ? userSummary[metric.key].toLocaleString()
+                        : "—"}
+                  </p>
+                </div>
+              ))}
+            </div>
+            {userSummaryError ? (
+              <p role="status" className="text-xs text-red-700">
+                {userSummaryError}
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <button

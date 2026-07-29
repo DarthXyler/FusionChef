@@ -9,6 +9,7 @@ export type AdminUserLinkSelection = {
 export type AdminUsersQueryFilters = {
   cursor?: string | null;
   limit?: number;
+  includeSummary?: boolean;
   search: string;
   role: string;
   payment: string;
@@ -68,6 +69,7 @@ export function toggleAdminUserLinkSelection(
 export function buildAdminUsersQuery({
   cursor,
   limit = 100,
+  includeSummary = false,
   search,
   role,
   payment,
@@ -81,6 +83,9 @@ export function buildAdminUsersQuery({
 }: AdminUsersQueryFilters) {
   const params = new URLSearchParams();
   params.set("limit", String(limit));
+  if (includeSummary) {
+    params.set("includeSummary", "true");
+  }
   if (cursor) {
     params.set("cursor", cursor);
   }

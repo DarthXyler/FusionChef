@@ -10,6 +10,14 @@ export type AdminUserActivityStatusFilter =
   | "never_active";
 export type AdminUserActivityStatus = Exclude<AdminUserActivityStatusFilter, "all">;
 
+export type AdminUserSummary = {
+  totalUsers: number;
+  payingUsers: number;
+  activeUsers: number;
+  inactiveUsers: number;
+  needsAttention: number;
+};
+
 export const ADMIN_USER_LAST_ACTIVITY_SQL = `CASE
   WHEN pas.last_durable_activity_at IS NULL THEN vps.last_verified_purchase_at
   WHEN vps.last_verified_purchase_at IS NULL THEN pas.last_durable_activity_at
@@ -67,6 +75,26 @@ export const ADMIN_USER_ENGAGEMENT_JOINS_SQL = `CROSS JOIN engagement_config ec
   LEFT JOIN product_activity_summary pas ON pas.auth_user_id = u.id
   LEFT JOIN verified_purchase_summary vps
     ON vps.anon_user_id = ail.canonical_anon_user_id`;
+
+export const ADMIN_USER_SUMMARY_SQL = `${ADMIN_USER_ENGAGEMENT_CTES_SQL}
+  SELECT
+    COUNT(DISTINCT u.id) AS total_users,
+    COUNT(DISTINCT CASE
+      WHEN ${ADMIN_USER_HAS_PURCHASE_SQL} THEN u.id
+    END) AS paying_users,
+    COUNT(DISTINCT CASE
+      WHEN (${ADMIN_USER_LAST_ACTIVITY_SQL}) > ec.activity_cutoff THEN u.id
+    END) AS active_users,
+    COUNT(DISTINCT CASE
+      WHEN (${ADMIN_USER_LAST_ACTIVITY_SQL}) IS NOT NULL
+        AND (${ADMIN_USER_LAST_ACTIVITY_SQL}) <= ec.activity_cutoff THEN u.id
+    END) AS inactive_users,
+    COUNT(DISTINCT CASE
+      WHEN ail.canonical_anon_user_id IS NULL THEN u.id
+    END) AS needs_attention
+  FROM auth_users u
+  LEFT JOIN auth_identity_links ail ON ail.auth_user_id = u.id
+  ${ADMIN_USER_ENGAGEMENT_JOINS_SQL}`;
 
 export function parseAdminUserTypeFilter(value: string | null): AdminUserTypeFilter {
   return value === "free_only" || value === "paying" || value === "no_activity"

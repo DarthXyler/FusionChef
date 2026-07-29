@@ -15,6 +15,7 @@ import {
   ADMIN_USER_ENGAGEMENT_JOINS_SQL,
   ADMIN_USER_INACTIVITY_DAYS,
   ADMIN_USER_LAST_ACTIVITY_SQL,
+  ADMIN_USER_SUMMARY_SQL,
   ADMIN_USER_TYPE_SQL,
   getAdminUserActivityCutoffIso,
   getAdminUserActivityStatusWhereClause,
@@ -22,6 +23,7 @@ import {
   parseAdminUserActivityStatusFilter,
   parseAdminUserTypeFilter,
   type AdminUserActivityStatus,
+  type AdminUserSummary,
   type AdminUserType,
 } from "@/lib/admin-user-engagement";
 import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
@@ -390,6 +392,21 @@ function buildUserSelectSql(whereSql: string) {
     ${whereSql}`;
 }
 
+async function loadAdminUserSummary(activityCutoff: string): Promise<AdminUserSummary> {
+  const result = await executeTurso({
+    sql: ADMIN_USER_SUMMARY_SQL,
+    args: [activityCutoff],
+  });
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  return {
+    totalUsers: asInteger(row?.total_users),
+    payingUsers: asInteger(row?.paying_users),
+    activeUsers: asInteger(row?.active_users),
+    inactiveUsers: asInteger(row?.inactive_users),
+    needsAttention: asInteger(row?.needs_attention),
+  };
+}
+
 function getDeletionAuditHashSecret() {
   return (
     process.env.AUTH_SESSION_SECRET?.trim() ||
@@ -423,6 +440,7 @@ export async function GET(request: NextRequest) {
   try {
     await ensureAdminUserSchemas();
     const params = request.nextUrl.searchParams;
+    const includeSummary = params.get("includeSummary") === "true";
     const limit = Math.max(
       1,
       Math.min(MAX_LIST_LIMIT, Number.parseInt(params.get("limit") ?? String(DEFAULT_LIST_LIMIT), 10)),
@@ -513,12 +531,32 @@ export async function GET(request: NextRequest) {
       args.push(lastLoginSince);
     }
 
-    const result = await executeTurso({
+    const listPromise = executeTurso({
       sql: `${buildUserSelectSql(`WHERE ${where.join(" AND ")}`)}
             ORDER BY u.last_login_at DESC, u.id DESC
             LIMIT ?`,
       args: [...args, limit + 1],
     });
+    const summaryPromise = includeSummary
+      ? loadAdminUserSummary(activityCutoff)
+          .then((summary) => ({ summary, summaryError: "" }))
+          .catch((error: unknown) => {
+            logMonetizationAudit({
+              requestId: admin.context.requestId,
+              event: "admin_user_summary_load_failed",
+              actor: admin.context.actor,
+              errorName: error instanceof Error ? error.name : "unknown",
+            });
+            return {
+              summary: null,
+              summaryError: "Could not load overall user summary.",
+            };
+          })
+      : Promise.resolve({
+          summary: null,
+          summaryError: "",
+        });
+    const [result, summaryResult] = await Promise.all([listPromise, summaryPromise]);
 
     const rows = result.rows.map((row) => row as Record<string, unknown>);
     const pageRows = rows.slice(0, limit);
@@ -530,6 +568,8 @@ export async function GET(request: NextRequest) {
     const last = pageRows[pageRows.length - 1];
     const response = NextResponse.json({
       users,
+      summary: summaryResult.summary,
+      summaryError: summaryResult.summaryError,
       hasMore: rows.length > limit,
       nextCursor:
         rows.length > limit && last
