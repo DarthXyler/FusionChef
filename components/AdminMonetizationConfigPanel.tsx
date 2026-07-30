@@ -8,6 +8,7 @@ import {
 import {
   getAdminUserAccountSetupLabel,
   getAdminUserIdentityIssueLabel,
+  getAdminUserIdentityIssueTooltip,
   type AdminUserAccountSetup,
   type AdminUserIdentityIssue,
   type AdminUserSummary,
@@ -339,10 +340,10 @@ const ADMIN_USER_IDENTITY_ISSUE_METRICS: Array<{
   key: "setupMissing" | "sharedIdentity" | "splitData" | "invalidIdentity";
   label: string;
 }> = [
-  { key: "setupMissing", label: "Setup missing" },
-  { key: "sharedIdentity", label: "Shared identity" },
-  { key: "splitData", label: "Split data" },
-  { key: "invalidIdentity", label: "Invalid identity" },
+  { key: "setupMissing", label: "Setup incomplete" },
+  { key: "sharedIdentity", label: "Shared app data" },
+  { key: "splitData", label: "Split app data" },
+  { key: "invalidIdentity", label: "Invalid account setup" },
 ];
 
 const ADMIN_TABS: Array<{ key: AdminTab; label: string }> = [
@@ -2380,10 +2381,10 @@ export function AdminMonetizationConfigPanel({
                 className="w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-emerald-500"
               >
                 <option value="all">All issues</option>
-                <option value="setup_missing">Setup missing</option>
-                <option value="shared_identity">Shared identity</option>
-                <option value="split_data">Split data</option>
-                <option value="invalid_identity">Invalid identity</option>
+                <option value="setup_missing">Setup incomplete</option>
+                <option value="shared_identity">Shared app data</option>
+                <option value="split_data">Split app data</option>
+                <option value="invalid_identity">Invalid account setup</option>
               </select>
             </label>
           </div>
@@ -2403,7 +2404,7 @@ export function AdminMonetizationConfigPanel({
                   <th className="px-3 py-2">User Type</th>
                   <th className="px-3 py-2">Activity Status</th>
                   <th className="px-3 py-2">Last Activity</th>
-                  <th className="px-3 py-2">Account Setup</th>
+                  <th className="min-w-[13rem] px-3 py-2">Account Setup</th>
                   <th className="px-3 py-2">Credits</th>
                   <th className="px-3 py-2">Purchases</th>
                   <th className="px-3 py-2">Cookbook</th>
@@ -2447,20 +2448,36 @@ export function AdminMonetizationConfigPanel({
                     <td className="px-3 py-2 text-xs">
                       {user.lastActivityAt ? toIsoLabel(user.lastActivityAt) : "Never"}
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="min-w-[13rem] px-3 py-2 align-top">
                       <span
                         className={
                           user.accountSetup === "complete"
-                            ? "inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800"
-                            : "inline-flex rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700"
+                            ? "inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold leading-none text-emerald-800"
+                            : "inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold leading-none text-amber-800"
                         }
                       >
                         {getAdminUserAccountSetupLabel(user.accountSetup)}
                       </span>
                       {user.accountSetup === "needs_attention" ? (
-                        <p className="mt-1 text-xs font-medium text-amber-800">
-                          {getAdminUserIdentityIssueLabel(user.accountSetupIssue) ||
-                            "Unknown issue"}
+                        <p className="mt-1.5 flex max-w-[12rem] items-start gap-1 text-xs leading-4 text-zinc-500">
+                          <span>
+                            {getAdminUserIdentityIssueLabel(user.accountSetupIssue) ||
+                              "Unknown issue"}
+                          </span>
+                          <span
+                            aria-label={
+                              getAdminUserIdentityIssueTooltip(user.accountSetupIssue) ||
+                              "The account connection needs further review."
+                            }
+                            className="cursor-help text-[11px] text-zinc-400"
+                            role="img"
+                            title={
+                              getAdminUserIdentityIssueTooltip(user.accountSetupIssue) ||
+                              "The account connection needs further review."
+                            }
+                          >
+                            ⓘ
+                          </span>
                         </p>
                       ) : null}
                     </td>

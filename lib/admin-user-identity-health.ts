@@ -51,6 +51,7 @@ const VALID_CANONICAL_ID_SQL = `(
  *
  * Split data requires an explicit alias-to-canonical mapping plus durable
  * product ownership under the alias (or a device mapping still targeting it).
+ * Untouched zero/zero balance placeholders are not ownership evidence.
  * Email, login timestamps, and OAuth provider data are deliberately excluded.
  */
 export const ADMIN_USER_IDENTITY_HEALTH_CTES_SQL = `,
@@ -110,6 +111,10 @@ export const ADMIN_USER_IDENTITY_HEALTH_CTES_SQL = `,
     WHERE EXISTS (
       SELECT 1 FROM credit_balances cb
       WHERE cb.anon_user_id = iac.alias_id
+        AND (
+          COALESCE(cb.available_credits, 0) <> 0
+          OR COALESCE(cb.pending_credits, 0) <> 0
+        )
     )
       OR EXISTS (
         SELECT 1 FROM credit_daily_usage cdu
@@ -126,6 +131,8 @@ export const ADMIN_USER_IDENTITY_HEALTH_CTES_SQL = `,
       OR EXISTS (
         SELECT 1 FROM credit_purchase_transactions cpt
         WHERE cpt.anon_user_id = iac.alias_id
+          AND cpt.verified_at IS NOT NULL
+          AND trim(cpt.verified_at) <> ''
       )
       OR EXISTS (
         SELECT 1 FROM cookbook_recipes recipe
@@ -277,16 +284,36 @@ export function getAdminUserIdentityIssueLabel(
   issue: AdminUserIdentityIssue | null,
 ) {
   if (issue === "setup_missing") {
-    return "Setup missing";
+    return "Setup incomplete";
   }
   if (issue === "shared_identity") {
-    return "Shared identity";
+    return "Shared app data";
   }
   if (issue === "split_data") {
-    return "Split data";
+    return "Split app data";
   }
   if (issue === "invalid_identity") {
-    return "Invalid identity";
+    return "Invalid account setup";
   }
   return issue === "unknown_issue" ? "Unknown issue" : "";
+}
+
+export function getAdminUserIdentityIssueTooltip(
+  issue: AdminUserIdentityIssue | null,
+) {
+  if (issue === "setup_missing") {
+    return "The signed-in account is not yet connected to its app data.";
+  }
+  if (issue === "shared_identity") {
+    return "Multiple signed-in accounts are connected to the same app data.";
+  }
+  if (issue === "split_data") {
+    return "Meaningful app data exists under more than one identity for this account.";
+  }
+  if (issue === "invalid_identity") {
+    return "The account connection contains an invalid or inconsistent identity.";
+  }
+  return issue === "unknown_issue"
+    ? "The account connection needs further review."
+    : "";
 }
