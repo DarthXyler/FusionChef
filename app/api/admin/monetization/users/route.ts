@@ -57,6 +57,9 @@ import {
   type IdempotencyContext,
 } from "@/lib/idempotency";
 import { executeTurso, executeTursoBatch } from "@/lib/turso";
+import {
+  buildPurchaseReconciliationAccountDeletionStatement,
+} from "@/lib/purchase-settlement-retention";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1096,6 +1099,7 @@ async function deleteReadyAccounts(params: {
     }));
     await executeTursoBatch([
       ...deletionEventStatements,
+      buildPurchaseReconciliationAccountDeletionStatement(canonical),
       {
         sql: `UPDATE credit_purchase_transactions
               SET anon_user_id = ?, payload_json = '{}', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')

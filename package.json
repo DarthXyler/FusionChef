@@ -11,8 +11,10 @@
     "test:admin-users": "node --test lib/admin-user-link-status.test.mjs lib/admin-user-engagement.test.mjs lib/admin-user-identity-health.test.mjs",
     "test:identity": "node --test lib/cookbook-identity.test.mjs",
     "test:product-activity": "node --test lib/product-activity.test.mjs",
+    "test:purchase-settlement": "node --test lib/purchase-settlement-migration.test.mjs",
     "test:monetization:turso": "node scripts/regression-monetization-turso.mjs",
     "migrate:product-activity": "node scripts/apply-turso-migration.mjs migrations/20260729_001_create_product_activity_events.sql",
+    "migrate:purchase-settlement": "node scripts/apply-turso-migration.mjs migrations/20260731_001_create_purchase_settlement_foundation.sql && node scripts/report-purchase-settlement-backfill.mjs",
     "image:ab-test": "node scripts/fuse-image-ab-test.mjs"
   },
   "dependencies": {
