@@ -20,11 +20,16 @@ import { applyPurchaseReversalDeduction } from "@/lib/monetization-ledger";
 import { settleVerifiedPurchase } from "@/lib/monetization-purchase-settlement";
 import {
   createPurchaseRecord,
+  getGooglePurchasesByTokenHash,
   getPurchaseByProviderTransaction,
   updatePurchaseRecord,
 } from "@/lib/monetization-purchases";
 import { recordVerifiedPurchaseActivitySafely } from "@/lib/product-activity";
 import {
+  buildLegacyGooglePurchaseTransactionIdForLookup,
+  buildGooglePurchaseTransactionId,
+  GOOGLE_PURCHASE_TOKEN_HASH_FIELD,
+  hashGooglePurchaseToken,
   ProviderVerificationError,
   verifyProviderPurchase,
 } from "@/lib/monetization-provider-verification";
@@ -94,6 +99,14 @@ function parseVerifyBody(value: unknown): VerifyPurchaseBody {
   }
 
   return body;
+}
+
+function purchaseForResponse<T extends { payload: Record<string, unknown> }>(
+  purchase: T,
+) {
+  const payload = { ...purchase.payload };
+  delete payload[GOOGLE_PURCHASE_TOKEN_HASH_FIELD];
+  return { ...purchase, payload };
 }
 
 export async function POST(request: NextRequest) {
@@ -205,11 +218,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const existing = await getPurchaseByProviderTransaction(
+    let existing = await getPurchaseByProviderTransaction(
       body.provider,
       verification.providerTransactionId,
     );
-
+    if (body.provider === "google_play") {
+      const purchaseToken = body.googlePurchaseToken!;
+      const tokenHash = hashGooglePurchaseToken(purchaseToken);
+      const candidates = [
+        existing,
+        ...(await getGooglePurchasesByTokenHash(tokenHash)),
+        await getPurchaseByProviderTransaction(
+          body.provider,
+          buildGooglePurchaseTransactionId(null, purchaseToken),
+        ),
+        await getPurchaseByProviderTransaction(
+          body.provider,
+          buildLegacyGooglePurchaseTransactionIdForLookup(purchaseToken),
+        ),
+      ].filter((candidate) => candidate !== null);
+      const uniqueCandidates = Array.from(
+        new Map(candidates.map((candidate) => [candidate.rowId, candidate])).values(),
+      );
+      if (uniqueCandidates.length > 1) {
+        logPurchaseVerify({
+          requestId,
+          event: "verification_risk",
+          reason: "ambiguous_google_purchase_candidates",
+          provider: body.provider,
+        });
+        const responseBody = {
+          error: "This purchase could not be settled safely.",
+          reason: "inconsistent_purchase_state",
+        };
+        if (idempotencyContext) {
+          await completeIdempotentRequest(idempotencyContext, 409, responseBody);
+        }
+        return responseWithIdentity(responseBody, 409);
+      }
+      existing = uniqueCandidates[0] ?? null;
+    }
     if (existing && existing.anonUserId !== identity.anonUserId) {
       // A purchase token can only belong to one user identity. This prevents
       // replaying the same store purchase against another account.
@@ -258,7 +306,7 @@ export async function POST(request: NextRequest) {
             : [...verification.riskFlags, "provider_reversal_insufficient_credits"],
         });
         const responseBody = {
-          purchase: updated,
+          purchase: updated ? purchaseForResponse(updated) : updated,
           reversalApplied: reversal.ok,
           outstandingReversalCredits: reversal.ok ? 0 : remainingToReverse,
           balance: reversal.balance,
@@ -272,12 +320,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const shouldEvaluateGooglePendingPromotion =
+      body.provider === "google_play" && verification.state === "purchased";
     if (
       existing &&
-      (verification.state !== "purchased" || existing.status !== "verified")
+      (verification.state !== "purchased" || existing.status !== "verified") &&
+      !shouldEvaluateGooglePendingPromotion
     ) {
       const responseBody = {
-        purchase: existing,
+        purchase: purchaseForResponse(existing),
         replay: true,
       };
       if (idempotencyContext) {
@@ -305,7 +356,7 @@ export async function POST(request: NextRequest) {
         riskFlags: verification.riskFlags,
       });
       const responseBody = {
-        purchase: record,
+        purchase: purchaseForResponse(record),
         grantedCredits: 0,
       };
       if (idempotencyContext) {
@@ -331,9 +382,14 @@ export async function POST(request: NextRequest) {
         providerMetadata: {
           verificationState: verification.state,
           purchasedAt: verification.purchasedAt,
-          packageName: body.packageName || undefined,
         },
         riskFlags: verification.riskFlags,
+        allowGooglePendingPromotion: shouldEvaluateGooglePendingPromotion,
+        existingProviderTransactionIdHint:
+          existing &&
+          existing.providerTransactionId !== verification.providerTransactionId
+            ? existing.providerTransactionId
+            : null,
       },
       {
         afterCommit: async (result) => {
@@ -399,11 +455,11 @@ export async function POST(request: NextRequest) {
     const responseBody =
       settlement.status === "replay"
         ? {
-            purchase: settlement.purchase,
+            purchase: purchaseForResponse(settlement.purchase),
             replay: true,
           }
         : {
-            purchase: settlement.purchase,
+            purchase: purchaseForResponse(settlement.purchase),
             grantedCredits: credits,
             balance: settlement.balance,
           };

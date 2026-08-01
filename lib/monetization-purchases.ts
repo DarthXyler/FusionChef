@@ -200,6 +200,44 @@ export async function getPurchaseByProviderTransaction(
   return row ? rowToPurchaseRecord(row) : null;
 }
 
+export async function getGooglePurchasesByTokenHash(tokenHash: string) {
+  await ensureSchema();
+  const result = await executeTurso({
+    sql: `SELECT
+            row_id,
+            provider,
+            provider_transaction_id,
+            provider_original_transaction_id,
+            anon_user_id,
+            product_id,
+            status,
+            granted_credits,
+            reversed_credits,
+            outstanding_reversal_credits,
+            risk_flags_json,
+            payload_json,
+            verified_at,
+            revoked_at,
+            created_at,
+            updated_at
+          FROM credit_purchase_transactions
+          WHERE provider = 'google_play'
+            AND CASE
+                  WHEN json_valid(payload_json)
+                  THEN json_extract(
+                    payload_json,
+                    '$._googlePurchaseTokenSha256'
+                  )
+                  ELSE NULL
+                END = ?
+          LIMIT 2`,
+    args: [tokenHash],
+  });
+  return result.rows.map((row) =>
+    rowToPurchaseRecord(row as Record<string, unknown>),
+  );
+}
+
 export async function listRecentPurchasesForUser(anonUserId: string, limit = 20) {
   await ensureSchema();
   const safeLimit = Math.max(1, Math.min(200, Math.trunc(limit)));

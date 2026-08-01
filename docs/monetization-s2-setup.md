@@ -46,6 +46,7 @@
 ### Google Play Verification
 
 - `GOOGLE_PLAY_PACKAGE_NAME`
+  - This trusted server value is always used as the Android Publisher verification target.
 - `GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL`
 - `GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY`
   - Store as sensitive multiline key (`\n` supported in env value).
@@ -69,9 +70,13 @@
   "provider": "google_play",
   "productId": "credits_20",
   "googlePurchaseToken": "purchase-token-from-play",
-  "packageName": "optional.override.package"
+  "packageName": "com.flavorfusionchef.mobile"
 }
 ```
+
+`packageName` remains accepted for mobile compatibility, but it must match
+`GOOGLE_PLAY_PACKAGE_NAME`. It cannot select a different application. The
+field may be omitted by clients that do not send it.
 
 ## Anti-Replay Behavior
 

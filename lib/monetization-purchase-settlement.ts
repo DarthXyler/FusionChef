@@ -21,6 +21,10 @@ export type VerifiedPurchaseSettlementInput = {
   currency?: string | null;
   price?: string | number | null;
   riskFlags?: string[];
+  /** Trusted route-only signal that fresh Google verification returned purchased. */
+  allowGooglePendingPromotion?: boolean;
+  /** Supports lookup of pre-hash Google token identifiers without creating new ones. */
+  existingProviderTransactionIdHint?: string | null;
 };
 
 export type SettledPurchaseRecord = {
@@ -70,9 +74,12 @@ export type VerifiedPurchaseSettlementResult =
         | "multiple_purchase_candidates"
         | "multiple_ledger_candidates"
         | "purchase_status_conflict"
+        | "purchase_transaction_mismatch"
         | "purchase_amount_mismatch"
         | "purchase_product_mismatch"
         | "purchase_original_transaction_mismatch"
+        | "pending_state_unproven"
+        | "pending_purchase_has_financial_records"
         | "ledger_event_type_mismatch"
         | "ledger_amount_mismatch"
         | "ledger_product_mismatch"
@@ -280,6 +287,15 @@ function validateInput(input: VerifiedPurchaseSettlementInput) {
       "Settlement idempotency key must match the verified provider transaction.",
     );
   }
+  if (
+    (input.allowGooglePendingPromotion ||
+      input.existingProviderTransactionIdHint?.trim()) &&
+    input.provider !== "google_play"
+  ) {
+    throw new Error(
+      "Google pending-purchase recovery facts cannot be used for another provider.",
+    );
+  }
 }
 
 async function ensureDefaultSchemas() {
@@ -298,6 +314,15 @@ async function loadPurchaseCandidates(
   transaction: Transaction,
   input: VerifiedPurchaseSettlementInput,
 ) {
+  const transactionIds = Array.from(
+    new Set(
+      [
+        input.providerTransactionId.trim(),
+        input.existingProviderTransactionIdHint?.trim() || "",
+      ].filter(Boolean),
+    ),
+  );
+  const placeholders = transactionIds.map(() => "?").join(", ");
   const result = await transaction.execute({
     sql: `SELECT
             row_id,
@@ -317,11 +342,63 @@ async function loadPurchaseCandidates(
             created_at,
             updated_at
           FROM credit_purchase_transactions
-          WHERE provider = ? AND provider_transaction_id = ?`,
-    args: [input.provider, input.providerTransactionId],
+          WHERE provider = ?
+            AND provider_transaction_id IN (${placeholders})`,
+    args: [input.provider, ...transactionIds],
   });
   return result.rows.map((row) =>
     rowToPurchase(row as Record<string, unknown>),
+  );
+}
+
+function isProvableGooglePendingPurchase(
+  purchase: SettledPurchaseRecord,
+  input: VerifiedPurchaseSettlementInput,
+) {
+  const previousOrderId = asString(purchase.payload.orderId).trim();
+  const incomingOrderId = asString(
+    input.providerVerificationPayload?.orderId,
+  ).trim();
+  const previousTokenHash = asString(
+    purchase.payload._googlePurchaseTokenSha256,
+  ).trim();
+  const incomingTokenHash = asString(
+    input.providerVerificationPayload?._googlePurchaseTokenSha256,
+  ).trim();
+  const storedFallbackHash = purchase.providerTransactionId.startsWith(
+    "token_sha256:",
+  )
+    ? purchase.providerTransactionId.slice("token_sha256:".length)
+    : purchase.providerTransactionId.startsWith("token:")
+      ? createHash("sha256")
+          .update(purchase.providerTransactionId.slice("token:".length))
+          .digest("hex")
+      : "";
+  const transactionIdentityIsProven = previousOrderId
+    ? incomingOrderId === previousOrderId &&
+      (purchase.providerTransactionId === previousOrderId ||
+        purchase.providerOriginalTransactionId === previousOrderId)
+    : Boolean(
+        incomingTokenHash &&
+          (previousTokenHash || storedFallbackHash) === incomingTokenHash,
+      );
+  const hasBlockingRiskFlag = purchase.riskFlags.some((flag) =>
+    /(cancel|fraud|refund|revok)/i.test(flag),
+  );
+  return (
+    input.allowGooglePendingPromotion === true &&
+    input.provider === "google_play" &&
+    purchase.provider === "google_play" &&
+    purchase.status === "rejected" &&
+    purchase.verifiedAt === null &&
+    purchase.grantedCredits === 0 &&
+    purchase.reversedCredits === 0 &&
+    purchase.outstandingReversalCredits === 0 &&
+    purchase.revokedAt === null &&
+    purchase.payload.purchaseState === 2 &&
+    input.providerVerificationPayload?.purchaseState === 0 &&
+    transactionIdentityIsProven &&
+    !hasBlockingRiskFlag
   );
 }
 
@@ -393,22 +470,14 @@ function validatePurchase(
       reason: "purchase_owner_mismatch",
     };
   }
-  if (
-    purchase.status !== "verified" ||
-    !purchase.verifiedAt ||
-    purchase.reversedCredits !== 0 ||
-    purchase.outstandingReversalCredits !== 0 ||
-    purchase.revokedAt !== null
-  ) {
+  const acceptedTransactionIds = new Set([
+    input.providerTransactionId.trim(),
+    input.existingProviderTransactionIdHint?.trim() || "",
+  ]);
+  if (!acceptedTransactionIds.has(purchase.providerTransactionId)) {
     return {
       status: "inconsistent_state",
-      reason: "purchase_status_conflict",
-    };
-  }
-  if (purchase.grantedCredits !== input.verifiedCredits) {
-    return {
-      status: "inconsistent_state",
-      reason: "purchase_amount_mismatch",
+      reason: "purchase_transaction_mismatch",
     };
   }
   if (purchase.productId !== input.productId) {
@@ -427,6 +496,44 @@ function validatePurchase(
     return {
       status: "inconsistent_state",
       reason: "purchase_original_transaction_mismatch",
+    };
+  }
+
+  if (isProvableGooglePendingPurchase(purchase, input)) {
+    return null;
+  }
+  if (
+    input.allowGooglePendingPromotion &&
+    purchase.provider === "google_play" &&
+    purchase.status !== "verified"
+  ) {
+    if (purchase.grantedCredits !== 0) {
+      return {
+        status: "inconsistent_state",
+        reason: "purchase_amount_mismatch",
+      };
+    }
+    return {
+      status: "inconsistent_state",
+      reason: "pending_state_unproven",
+    };
+  }
+  if (
+    purchase.status !== "verified" ||
+    !purchase.verifiedAt ||
+    purchase.reversedCredits !== 0 ||
+    purchase.outstandingReversalCredits !== 0 ||
+    purchase.revokedAt !== null
+  ) {
+    return {
+      status: "inconsistent_state",
+      reason: "purchase_status_conflict",
+    };
+  }
+  if (purchase.grantedCredits !== input.verifiedCredits) {
+    return {
+      status: "inconsistent_state",
+      reason: "purchase_amount_mismatch",
     };
   }
   return null;
@@ -661,6 +768,16 @@ export async function settleVerifiedPurchase(
       });
     }
     let ledger = ledgerCandidates[0] ?? null;
+    if (
+      purchase &&
+      isProvableGooglePendingPurchase(purchase, input) &&
+      ledger
+    ) {
+      return rollbackAndReturn(transaction, {
+        status: "inconsistent_state",
+        reason: "pending_purchase_has_financial_records",
+      });
+    }
     if (ledger) {
       const invalidLedger = validateLedger(ledger, input, Boolean(purchase));
       if (invalidLedger) {

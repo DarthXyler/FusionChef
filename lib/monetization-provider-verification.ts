@@ -2,7 +2,7 @@
  * Server-side purchase verification adapters.
  * Supports Apple App Store and Google Play product purchase verification.
  */
-import { createSign } from "crypto";
+import { createHash, createSign } from "crypto";
 import type { PurchaseProvider } from "@/lib/monetization-credit-packs";
 
 type PurchaseVerificationState = "purchased" | "revoked" | "pending" | "canceled";
@@ -45,6 +45,76 @@ function assertNonEmpty(value: string | undefined, fieldName: string) {
     throw new ProviderVerificationError(`${fieldName} is not configured.`, 500);
   }
   return value.trim();
+}
+
+const ANDROID_PACKAGE_NAME_PATTERN =
+  /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/;
+export const GOOGLE_PURCHASE_TOKEN_HASH_FIELD =
+  "_googlePurchaseTokenSha256";
+
+export function resolveGooglePlayPackageName(
+  clientPackageName?: string | null,
+) {
+  const configuredPackageName = assertNonEmpty(
+    process.env.GOOGLE_PLAY_PACKAGE_NAME,
+    "GOOGLE_PLAY_PACKAGE_NAME",
+  );
+  if (!ANDROID_PACKAGE_NAME_PATTERN.test(configuredPackageName)) {
+    throw new ProviderVerificationError(
+      "GOOGLE_PLAY_PACKAGE_NAME is invalid.",
+      500,
+    );
+  }
+
+  const suppliedPackageName = clientPackageName?.trim() || "";
+  if (suppliedPackageName && suppliedPackageName !== configuredPackageName) {
+    throw new ProviderVerificationError(
+      "packageName does not match the configured Android application.",
+      400,
+    );
+  }
+  return configuredPackageName;
+}
+
+export function buildGooglePurchaseTransactionId(
+  orderId: string | null | undefined,
+  purchaseToken: string,
+) {
+  const normalizedOrderId = orderId?.trim() || "";
+  if (normalizedOrderId) {
+    return normalizedOrderId;
+  }
+  const tokenHash = hashGooglePurchaseToken(purchaseToken);
+  return `token_sha256:${tokenHash}`;
+}
+
+export function hashGooglePurchaseToken(purchaseToken: string) {
+  return createHash("sha256").update(purchaseToken).digest("hex");
+}
+
+export function resolveGooglePurchaseState(
+  purchaseState: unknown,
+): PurchaseVerificationState {
+  if (purchaseState === 0) {
+    return "purchased";
+  }
+  if (purchaseState === 1) {
+    return "canceled";
+  }
+  if (purchaseState === 2) {
+    return "pending";
+  }
+  throw new ProviderVerificationError(
+    "Google purchase response has an unrecognized purchase state.",
+    502,
+  );
+}
+
+/** Historical lookup only. New purchase tokens are represented by a SHA-256 digest. */
+export function buildLegacyGooglePurchaseTransactionIdForLookup(
+  purchaseToken: string,
+) {
+  return `token:${purchaseToken}`;
 }
 
 function toIsoFromMillis(value: unknown) {
@@ -338,11 +408,7 @@ export async function verifyGooglePurchase(
     throw new ProviderVerificationError("expectedProductId is required.", 400);
   }
 
-  const configuredPackageName = assertNonEmpty(
-    process.env.GOOGLE_PLAY_PACKAGE_NAME,
-    "GOOGLE_PLAY_PACKAGE_NAME",
-  );
-  const packageName = (input.packageName?.trim() || configuredPackageName).trim();
+  const packageName = resolveGooglePlayPackageName(input.packageName);
   const accessToken = await getGoogleAccessToken(input.requestId);
   const verificationUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(packageName)}/purchases/products/${encodeURIComponent(expectedProductId)}/tokens/${encodeURIComponent(purchaseToken)}`;
 
@@ -367,10 +433,11 @@ export async function verifyGooglePurchase(
   }
 
   const orderId = typeof payload.orderId === "string" ? payload.orderId.trim() : "";
-  const providerTransactionId = orderId || `token:${purchaseToken}`;
-  const purchaseState = Number(payload.purchaseState);
-  const state: PurchaseVerificationState =
-    purchaseState === 0 ? "purchased" : purchaseState === 1 ? "canceled" : "pending";
+  const providerTransactionId = buildGooglePurchaseTransactionId(
+    orderId,
+    purchaseToken,
+  );
+  const state = resolveGooglePurchaseState(payload.purchaseState);
   const productId = expectedProductId;
   const riskFlags: string[] = [];
   if (typeof payload.purchaseType === "number" && payload.purchaseType !== 0) {
@@ -386,7 +453,10 @@ export async function verifyGooglePurchase(
     purchasedAt: toIsoFromMillis(payload.purchaseTimeMillis),
     revokedAt: state === "canceled" ? toIsoFromMillis(payload.purchaseTimeMillis) : null,
     riskFlags,
-    payload,
+    payload: {
+      ...payload,
+      [GOOGLE_PURCHASE_TOKEN_HASH_FIELD]: hashGooglePurchaseToken(purchaseToken),
+    },
   };
 }
 
