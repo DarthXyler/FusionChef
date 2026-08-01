@@ -19,6 +19,7 @@ import {
   type AdminUserActivityStatus,
   type AdminUserType,
 } from "@/lib/admin-user-engagement";
+import { AdminPurchaseReconciliationSection } from "@/components/AdminPurchaseReconciliationSection";
 
 type EnforcementMode = "off" | "observe" | "enforce";
 type PackageKey = "pack_1" | "pack_2" | "pack_3";
@@ -3099,11 +3100,19 @@ export function AdminMonetizationConfigPanel({
 
       {activeTab === "reconciliation" ? (
       <section className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-emerald-900">Credit Reconciliation</h2>
-        <p className="text-sm text-zinc-700">
-          Run this manually when users report stuck credits. It releases expired reservations
-          immediately, without waiting for scheduled cron.
-        </p>
+        <h2 className="text-lg font-semibold text-emerald-900">Reconciliation</h2>
+
+        <section className="space-y-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+          <div className="max-w-3xl space-y-1">
+            <h3 className="text-base font-semibold text-emerald-950">
+              Expired Reservation Reconciliation
+            </h3>
+            <p className="text-sm leading-6 text-zinc-700">
+              Use this when credits remain temporarily locked after a recipe generation or other
+              credit-consuming action did not finish. Previewing and running reconciliation
+              releases only expired reservations and restores those existing credits.
+            </p>
+          </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <label className="space-y-2 text-sm font-semibold text-emerald-900">
@@ -3197,6 +3206,9 @@ export function AdminMonetizationConfigPanel({
             {panelNotices.reconciliation.success}
           </p>
         ) : null}
+        </section>
+
+        <AdminPurchaseReconciliationSection adminToken={adminToken} />
       </section>
       ) : null}
     </div>
