@@ -44,6 +44,24 @@ export type PurchaseReconciliationReport = {
   issues: PurchaseReconciliationIssue[];
 };
 
+export type PurchaseReconciliationEvidence = {
+  issue: PurchaseReconciliationIssue;
+  purchaseRowId: string | null;
+  ledgerEntryId: string | null;
+  providerTransactionId: string;
+  userId: string;
+  productId: string;
+  purchaseStatus: string | null;
+  purchaseVerifiedAt: string | null;
+  purchaseGrantedCredits: number | null;
+  recordedCredits: number | null;
+  ledgerOwnerId: string | null;
+  ledgerIdempotencyScope: string | null;
+  ledgerIdempotencyKey: string | null;
+  balanceExists: boolean;
+  blockingIssueTypes: PurchaseReconciliationIssueType[];
+};
+
 type ReconciliationClient = Pick<Client, "execute">;
 
 type Purchase = {
@@ -138,7 +156,7 @@ const SNAPSHOT_SQL = `
     CASE WHEN json_valid(metadata_json)
       THEN json_extract(metadata_json, '$.productId') ELSE NULL END
   FROM credit_ledger_entries
-  WHERE event_type = 'purchase_grant'
+  WHERE event_type IN ('purchase_grant', 'purchase_adjustment')
 
   UNION ALL
 
@@ -162,7 +180,7 @@ const SNAPSHOT_SQL = `
     NULL AS metadata_transaction_id,
     NULL AS metadata_product_id
   FROM credit_purchase_ledger_links
-  WHERE link_kind = 'base_grant'
+  WHERE link_kind IN ('base_grant', 'repair_adjustment')
 
   UNION ALL
 
@@ -342,12 +360,15 @@ function emptyCounts(): PurchaseReconciliationCounts {
   ) as PurchaseReconciliationCounts;
 }
 
-export async function scanPurchaseReconciliation(
+async function scanPurchaseReconciliationWithEvidence(
   options: {
     client?: ReconciliationClient;
     now?: () => Date;
   } = {},
-): Promise<PurchaseReconciliationReport> {
+): Promise<{
+  report: PurchaseReconciliationReport;
+  evidenceById: Map<string, PurchaseReconciliationEvidence>;
+}> {
   const client = options.client ?? getTursoClient();
   const snapshot = await client.execute(SNAPSHOT_SQL);
 
@@ -417,7 +438,9 @@ export async function scanPurchaseReconciliation(
     ledgers.map((ledger) => [ledger.entryId, ledger]),
   );
   const ledgersByKey = new Map<string, Ledger[]>();
-  for (const ledger of ledgers) {
+  for (const ledger of ledgers.filter(
+    (candidate) => candidate.eventType === "purchase_grant",
+  )) {
     for (const key of getLedgerAssociationKeys(ledger)) {
       ledgersByKey.set(key, [...(ledgersByKey.get(key) ?? []), ledger]);
     }
@@ -431,6 +454,7 @@ export async function scanPurchaseReconciliation(
   }
 
   const issues = new Map<string, PurchaseReconciliationIssue>();
+  const evidenceById = new Map<string, PurchaseReconciliationEvidence>();
   const addIssue = (facts: IssueFacts) => {
     const purchase = facts.purchase ?? null;
     const ledger = facts.ledger ?? null;
@@ -459,7 +483,7 @@ export async function scanPurchaseReconciliation(
       .update(dedupeKey)
       .digest("hex")
       .slice(0, 20);
-    issues.set(dedupeKey, {
+    const issue: PurchaseReconciliationIssue = {
       id: issueId,
       issueType: facts.issueType,
       userId: userId || "Unavailable",
@@ -485,6 +509,27 @@ export async function scanPurchaseReconciliation(
       currentBalance: balances.get(userId) ?? 0,
       explanation: copy.explanation,
       recommendedStep: copy.recommendedStep,
+    };
+    issues.set(dedupeKey, issue);
+    evidenceById.set(issueId, {
+      issue,
+      purchaseRowId: purchase?.rowId ?? null,
+      ledgerEntryId: ledger?.entryId ?? null,
+      providerTransactionId,
+      userId,
+      productId: purchase?.productId || ledger?.metadataProductId || "",
+      purchaseStatus: purchase?.status ?? null,
+      purchaseVerifiedAt: purchase?.verifiedAt ?? null,
+      purchaseGrantedCredits: purchase?.grantedCredits ?? null,
+      recordedCredits:
+        facts.ledgerAmount !== undefined
+          ? facts.ledgerAmount
+          : ledger?.amount ?? null,
+      ledgerOwnerId: ledger?.anonUserId ?? null,
+      ledgerIdempotencyScope: ledger?.idempotencyScope ?? null,
+      ledgerIdempotencyKey: ledger?.idempotencyKey ?? null,
+      balanceExists: balances.has(userId),
+      blockingIssueTypes: [],
     });
   };
 
@@ -497,9 +542,22 @@ export async function scanPurchaseReconciliation(
     );
     const deterministicLedgers = ledgersByKey.get(key) ?? [];
     const purchaseLinks = linksByPurchase.get(purchase.rowId) ?? [];
-    const linkedLedgers = purchaseLinks
+    const baseLinks = purchaseLinks.filter(
+      (link) => link.linkKind === "base_grant",
+    );
+    const repairLinks = purchaseLinks.filter(
+      (link) => link.linkKind === "repair_adjustment",
+    );
+    const linkedLedgers = baseLinks
       .map((link) => ledgersById.get(link.ledgerEntryId) ?? null)
       .filter((ledger): ledger is Ledger => ledger !== null);
+    const repairLedgers = repairLinks
+      .map((link) => ledgersById.get(link.ledgerEntryId) ?? null)
+      .filter((ledger): ledger is Ledger => ledger !== null);
+    const recordedCredits = [...linkedLedgers, ...repairLedgers].reduce(
+      (total, ledger) => total + ledger.amount,
+      0,
+    );
 
     if (deterministicLedgers.length > 1 || linkedLedgers.length > 1) {
       addIssue({
@@ -551,9 +609,6 @@ export async function scanPurchaseReconciliation(
       if (ledger.anonUserId !== purchase.anonUserId) {
         addIssue({ issueType: "owner_mismatch", purchase, ledger });
       }
-      if (ledger.amount !== purchase.grantedCredits) {
-        addIssue({ issueType: "credit_amount_mismatch", purchase, ledger });
-      }
       if (
         !associationKeys.has(key) ||
         hasLedgerIdentityConflict(ledger) ||
@@ -567,9 +622,37 @@ export async function scanPurchaseReconciliation(
         });
       }
     }
+    for (const ledger of repairLedgers) {
+      const associationKeys = getLedgerAssociationKeys(ledger);
+      if (ledger.anonUserId !== purchase.anonUserId) {
+        addIssue({ issueType: "owner_mismatch", purchase, ledger });
+      }
+      if (
+        (associationKeys.size > 0 && !associationKeys.has(key)) ||
+        hasLedgerIdentityConflict(ledger) ||
+        (ledger.metadataProductId &&
+          ledger.metadataProductId !== purchase.productId)
+      ) {
+        addIssue({
+          issueType: "product_or_transaction_conflict",
+          purchase,
+          ledger,
+        });
+      }
+    }
+    if (recordedCredits !== purchase.grantedCredits) {
+      addIssue({
+        issueType: "credit_amount_mismatch",
+        purchase,
+        ledger: linkedLedgers[0] ?? null,
+        ledgerAmount: recordedCredits,
+      });
+    }
   }
 
-  for (const ledger of ledgers) {
+  for (const ledger of ledgers.filter(
+    (candidate) => candidate.eventType === "purchase_grant",
+  )) {
     const keys = [...getLedgerAssociationKeys(ledger)];
     const primaryKey =
       ledger.idempotencyScope === "purchase-credit-grant"
@@ -640,6 +723,31 @@ export async function scanPurchaseReconciliation(
     }
   }
 
+  const conflictTypes = new Set<PurchaseReconciliationIssueType>([
+    "owner_mismatch",
+    "duplicate_grant",
+    "product_or_transaction_conflict",
+  ]);
+  const evidenceRows = [...evidenceById.values()];
+  for (const evidence of evidenceRows) {
+    evidence.blockingIssueTypes = Array.from(
+      new Set(
+        evidenceRows
+          .filter(
+            (candidate) =>
+              candidate.issue.id !== evidence.issue.id &&
+              conflictTypes.has(candidate.issue.issueType) &&
+              ((evidence.purchaseRowId &&
+                candidate.purchaseRowId === evidence.purchaseRowId) ||
+                (candidate.issue.provider === evidence.issue.provider &&
+                  candidate.providerTransactionId ===
+                    evidence.providerTransactionId)),
+          )
+          .map((candidate) => candidate.issue.issueType),
+      ),
+    );
+  }
+
   const issueRows = [...issues.values()].sort((left, right) =>
     left.issueType === right.issueType
       ? (right.purchaseDate ?? "").localeCompare(left.purchaseDate ?? "")
@@ -651,10 +759,33 @@ export async function scanPurchaseReconciliation(
   }
 
   return {
-    status: issueRows.length === 0 ? "healthy" : "needs_attention",
-    checkedAt: (options.now ?? (() => new Date()))().toISOString(),
-    totalIssues: issueRows.length,
-    counts,
-    issues: issueRows,
+    report: {
+      status: issueRows.length === 0 ? "healthy" : "needs_attention",
+      checkedAt: (options.now ?? (() => new Date()))().toISOString(),
+      totalIssues: issueRows.length,
+      counts,
+      issues: issueRows,
+    },
+    evidenceById,
   };
+}
+
+export async function scanPurchaseReconciliation(
+  options: {
+    client?: ReconciliationClient;
+    now?: () => Date;
+  } = {},
+) {
+  return (await scanPurchaseReconciliationWithEvidence(options)).report;
+}
+
+export async function findPurchaseReconciliationEvidence(
+  issueId: string,
+  options: {
+    client?: ReconciliationClient;
+    now?: () => Date;
+  } = {},
+) {
+  const snapshot = await scanPurchaseReconciliationWithEvidence(options);
+  return snapshot.evidenceById.get(issueId) ?? null;
 }

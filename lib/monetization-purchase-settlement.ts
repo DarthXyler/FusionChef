@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "crypto";
 import type { Client, Transaction } from "@libsql/client";
 import type { PurchaseProvider } from "./monetization-credit-packs.ts";
+import {
+  insertCompletedPurchaseReconciliationAudit,
+  type PurchaseReconciliationAuditInput,
+} from "./monetization-purchase-reconciliation-audit.ts";
 import { getTursoClient } from "./turso.ts";
 
 const PURCHASE_LEDGER_SCOPE = "purchase-credit-grant";
@@ -25,6 +29,11 @@ export type VerifiedPurchaseSettlementInput = {
   allowGooglePendingPromotion?: boolean;
   /** Supports lookup of pre-hash Google token identifiers without creating new ones. */
   existingProviderTransactionIdHint?: string | null;
+  expectedBalanceBefore?: number;
+  reconciliationAudit?: Omit<
+    PurchaseReconciliationAuditInput,
+    "purchaseTransactionId" | "ledgerEntryId" | "completedAt"
+  >;
 };
 
 export type SettledPurchaseRecord = {
@@ -86,14 +95,17 @@ export type VerifiedPurchaseSettlementResult =
         | "ledger_metadata_unproven"
         | "base_grant_link_conflict"
         | "ledger_link_conflict"
-        | "missing_balance_for_existing_grant";
+        | "missing_balance_for_existing_grant"
+        | "reconciliation_balance_changed"
+        | "reconciliation_issue_changed";
     };
 
 export type PurchaseSettlementFaultStage =
   | "after_purchase_insert"
   | "after_ledger_insert"
   | "after_balance_update"
-  | "after_link_insert";
+  | "after_link_insert"
+  | "after_reconciliation_audit_insert";
 
 type SettlementClient = Pick<Client, "transaction">;
 
@@ -276,6 +288,13 @@ function validateInput(input: VerifiedPurchaseSettlementInput) {
     throw new Error("Verified purchase settlement facts are incomplete.");
   }
   if (
+    input.expectedBalanceBefore !== undefined &&
+    (!Number.isInteger(input.expectedBalanceBefore) ||
+      input.expectedBalanceBefore < 0)
+  ) {
+    throw new Error("Expected purchase settlement balance is invalid.");
+  }
+  if (
     !Number.isInteger(input.verifiedCredits) ||
     input.verifiedCredits < 1 ||
     input.verifiedCredits > MAX_SETTLEMENT_CREDITS
@@ -422,6 +441,62 @@ async function loadLedgerCandidates(
   });
   return result.rows.map((row) =>
     rowToLedger(row as Record<string, unknown>),
+  );
+}
+
+async function reconciliationAssociationIsStillExact(
+  transaction: Transaction,
+  input: VerifiedPurchaseSettlementInput,
+  ledger: LedgerCandidate | null,
+) {
+  const issueType = input.reconciliationAudit?.issueType;
+  if (
+    issueType !== "purchase_missing_grant" &&
+    issueType !== "grant_missing_purchase"
+  ) {
+    return true;
+  }
+  const transactionIds = Array.from(
+    new Set(
+      [
+        input.providerTransactionId.trim(),
+        input.existingProviderTransactionIdHint?.trim() || "",
+      ].filter(Boolean),
+    ),
+  );
+  const transactionPlaceholders = transactionIds.map(() => "?").join(", ");
+  const idempotencyKeys = transactionIds.map(
+    (transactionId) => `${input.provider}:${transactionId}`,
+  );
+  const keyPlaceholders = idempotencyKeys.map(() => "?").join(", ");
+  const result = await transaction.execute({
+    sql: `SELECT entry_id
+          FROM credit_ledger_entries
+          WHERE event_type = 'purchase_grant'
+            AND (
+              (idempotency_scope = ?
+                AND idempotency_key IN (${keyPlaceholders}))
+              OR (
+                json_valid(metadata_json)
+                AND json_extract(metadata_json, '$.provider') = ?
+                AND json_extract(metadata_json, '$.providerTransactionId')
+                  IN (${transactionPlaceholders})
+              )
+            )`,
+    args: [
+      PURCHASE_LEDGER_SCOPE,
+      ...idempotencyKeys,
+      input.provider,
+      ...transactionIds,
+    ],
+  });
+  if (issueType === "purchase_missing_grant") {
+    return result.rows.length === 0 && ledger === null;
+  }
+  return (
+    result.rows.length === 1 &&
+    ledger !== null &&
+    asString(result.rows[0]?.entry_id) === ledger.entryId
   );
 }
 
@@ -738,6 +813,23 @@ export async function settleVerifiedPurchase(
       args: [input.canonicalAnonUserId, nowIso],
     });
     const balanceWasCreated = balanceInsert.rowsAffected > 0;
+    if (input.expectedBalanceBefore !== undefined) {
+      const expectedBalanceResult = await transaction.execute({
+        sql: `SELECT available_credits
+              FROM credit_balances
+              WHERE anon_user_id = ?`,
+        args: [input.canonicalAnonUserId],
+      });
+      const availableCredits = asInteger(
+        expectedBalanceResult.rows[0]?.available_credits,
+      );
+      if (availableCredits !== input.expectedBalanceBefore) {
+        return rollbackAndReturn(transaction, {
+          status: "inconsistent_state",
+          reason: "reconciliation_balance_changed",
+        });
+      }
+    }
 
     const purchaseCandidates = await loadPurchaseCandidates(
       transaction,
@@ -789,6 +881,18 @@ export async function settleVerifiedPurchase(
           reason: "missing_balance_for_existing_grant",
         });
       }
+    }
+    if (
+      !(await reconciliationAssociationIsStillExact(
+        transaction,
+        input,
+        ledger,
+      ))
+    ) {
+      return rollbackAndReturn(transaction, {
+        status: "inconsistent_state",
+        reason: "reconciliation_issue_changed",
+      });
     }
 
     let purchaseRowId = purchase?.rowId ?? null;
@@ -845,6 +949,12 @@ export async function settleVerifiedPurchase(
     }
 
     if (purchase && ledger && linkValidation.exactLink) {
+      if (input.reconciliationAudit) {
+        return rollbackAndReturn(transaction, {
+          status: "inconsistent_state",
+          reason: "reconciliation_issue_changed",
+        });
+      }
       const balanceResult = await transaction.execute({
         sql: `SELECT available_credits, pending_credits, updated_at
               FROM credit_balances
@@ -1070,6 +1180,29 @@ export async function settleVerifiedPurchase(
       balance: rowToBalance(finalBalanceRow, input.canonicalAnonUserId),
       ledgerEntryId: ledger.entryId,
     };
+    if (input.reconciliationAudit) {
+      if (
+        input.reconciliationAudit.balanceBefore !==
+          input.expectedBalanceBefore ||
+        input.reconciliationAudit.balanceAfter !==
+          result.balance.availableCredits ||
+        input.reconciliationAudit.creditDelta !==
+          result.balance.availableCredits -
+            input.reconciliationAudit.balanceBefore
+      ) {
+        return rollbackAndReturn(transaction, {
+          status: "inconsistent_state",
+          reason: "reconciliation_balance_changed",
+        });
+      }
+      await insertCompletedPurchaseReconciliationAudit(transaction, {
+        ...input.reconciliationAudit,
+        purchaseTransactionId: result.purchase.rowId,
+        ledgerEntryId: result.ledgerEntryId,
+        completedAt: nowIso,
+      });
+      await options.faultInjector?.("after_reconciliation_audit_insert");
+    }
     await transaction.commit();
     if (options.afterCommit) {
       try {

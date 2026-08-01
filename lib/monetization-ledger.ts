@@ -16,6 +16,7 @@ export type CreditLedgerEvent =
   | "observe_reroll"
   | "grant"
   | "purchase_grant"
+  | "purchase_adjustment"
   | "purchase_reversal"
   | "reserve"
   | "commit"

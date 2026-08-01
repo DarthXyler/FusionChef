@@ -3208,7 +3208,10 @@ export function AdminMonetizationConfigPanel({
         ) : null}
         </section>
 
-        <AdminPurchaseReconciliationSection adminToken={adminToken} />
+        <AdminPurchaseReconciliationSection
+          adminToken={adminToken}
+          adminActor={adminActor}
+        />
       </section>
       ) : null}
     </div>
