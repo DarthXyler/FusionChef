@@ -16,7 +16,8 @@ import {
   type IdempotencyContext,
 } from "@/lib/idempotency";
 import { getCreditsForProduct, type PurchaseProvider } from "@/lib/monetization-credit-packs";
-import { applyPurchaseReversalDeduction, grantCredits } from "@/lib/monetization-ledger";
+import { applyPurchaseReversalDeduction } from "@/lib/monetization-ledger";
+import { settleVerifiedPurchase } from "@/lib/monetization-purchase-settlement";
 import {
   createPurchaseRecord,
   getPurchaseByProviderTransaction,
@@ -271,7 +272,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (existing) {
+    if (
+      existing &&
+      (verification.state !== "purchased" || existing.status !== "verified")
+    ) {
       const responseBody = {
         purchase: existing,
         replay: true,
@@ -312,43 +316,73 @@ export async function POST(request: NextRequest) {
       return response;
     }
 
-    const grantResult = await grantCredits({
-      // Verified new purchase: grant credits once and record the transaction
-      // so retries return the same result instead of granting twice.
-      anonUserId: identity.anonUserId,
-      amount: credits,
-      actor: "purchase_verification",
-      eventType: "purchase_grant",
-      idempotencyScope: "purchase-credit-grant",
-      idempotencyKey: `${body.provider}:${verification.providerTransactionId}`,
-      metadata: {
+    const settlement = await settleVerifiedPurchase(
+      {
         provider: body.provider,
-        productId: verification.productId,
         providerTransactionId: verification.providerTransactionId,
+        providerOriginalTransactionId:
+          verification.providerOriginalTransactionId,
+        canonicalAnonUserId: identity.anonUserId,
+        productId: verification.productId,
+        verifiedCredits: credits,
+        verifiedAt: verification.purchasedAt ?? new Date().toISOString(),
+        settlementIdempotencyKey: `${body.provider}:${verification.providerTransactionId}`,
+        providerVerificationPayload: verification.payload,
+        providerMetadata: {
+          verificationState: verification.state,
+          purchasedAt: verification.purchasedAt,
+          packageName: body.packageName || undefined,
+        },
+        riskFlags: verification.riskFlags,
       },
-    });
+      {
+        afterCommit: async (result) => {
+          await recordVerifiedPurchaseActivitySafely({
+            authUserId: authSession.userId,
+            provider: body.provider,
+            providerTransactionId: result.purchase.providerTransactionId,
+            verifiedAt: result.purchase.verifiedAt,
+          });
+        },
+      },
+    );
 
-    const record = await createPurchaseRecord({
-      provider: body.provider,
-      providerTransactionId: verification.providerTransactionId,
-      providerOriginalTransactionId: verification.providerOriginalTransactionId,
-      anonUserId: identity.anonUserId,
-      productId: verification.productId,
-      status: "verified",
-      grantedCredits: credits,
-      reversedCredits: 0,
-      outstandingReversalCredits: 0,
-      verifiedAt: verification.purchasedAt ?? new Date().toISOString(),
-      revokedAt: null,
-      payload: verification.payload,
-      riskFlags: verification.riskFlags,
-    });
-    await recordVerifiedPurchaseActivitySafely({
-      authUserId: authSession.userId,
-      provider: body.provider,
-      providerTransactionId: record.providerTransactionId,
-      verifiedAt: record.verifiedAt,
-    });
+    if (settlement.status === "owner_conflict") {
+      logPurchaseVerify({
+        requestId,
+        event: "verification_risk",
+        reason: settlement.reason,
+        provider: body.provider,
+      });
+      const responseBody = {
+        error: "This purchase token has already been used.",
+      };
+      if (idempotencyContext) {
+        await completeIdempotentRequest(idempotencyContext, 409, responseBody);
+      }
+      const response = responseWithIdentity(responseBody, 409);
+      response.headers.set("Idempotency-Status", "stored");
+      return response;
+    }
+
+    if (settlement.status === "inconsistent_state") {
+      logPurchaseVerify({
+        requestId,
+        event: "purchase_settlement_inconsistent",
+        reason: settlement.reason,
+        provider: body.provider,
+      });
+      const responseBody = {
+        error: "This purchase could not be settled safely.",
+        reason: "inconsistent_purchase_state",
+      };
+      if (idempotencyContext) {
+        await completeIdempotentRequest(idempotencyContext, 409, responseBody);
+      }
+      const response = responseWithIdentity(responseBody, 409);
+      response.headers.set("Idempotency-Status", "stored");
+      return response;
+    }
 
     if (verification.riskFlags.length > 0) {
       logPurchaseVerify({
@@ -362,11 +396,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const responseBody = {
-      purchase: record,
-      grantedCredits: credits,
-      balance: grantResult.balance,
-    };
+    const responseBody =
+      settlement.status === "replay"
+        ? {
+            purchase: settlement.purchase,
+            replay: true,
+          }
+        : {
+            purchase: settlement.purchase,
+            grantedCredits: credits,
+            balance: settlement.balance,
+          };
     if (idempotencyContext) {
       await completeIdempotentRequest(idempotencyContext, 200, responseBody);
     }

@@ -3,9 +3,17 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ts from "typescript";
+import { settleVerifiedPurchase } from "../lib/monetization-purchase-settlement.ts";
 
 const runId = `ff_regression_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 const usingRemote = Boolean(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN);
+const isolatedRemoteDatabaseAllowed =
+  process.env.ALLOW_ISOLATED_MONETIZATION_TEST_DATABASE === "true";
+if (usingRemote && !isolatedRemoteDatabaseAllowed) {
+  throw new Error(
+    "Remote monetization regression is disabled. Set ALLOW_ISOLATED_MONETIZATION_TEST_DATABASE=true only for an isolated test database.",
+  );
+}
 const client = createClient({
   url: usingRemote
     ? process.env.TURSO_DATABASE_URL
@@ -227,91 +235,50 @@ async function ensureSchema() {
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     UNIQUE(provider, provider_transaction_id)
   )`);
+  const settlementMigration = await readFile(
+    new URL(
+      "../migrations/20260731_001_create_purchase_settlement_foundation.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  await client.executeMultiple(settlementMigration);
 }
 
-async function ensureBalanceRow() {
-  await execute(
-    `INSERT INTO credit_balances (anon_user_id, available_credits, pending_credits)
-     VALUES (?, 0, 0)
-     ON CONFLICT(anon_user_id) DO NOTHING`,
-    [anonUserId],
+async function settlePurchase({ transactionId, productId, credits }) {
+  const result = await settleVerifiedPurchase(
+    {
+      provider,
+      providerTransactionId: transactionId,
+      providerOriginalTransactionId: transactionId,
+      canonicalAnonUserId: anonUserId,
+      productId,
+      verifiedCredits: credits,
+      verifiedAt: new Date().toISOString(),
+      settlementIdempotencyKey: `${provider}:${transactionId}`,
+      providerVerificationPayload: {
+        transactionId,
+        productId,
+        fixture: true,
+      },
+      providerMetadata: {
+        source: "monetization-regression",
+      },
+    },
+    {
+      client,
+      ensureSchemas: async () => {},
+    },
   );
-}
-
-async function grantCredits({ transactionId, productId, credits }) {
-  const existing = await execute(
-    `SELECT provider_transaction_id FROM credit_purchase_transactions
-     WHERE provider = ? AND provider_transaction_id = ?
-     LIMIT 1`,
-    [provider, transactionId],
-  );
-  if (existing.rows.length > 0) {
-    return { replay: true };
+  if (
+    result.status === "owner_conflict" ||
+    result.status === "inconsistent_state"
+  ) {
+    throw new Error(`Purchase settlement failed closed: ${result.reason}`);
   }
-
-  const nowIso = new Date().toISOString();
-  const entryId = `${transactionId}_ledger`;
-  const rowId = `${transactionId}_purchase`;
-  const results = await client.batch(
-    [
-      {
-        sql: `UPDATE credit_balances
-          SET available_credits = available_credits + ?, updated_at = ?
-          WHERE anon_user_id = ?
-          RETURNING available_credits, pending_credits`,
-        args: [credits, nowIso, anonUserId],
-      },
-      {
-        sql: `INSERT INTO credit_ledger_entries (
-          entry_id, anon_user_id, event_type, amount, balance_available_after,
-          balance_pending_after, reservation_id, idempotency_scope, idempotency_key,
-          actor, metadata_json, created_at
-        )
-        VALUES (
-          ?, ?, 'purchase_grant', ?,
-          (SELECT available_credits FROM credit_balances WHERE anon_user_id = ?),
-          (SELECT pending_credits FROM credit_balances WHERE anon_user_id = ?),
-          NULL, 'purchase-credit-grant', ?, 'purchase_verification', ?, ?
-        )
-        RETURNING balance_available_after, balance_pending_after`,
-        args: [
-          entryId,
-          anonUserId,
-          credits,
-          anonUserId,
-          anonUserId,
-          `${provider}:${transactionId}`,
-          JSON.stringify({ provider, productId, providerTransactionId: transactionId }),
-          nowIso,
-        ],
-      },
-      {
-        sql: `INSERT INTO credit_purchase_transactions (
-          row_id, provider, provider_transaction_id, provider_original_transaction_id,
-          anon_user_id, product_id, status, granted_credits, reversed_credits,
-          outstanding_reversal_credits, verified_at, payload_json, risk_flags_json,
-          created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, 'verified', ?, 0, 0, ?, '{}', '[]', ?, ?)`,
-        args: [
-          rowId,
-          provider,
-          transactionId,
-          transactionId,
-          anonUserId,
-          productId,
-          credits,
-          nowIso,
-          nowIso,
-          nowIso,
-        ],
-      },
-    ],
-    "write",
-  );
   return {
-    replay: false,
-    balanceAfter: Number(results[1].rows[0].balance_available_after),
+    replay: result.status === "replay",
+    balanceAfter: result.balance.availableCredits,
   };
 }
 
@@ -372,19 +339,27 @@ async function getBalance() {
   };
 }
 
+async function getBaseGrantLinkCount() {
+  const result = await execute(
+    `SELECT COUNT(*) AS count
+     FROM credit_purchase_ledger_links
+     WHERE link_kind = 'base_grant'`,
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
 try {
   await assertFuseCostFallbacks();
   await ensureSchema();
-  await ensureBalanceRow();
 
-  const firstGrant = await grantCredits({
+  const firstGrant = await settlePurchase({
     transactionId: firstTransactionId,
     productId: "com.flavorfusion.credits.20",
     credits: 20,
   });
   assert(!firstGrant.replay && firstGrant.balanceAfter === 20, "first purchase grant failed");
 
-  const replay = await grantCredits({
+  const replay = await settlePurchase({
     transactionId: firstTransactionId,
     productId: "com.flavorfusion.credits.20",
     credits: 20,
@@ -392,12 +367,16 @@ try {
   assert(replay.replay, "duplicate purchase was not treated as replay");
   assert((await getBalance()).available === 20, "duplicate purchase changed balance");
 
-  const secondGrant = await grantCredits({
+  const secondGrant = await settlePurchase({
     transactionId: secondTransactionId,
     productId: "com.flavorfusion.credits.50",
     credits: 50,
   });
   assert(!secondGrant.replay && secondGrant.balanceAfter === 70, "second purchase grant failed");
+  assert(
+    (await getBaseGrantLinkCount()) === 2,
+    "purchase settlements did not create one base-grant link each",
+  );
 
   await reversePurchase({ transactionId: firstTransactionId, credits: 20 });
   const finalBalance = await getBalance();
@@ -413,9 +392,10 @@ try {
         checks: [
           "schema",
           "fuse_cost_fallbacks_3",
-          "purchase_grant_20",
+          "atomic_purchase_settlement_20",
           "duplicate_purchase_replay",
-          "purchase_grant_50",
+          "atomic_purchase_settlement_50",
+          "purchase_base_grant_links",
           "purchase_reversal_20",
           "final_balance",
         ],
