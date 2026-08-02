@@ -12,6 +12,13 @@ import {
   AccountDeletionSchemaError,
   assertAccountDeletionSchemaReady,
 } from "@/lib/account-deletion-schema";
+import { buildAccountDeletionGraphCleanupStatements } from "@/lib/account-deletion-execution";
+import {
+  getEmptyAccountDeletionInventory,
+  planAccountDeletion,
+  type AccountDeletionGraphPlan,
+  type AccountDeletionInventory,
+} from "@/lib/account-deletion-planner";
 import {
   getAdminUserLinkStatus,
   parseAdminUserLinkStatus,
@@ -65,9 +72,6 @@ import {
   type IdempotencyContext,
 } from "@/lib/idempotency";
 import { executeTurso, executeTursoBatch } from "@/lib/turso";
-import {
-  buildPurchaseReconciliationAccountDeletionStatement,
-} from "@/lib/purchase-settlement-retention";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -112,25 +116,16 @@ type DeleteTarget = {
     | "ambiguous"
     | "duplicate_input"
     | "duplicate_target"
-    | "blocked_shared_identity";
+    | "blocked_shared_identity"
+    | "manual_review";
   message: string;
   user: ResolvedUser | null;
   linkedAuthUsers: Array<{ authUserId: string; email: string }>;
   counts: AccountDeletionCounts;
+  graph: AccountDeletionGraphPlan | null;
 };
 
-type AccountDeletionCounts = {
-  authUsers: number;
-  identityLinks: number;
-  mobileDeviceLinks: number;
-  mobileAliases: number;
-  cookbookRecipes: number;
-  creditBalanceRows: number;
-  creditReservations: number;
-  creditLedgerEntries: number;
-  dailyUsageRows: number;
-  purchaseTransactionsPreserved: number;
-};
+type AccountDeletionCounts = AccountDeletionInventory;
 
 class RequestValidationError extends Error {}
 
@@ -836,90 +831,47 @@ async function resolveBatchTargets(identifiers: string[]) {
   return targets;
 }
 
-async function getLinkedAuthUsers(canonicalAnonUserId: string) {
-  if (!canonicalAnonUserId) {
+async function getDeletionOwnerLabels(authUserIds: string[]) {
+  if (authUserIds.length === 0) {
     return [] as Array<{ authUserId: string; email: string }>;
   }
-  const result = await executeTurso({
-    sql: `SELECT u.id AS auth_user_id, u.email
-          FROM auth_identity_links ail
-          JOIN auth_users u ON u.id = ail.auth_user_id
-          WHERE ail.canonical_anon_user_id = ?
-          ORDER BY u.email ASC`,
-    args: [canonicalAnonUserId],
-  });
-  return result.rows.map((row) => ({
-    authUserId: asString((row as Record<string, unknown>).auth_user_id),
-    email: asString((row as Record<string, unknown>).email),
-  }));
-}
-
-async function getAccountDeletionCounts(user: ResolvedUser): Promise<AccountDeletionCounts> {
-  const canonical = user.canonicalAnonUserId;
-  const authUserId = user.authUserId;
-  const result = await executeTurso({
-    sql: `SELECT
-            (SELECT COUNT(*) FROM auth_users WHERE id = ?) AS auth_users,
-            (SELECT COUNT(*) FROM auth_identity_links WHERE auth_user_id = ? OR canonical_anon_user_id = ?) AS identity_links,
-            (SELECT COUNT(*) FROM mobile_identity_links WHERE canonical_anon_user_id = ?) AS mobile_device_links,
-            (SELECT COUNT(*) FROM mobile_identity_aliases WHERE anon_user_id = ? OR canonical_anon_user_id = ?) AS mobile_aliases,
-            (SELECT COUNT(*) FROM cookbook_recipes WHERE anon_user_id = ?) AS cookbook_recipes,
-            (SELECT COUNT(*) FROM credit_balances WHERE anon_user_id = ?) AS credit_balance_rows,
-            (SELECT COUNT(*) FROM credit_reservations WHERE anon_user_id = ?) AS credit_reservations,
-            (SELECT COUNT(*) FROM credit_ledger_entries WHERE anon_user_id = ?) AS credit_ledger_entries,
-            (SELECT COUNT(*) FROM credit_daily_usage WHERE anon_user_id = ?) AS daily_usage_rows,
-            (SELECT COUNT(*) FROM credit_purchase_transactions WHERE anon_user_id = ?) AS purchase_transactions_preserved`,
-    args: [
-      authUserId,
-      authUserId,
-      canonical,
-      canonical,
-      canonical,
-      canonical,
-      canonical,
-      canonical,
-      canonical,
-      canonical,
-      canonical,
-      canonical,
-    ],
-  });
-  const row = (result.rows[0] ?? {}) as Record<string, unknown>;
-  return {
-    authUsers: asInteger(row.auth_users),
-    identityLinks: asInteger(row.identity_links),
-    mobileDeviceLinks: asInteger(row.mobile_device_links),
-    mobileAliases: asInteger(row.mobile_aliases),
-    cookbookRecipes: asInteger(row.cookbook_recipes),
-    creditBalanceRows: asInteger(row.credit_balance_rows),
-    creditReservations: asInteger(row.credit_reservations),
-    creditLedgerEntries: asInteger(row.credit_ledger_entries),
-    dailyUsageRows: asInteger(row.daily_usage_rows),
-    purchaseTransactionsPreserved: asInteger(row.purchase_transactions_preserved),
-  };
+  const owners: Array<{ authUserId: string; email: string }> = [];
+  for (let index = 0; index < authUserIds.length; index += RESOLVE_CHUNK_SIZE) {
+    const chunk = authUserIds.slice(index, index + RESOLVE_CHUNK_SIZE);
+    const result = await executeTurso({
+      sql: `SELECT id AS auth_user_id, email
+            FROM auth_users
+            WHERE id IN (${chunk.map(() => "?").join(", ")})`,
+      args: chunk,
+    });
+    result.rows.forEach((row) => {
+      owners.push({
+        authUserId: asString(row.auth_user_id),
+        email: asString(row.email),
+      });
+    });
+  }
+  return owners.sort((left, right) => left.email.localeCompare(right.email));
 }
 
 async function resolveDeleteTargets(identifiers: string[]) {
   const baseTargets = await resolveBatchTargets(identifiers);
-  const readyAuthIds = new Set(
+  const readyAuthIds = [...new Set(
     baseTargets
       .filter((target) => (target.status === "ready" || target.status === "duplicate_target") && target.user)
       .map((target) => target.user?.authUserId ?? ""),
-  );
+  )].filter(Boolean);
+  const plan = await planAccountDeletion({ authUserIds: readyAuthIds });
+  const graphById = new Map(plan.graphs.map((graph) => [graph.graphId, graph]));
+  const ownerLabelsByGraphId = new Map<string, Array<{ authUserId: string; email: string }>>();
+  for (const graph of plan.graphs) {
+    ownerLabelsByGraphId.set(
+      graph.graphId,
+      await getDeletionOwnerLabels(graph.ownerAuthUserIds),
+    );
+  }
   const output: DeleteTarget[] = [];
   for (const target of baseTargets) {
-    const emptyCounts: AccountDeletionCounts = {
-      authUsers: 0,
-      identityLinks: 0,
-      mobileDeviceLinks: 0,
-      mobileAliases: 0,
-      cookbookRecipes: 0,
-      creditBalanceRows: 0,
-      creditReservations: 0,
-      creditLedgerEntries: 0,
-      dailyUsageRows: 0,
-      purchaseTransactionsPreserved: 0,
-    };
     const canEvaluateDeletion =
       (target.status === "ready" || target.status === "duplicate_target") && target.user;
     if (!canEvaluateDeletion || !target.user) {
@@ -927,24 +879,41 @@ async function resolveDeleteTargets(identifiers: string[]) {
         ...target,
         status: target.status,
         linkedAuthUsers: [],
-        counts: emptyCounts,
+        counts: getEmptyAccountDeletionInventory(),
+        graph: null,
       });
       continue;
     }
 
-    const [linkedAuthUsers, counts] = await Promise.all([
-      getLinkedAuthUsers(target.user.canonicalAnonUserId),
-      getAccountDeletionCounts(target.user),
-    ]);
-    const unselectedLinkedUsers = linkedAuthUsers.filter((linked) => !readyAuthIds.has(linked.authUserId));
-    if (unselectedLinkedUsers.length > 0) {
+    const graphId = plan.targetGraphIds[target.user.authUserId];
+    const graph = graphId ? graphById.get(graphId) ?? null : null;
+    if (!graph) {
       output.push({
         input: target.input,
-        status: "blocked_shared_identity",
-        message: "This account shares cookbook/credits with another signed-in account. Include all linked accounts or separate them first.",
+        status: "manual_review",
+        message: "The complete account identity graph could not be resolved safely.",
+        user: target.user,
+        linkedAuthUsers: [],
+        counts: getEmptyAccountDeletionInventory(),
+        graph: null,
+      });
+      continue;
+    }
+    const linkedAuthUsers = ownerLabelsByGraphId.get(graph.graphId) ?? [];
+    if (graph.status === "manual_review") {
+      const isUnselectedOwner = graph.blockers.includes(
+        "unselected_authenticated_owner",
+      );
+      output.push({
+        input: target.input,
+        status: isUnselectedOwner ? "blocked_shared_identity" : "manual_review",
+        message: isUnselectedOwner
+          ? "This identity graph has another signed-in owner. Include every owner in the request."
+          : `This identity graph requires manual review (${graph.blockers.join(", ")}).`,
         user: target.user,
         linkedAuthUsers,
-        counts,
+        counts: graph.inventory,
+        graph,
       });
       continue;
     }
@@ -955,7 +924,8 @@ async function resolveDeleteTargets(identifiers: string[]) {
       message: "Ready to delete.",
       user: target.user,
       linkedAuthUsers,
-      counts,
+      counts: graph.inventory,
+      graph,
     });
   }
   return output;
@@ -992,16 +962,16 @@ function buildBatchResponse(params: {
 }
 
 function sumDeletionCounts(targets: DeleteTarget[]) {
-  const countedCanonicals = new Set<string>();
+  const countedGraphs = new Set<string>();
   return targets
     .filter((target) => {
-      if (target.status !== "ready" || !target.user?.canonicalAnonUserId) {
+      if (target.status !== "ready" || !target.graph) {
         return false;
       }
-      if (countedCanonicals.has(target.user.canonicalAnonUserId)) {
+      if (countedGraphs.has(target.graph.graphId)) {
         return false;
       }
-      countedCanonicals.add(target.user.canonicalAnonUserId);
+      countedGraphs.add(target.graph.graphId);
       return true;
     })
     .reduce<AccountDeletionCounts>(
@@ -1011,25 +981,26 @@ function sumDeletionCounts(targets: DeleteTarget[]) {
         mobileDeviceLinks: total.mobileDeviceLinks + target.counts.mobileDeviceLinks,
         mobileAliases: total.mobileAliases + target.counts.mobileAliases,
         cookbookRecipes: total.cookbookRecipes + target.counts.cookbookRecipes,
+        productActivityEvents:
+          total.productActivityEvents + target.counts.productActivityEvents,
         creditBalanceRows: total.creditBalanceRows + target.counts.creditBalanceRows,
         creditReservations: total.creditReservations + target.counts.creditReservations,
+        activeCreditReservations:
+          total.activeCreditReservations + target.counts.activeCreditReservations,
+        expiredCreditReservations:
+          total.expiredCreditReservations + target.counts.expiredCreditReservations,
         creditLedgerEntries: total.creditLedgerEntries + target.counts.creditLedgerEntries,
         dailyUsageRows: total.dailyUsageRows + target.counts.dailyUsageRows,
         purchaseTransactionsPreserved:
           total.purchaseTransactionsPreserved + target.counts.purchaseTransactionsPreserved,
+        purchaseLedgerLinks:
+          total.purchaseLedgerLinks + target.counts.purchaseLedgerLinks,
+        reconciliationActions:
+          total.reconciliationActions + target.counts.reconciliationActions,
+        priorDeletionEvents:
+          total.priorDeletionEvents + target.counts.priorDeletionEvents,
       }),
-      {
-        authUsers: 0,
-        identityLinks: 0,
-        mobileDeviceLinks: 0,
-        mobileAliases: 0,
-        cookbookRecipes: 0,
-        creditBalanceRows: 0,
-        creditReservations: 0,
-        creditLedgerEntries: 0,
-        dailyUsageRows: 0,
-        purchaseTransactionsPreserved: 0,
-      },
+      getEmptyAccountDeletionInventory(),
     );
 }
 
@@ -1046,38 +1017,55 @@ function buildDeleteResponse(params: {
       ready: params.targets.filter((target) => target.status === "ready").length,
       missing: params.targets.filter((target) => target.status === "missing").length,
       ambiguous: params.targets.filter((target) => target.status === "ambiguous").length,
+      manualReview: params.targets.filter((target) => target.status === "manual_review").length,
       blockedSharedIdentity: params.targets.filter((target) => target.status === "blocked_shared_identity").length,
       duplicateInputs: params.targets.filter((target) => target.status === "duplicate_input").length,
       duplicateTargets: params.targets.filter((target) => target.status === "duplicate_target").length,
       deleted: params.deleted?.length ?? 0,
       counts: sumDeletionCounts(params.targets),
     },
-    targets: params.targets.slice(0, 500),
+    targets: params.targets.slice(0, 500).map((target) => ({
+      ...target,
+      graph: target.graph
+        ? {
+            graphId: target.graph.graphId,
+            status: target.graph.status,
+            blockers: target.graph.blockers,
+            identityNodes: target.graph.identityNodes,
+            canonicalIdentityIds: target.graph.canonicalIdentityIds,
+            aliasEdges: target.graph.aliasEdges,
+            deviceMappingCount: target.graph.deviceKeys.length,
+          }
+        : null,
+    })),
     previewTruncated: params.targets.length > 500,
     deleted: params.deleted ?? [],
   };
 }
 
 async function deleteReadyAccounts(params: {
-  targets: Array<DeleteTarget & { user: ResolvedUser }>;
+  targets: Array<DeleteTarget & { user: ResolvedUser; graph: AccountDeletionGraphPlan }>;
   actor: string;
   reason: string;
   batchId: string;
 }) {
   const deleted: Array<{ authUserId: string; email: string; canonicalAnonUserId: string }> = [];
-  const targetsByCanonical = new Map<string, Array<DeleteTarget & { user: ResolvedUser }>>();
+  const targetsByGraph = new Map<
+    string,
+    Array<DeleteTarget & { user: ResolvedUser; graph: AccountDeletionGraphPlan }>
+  >();
   for (const target of params.targets) {
-    const existing = targetsByCanonical.get(target.user.canonicalAnonUserId) ?? [];
+    const existing = targetsByGraph.get(target.graph.graphId) ?? [];
     existing.push(target);
-    targetsByCanonical.set(target.user.canonicalAnonUserId, existing);
+    targetsByGraph.set(target.graph.graphId, existing);
   }
 
-  for (const [canonical, canonicalTargets] of targetsByCanonical.entries()) {
-    const primaryAuthUserId = canonicalTargets[0]?.user.authUserId ?? canonical;
-    const authUserIds = [...new Set(canonicalTargets.map((target) => target.user.authUserId))];
-    const authPlaceholders = authUserIds.map(() => "?").join(", ");
+  for (const graphTargets of targetsByGraph.values()) {
+    const graph = graphTargets[0].graph;
+    const canonical = graph.canonicalIdentityIds[0] ?? graph.identityNodes[0] ?? "";
+    const primaryAuthUserId = graph.ownerAuthUserIds[0] ?? "unknown";
     const deletedPurchaseOwner = `deleted:${primaryAuthUserId}`;
-    const deletionEventStatements = canonicalTargets.map((target) => ({
+    const deletionEventStatements = graphTargets.map((target) => ({
       sql: `INSERT INTO account_deletion_events (
               deletion_id,
               auth_user_id,
@@ -1107,37 +1095,12 @@ async function deleteReadyAccounts(params: {
     }));
     await executeTursoBatch([
       ...deletionEventStatements,
-      buildPurchaseReconciliationAccountDeletionStatement(canonical),
-      {
-        sql: `UPDATE credit_purchase_transactions
-              SET anon_user_id = ?, payload_json = '{}', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-              WHERE anon_user_id = ?`,
-        args: [deletedPurchaseOwner, canonical],
-      },
-      { sql: `DELETE FROM cookbook_recipes WHERE anon_user_id = ?`, args: [canonical] },
-      { sql: `DELETE FROM credit_balances WHERE anon_user_id = ?`, args: [canonical] },
-      { sql: `DELETE FROM credit_reservations WHERE anon_user_id = ?`, args: [canonical] },
-      { sql: `DELETE FROM credit_ledger_entries WHERE anon_user_id = ?`, args: [canonical] },
-      { sql: `DELETE FROM credit_daily_usage WHERE anon_user_id = ?`, args: [canonical] },
-      { sql: `DELETE FROM mobile_identity_links WHERE canonical_anon_user_id = ?`, args: [canonical] },
-      {
-        sql: `DELETE FROM mobile_identity_aliases
-              WHERE anon_user_id = ? OR canonical_anon_user_id = ?`,
-        args: [canonical, canonical],
-      },
-      {
-        sql: `DELETE FROM auth_identity_links
-              WHERE auth_user_id IN (${authPlaceholders}) OR canonical_anon_user_id = ?`,
-        args: [...authUserIds, canonical],
-      },
-      {
-        sql: `DELETE FROM product_activity_events
-              WHERE auth_user_id IN (${authPlaceholders})`,
-        args: authUserIds,
-      },
-      { sql: `DELETE FROM auth_users WHERE id IN (${authPlaceholders})`, args: authUserIds },
+      ...buildAccountDeletionGraphCleanupStatements({
+        graph,
+        deletedPurchaseOwner,
+      }),
     ], 30_000);
-    canonicalTargets.forEach((target) => {
+    graphTargets.forEach((target) => {
       deleted.push({
         authUserId: target.user.authUserId,
         email: target.user.email,
@@ -1223,8 +1186,15 @@ export async function POST(request: NextRequest) {
       }
 
       const ready = targets.filter(
-        (target): target is DeleteTarget & { user: ResolvedUser } =>
-          target.status === "ready" && target.user !== null,
+        (
+          target,
+        ): target is DeleteTarget & {
+          user: ResolvedUser;
+          graph: AccountDeletionGraphPlan;
+        } =>
+          target.status === "ready" &&
+          target.user !== null &&
+          target.graph !== null,
       );
       if (ready.length < 1) {
         return NextResponse.json(
@@ -1232,9 +1202,18 @@ export async function POST(request: NextRequest) {
           { status: 409 },
         );
       }
-      if (targets.some((target) => target.status === "blocked_shared_identity")) {
+      if (
+        targets.some(
+          (target) =>
+            target.status === "blocked_shared_identity" ||
+            target.status === "manual_review",
+        )
+      ) {
         return NextResponse.json(
-          { error: "One or more accounts share cookbook/credits with another account. Resolve the dry-run blockers first." },
+          {
+            error:
+              "One or more identity graphs require manual review. Resolve the dry-run blockers first.",
+          },
           { status: 409 },
         );
       }
