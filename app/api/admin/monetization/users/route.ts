@@ -1251,7 +1251,7 @@ export async function POST(request: NextRequest) {
       const execution = await executeAccountDeletionJob({
         jobId: payload.jobId,
         fingerprint: payload.fingerprint,
-        currentPlan: plan,
+        authUserIds: plan.selectedAuthUserIds,
         reason: payload.reason,
         actingAdminAuthUserId: deletionAdmin.context.actorAuthUserId,
         buildGraphStatements: ({ graph, jobId, targetId }) =>

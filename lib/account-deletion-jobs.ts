@@ -1,12 +1,15 @@
 import { createHmac, randomUUID } from "crypto";
-import type { Client, InStatement } from "@libsql/client";
+import type { Client, InStatement, Transaction } from "@libsql/client";
 import {
   type AccountDeletionGraphPlan,
   type AccountDeletionPlan,
+  planAccountDeletion,
 } from "./account-deletion-planner.ts";
 import { getTursoClient } from "./turso.ts";
 
 type JobClient = Pick<Client, "execute" | "batch">;
+type JobExecutionClient = Pick<Client, "execute" | "batch" | "transaction">;
+type TransactionPlanningClient = Pick<Transaction, "execute">;
 
 const DEFAULT_PREVIEW_TTL_SECONDS = 15 * 60;
 
@@ -573,7 +576,7 @@ async function markRetryableFailure(options: {
 export async function executeAccountDeletionJob(options: {
   jobId: string;
   fingerprint: string;
-  currentPlan: AccountDeletionPlan;
+  authUserIds: string[];
   reason: string;
   actingAdminAuthUserId: string;
   buildGraphStatements: (context: {
@@ -581,56 +584,74 @@ export async function executeAccountDeletionJob(options: {
     jobId: string;
     targetId: string;
   }) => InStatement[];
+  replan?: (context: {
+    authUserIds: string[];
+    client: TransactionPlanningClient;
+    secret: string;
+    snapshot: Date;
+  }) => Promise<AccountDeletionPlan>;
   now?: () => Date;
-  client?: JobClient;
+  client?: JobExecutionClient;
   secret?: string;
+  publicBaseUrl?: string;
 }) {
   const client = options.client ?? getTursoClient();
   const secret = getJobSecret(options.secret);
-  let job: PersistedJob | null;
+  const actorRef = hmacReference(
+    "admin",
+    options.actingAdminAuthUserId,
+    secret,
+  );
+  const reasonRef = hmacReference("reason", options.reason.trim(), secret);
+  const now = (options.now ?? (() => new Date()))();
+  const nowIso = now.toISOString();
+  const replan =
+    options.replan ??
+    ((context) =>
+      planAccountDeletion({
+        authUserIds: context.authUserIds,
+        client: context.client,
+        secret: context.secret,
+        snapshot: context.snapshot,
+        publicBaseUrl: options.publicBaseUrl,
+      }));
+
+  let initialJob: PersistedJob | null;
   try {
-    job = await readJobById(client, options.jobId);
+    initialJob = await readJobById(client, options.jobId);
   } catch {
     throw jobUnavailable();
   }
-  if (!job) {
+  if (!initialJob) {
     throw new AccountDeletionJobError(
       "account_deletion_job_not_found",
       "The account deletion job was not found.",
       404,
     );
   }
-  const actorRef = hmacReference(
-    "admin",
-    options.actingAdminAuthUserId,
-    secret,
-  );
-  if (job.actingAdminRef !== actorRef) {
+  if (initialJob.actingAdminRef !== actorRef) {
     throw new AccountDeletionJobError(
       "account_deletion_job_forbidden",
       "This account deletion job belongs to another administrator.",
       403,
     );
   }
-  if (
-    !options.fingerprint ||
-    options.fingerprint !== job.previewFingerprint
-  ) {
+  if (!options.fingerprint || options.fingerprint !== initialJob.previewFingerprint) {
     throw new AccountDeletionJobError(
       "stale_preview",
       "The account deletion preview no longer matches this request.",
       409,
     );
   }
-  if (job.status === "completed") {
+  if (initialJob.status === "completed") {
     return {
-      jobId: job.jobId,
+      jobId: initialJob.jobId,
       status: "completed" as const,
-      expiresAt: job.previewExpiresAt,
+      expiresAt: initialJob.previewExpiresAt,
       replayed: true,
     };
   }
-  if (job.status === "manual_review") {
+  if (initialJob.status === "manual_review") {
     throw new AccountDeletionJobError(
       "account_deletion_manual_review",
       "The account deletion job requires manual review.",
@@ -638,10 +659,10 @@ export async function executeAccountDeletionJob(options: {
     );
   }
   if (
-    job.status === "database_completed" ||
-    job.status === "storage_pending"
+    initialJob.status === "database_completed" ||
+    initialJob.status === "storage_pending"
   ) {
-    if (job.reasonRef !== hmacReference("reason", options.reason.trim(), secret)) {
+    if (initialJob.reasonRef !== reasonRef) {
       throw new AccountDeletionJobError(
         "stale_preview",
         "The account deletion reason no longer matches the approved preview.",
@@ -649,195 +670,256 @@ export async function executeAccountDeletionJob(options: {
       );
     }
     return {
-      jobId: job.jobId,
-      status: job.status,
-      expiresAt: job.previewExpiresAt,
+      jobId: initialJob.jobId,
+      status: initialJob.status,
+      expiresAt: initialJob.previewExpiresAt,
       replayed: true,
     };
   }
-  const now = (options.now ?? (() => new Date()))();
-  if (now.getTime() >= Date.parse(job.previewExpiresAt)) {
+
+  while (true) {
+    let transaction: Transaction | null = null;
+    let targetForFailure: PersistedTarget | null = null;
     try {
-      await client.execute({
-        sql: `UPDATE account_deletion_jobs
-              SET status = 'manual_review', last_error_code = 'expired_preview',
-                  last_error_summary = 'The approved deletion preview expired.',
-                  updated_at = ?
-              WHERE job_id = ? AND status <> 'completed'`,
-        args: [now.toISOString(), job.jobId],
+      const activeTransaction = await client.transaction("write");
+      transaction = activeTransaction;
+      const job = await readJobById(activeTransaction, options.jobId);
+      if (!job) {
+        throw new AccountDeletionJobError(
+          "account_deletion_job_not_found",
+          "The account deletion job was not found.",
+          404,
+        );
+      }
+      if (job.actingAdminRef !== actorRef) {
+        throw new AccountDeletionJobError(
+          "account_deletion_job_forbidden",
+          "This account deletion job belongs to another administrator.",
+          403,
+        );
+      }
+      if (!options.fingerprint || options.fingerprint !== job.previewFingerprint) {
+        throw new AccountDeletionJobError(
+          "stale_preview",
+          "The account deletion preview no longer matches this request.",
+          409,
+        );
+      }
+      if (job.status === "completed") {
+        await activeTransaction.rollback();
+        return {
+          jobId: job.jobId,
+          status: "completed" as const,
+          expiresAt: job.previewExpiresAt,
+          replayed: true,
+        };
+      }
+      if (job.status === "manual_review") {
+        throw new AccountDeletionJobError(
+          "account_deletion_manual_review",
+          "The account deletion job requires manual review.",
+          409,
+        );
+      }
+      if (now.getTime() >= Date.parse(job.previewExpiresAt)) {
+        await activeTransaction.execute({
+          sql: `UPDATE account_deletion_jobs
+                SET status = 'manual_review', last_error_code = 'expired_preview',
+                    last_error_summary = 'The approved deletion preview expired.',
+                    updated_at = ?
+                WHERE job_id = ? AND status <> 'completed'`,
+          args: [nowIso, job.jobId],
+        });
+        await activeTransaction.commit();
+        throw new AccountDeletionJobError(
+          "expired_preview",
+          "The account deletion preview expired. Create a new preview.",
+          409,
+        );
+      }
+
+      const targets = await readTargets(activeTransaction, job.jobId);
+      const unfinishedTargets = targets.filter(
+        (target) =>
+          target.status !== "database_completed" &&
+          target.status !== "storage_pending" &&
+          target.status !== "completed",
+      );
+      if (unfinishedTargets.length === 0) {
+        await activeTransaction.rollback();
+        break;
+      }
+      targetForFailure = unfinishedTargets[0];
+      if (targetForFailure.status === "manual_review") {
+        throw new AccountDeletionJobError(
+          "account_deletion_manual_review",
+          "An account deletion target requires manual review.",
+          409,
+        );
+      }
+
+      const currentPlan = await replan({
+        authUserIds: [...options.authUserIds],
+        client: activeTransaction,
+        secret,
+        snapshot: now,
       });
-    } catch {
-      throw jobUnavailable();
-    }
-    throw new AccountDeletionJobError(
-      "expired_preview",
-      "The account deletion preview expired. Create a new preview.",
-      409,
-    );
-  }
-  let targets: PersistedTarget[];
-  try {
-    targets = await readTargets(client, job.jobId);
-  } catch {
-    throw jobUnavailable();
-  }
-  const graphsByRef = new Map(
-    options.currentPlan.graphs.map((graph) => {
-      const targetRef = hmacReference("graph", graph.graphId, secret);
-      return [
-        targetRef,
-        {
-          graph,
-          graphFingerprint: fingerprintValue(stableGraphScope(graph), secret),
+      const graphsByRef = new Map(
+        currentPlan.graphs.map((graph) => {
+          const targetRef = hmacReference("graph", graph.graphId, secret);
+          return [
+            targetRef,
+            {
+              graph,
+              graphFingerprint: fingerprintValue(stableGraphScope(graph), secret),
+            },
+          ] as const;
+        }),
+      );
+      const targetsByRef = new Map(
+        targets.map((target) => [target.targetRef, target]),
+      );
+      const currentGraphMismatch = [...graphsByRef].some(
+        ([targetRef, current]) => {
+          const persisted = targetsByRef.get(targetRef);
+          return !persisted || persisted.graphFingerprint !== current.graphFingerprint;
         },
-      ] as const;
-    }),
-  );
-  const resumable =
-    job.status === "failed_retryable" || job.status === "executing";
-  const currentFingerprint = fingerprintValue(
-    stablePlanScope(options.currentPlan, options.reason),
-    secret,
-  );
-  const targetsByRef = new Map(
-    targets.map((target) => [target.targetRef, target]),
-  );
-  const currentGraphMismatch = [...graphsByRef].some(
-    ([targetRef, current]) => {
-      const persisted = targetsByRef.get(targetRef);
-      return (
-        !persisted ||
-        persisted.graphFingerprint !== current.graphFingerprint
       );
-    },
-  );
-  const unfinishedGraphMissing = targets.some((target) => {
-    const databaseFinished =
-      target.status === "database_completed" ||
-      target.status === "storage_pending" ||
-      target.status === "completed";
-    return !databaseFinished && !graphsByRef.has(target.targetRef);
-  });
-  const scopeChanged = resumable
-    ? job.reasonRef !== hmacReference("reason", options.reason.trim(), secret) ||
-      currentGraphMismatch ||
-      unfinishedGraphMissing
-    : currentFingerprint !== job.previewFingerprint;
-  if (scopeChanged) {
-    try {
-      await client.execute({
-        sql: `UPDATE account_deletion_jobs
-              SET status = 'manual_review', last_error_code = 'stale_preview',
-                  last_error_summary = 'The current deletion scope changed.',
-                  updated_at = ?
-              WHERE job_id = ? AND status <> 'completed'`,
-        args: [now.toISOString(), job.jobId],
-      });
-    } catch {
-      throw jobUnavailable();
-    }
-    throw new AccountDeletionJobError(
-      "stale_preview",
-      "The account deletion scope changed. Create and approve a new preview.",
-      409,
-    );
-  }
-
-  let started;
-  try {
-    started = await client.execute({
-      sql: `UPDATE account_deletion_jobs
-            SET status = 'executing',
-                approved_at = COALESCE(approved_at, ?),
-                started_at = COALESCE(started_at, ?),
-                attempt_count = attempt_count + 1,
-                last_error_code = NULL,
-                last_error_summary = NULL,
-                updated_at = ?
-            WHERE job_id = ?
-              AND status IN (
-                'previewed', 'approved', 'executing', 'database_completed',
-                'failed_retryable'
-              )`,
-      args: [now.toISOString(), now.toISOString(), now.toISOString(), job.jobId],
-    });
-  } catch {
-    throw jobUnavailable("Account deletion execution could not start safely.");
-  }
-  if ((started.rowsAffected ?? 0) !== 1) {
-    throw new AccountDeletionJobError(
-      "account_deletion_job_unavailable",
-      "Account deletion execution could not start safely.",
-      503,
-    );
-  }
-
-  for (const target of targets) {
-    if (target.status === "completed" || target.status === "database_completed") {
-      continue;
-    }
-    if (target.status === "manual_review") {
-      throw new AccountDeletionJobError(
-        "account_deletion_manual_review",
-        "An account deletion target requires manual review.",
-        409,
+      const unfinishedGraphMissing = unfinishedTargets.some(
+        (target) => !graphsByRef.has(target.targetRef),
       );
-    }
-    const currentGraph = graphsByRef.get(target.targetRef);
-    const graph = currentGraph?.graph;
-    if (!graph || graph.status !== "ready") {
-      throw new AccountDeletionJobError(
-        "stale_preview",
-        "The account deletion graph no longer matches the approved preview.",
-        409,
-      );
-    }
-    try {
-      await client.batch(
-        [
-          ...options.buildGraphStatements({
-            graph,
-            jobId: job.jobId,
-            targetId: target.targetId,
-          }),
-          {
-            sql: `UPDATE account_deletion_job_targets
-                  SET status = 'database_completed',
-                      attempt_count = attempt_count + 1,
-                      started_at = COALESCE(started_at, ?),
-                      last_error_code = NULL,
-                      last_error_summary = NULL,
-                      updated_at = ?
-                  WHERE target_id = ?
-                    AND status NOT IN ('database_completed', 'completed')`,
-            args: [now.toISOString(), now.toISOString(), target.targetId],
-          },
-        ],
-        "write",
-      );
-    } catch (error) {
-      const concurrent = (
-        await readTargets(client, job.jobId).catch(() => [])
-      ).find((candidate) => candidate.targetId === target.targetId);
+      const resumable =
+        job.status === "failed_retryable" || job.status === "executing";
+      const scopeChanged = resumable
+        ? job.reasonRef !== reasonRef ||
+          currentGraphMismatch ||
+          unfinishedGraphMissing
+        : fingerprintValue(stablePlanScope(currentPlan, options.reason), secret) !==
+          job.previewFingerprint;
+      const currentGraph = graphsByRef.get(targetForFailure.targetRef);
       if (
-        concurrent?.status === "database_completed" ||
-        concurrent?.status === "completed"
+        scopeChanged ||
+        !currentGraph ||
+        currentGraph.graph.status !== "ready" ||
+        currentGraph.graphFingerprint !== targetForFailure.graphFingerprint
       ) {
-        continue;
+        throw new AccountDeletionJobError(
+          "stale_preview",
+          "The account deletion scope changed. Create and approve a new preview.",
+          409,
+        );
+      }
+
+      const started = await activeTransaction.execute({
+        sql: `UPDATE account_deletion_jobs
+              SET status = 'executing',
+                  approved_at = COALESCE(approved_at, ?),
+                  started_at = COALESCE(started_at, ?),
+                  attempt_count = attempt_count + 1,
+                  last_error_code = NULL,
+                  last_error_summary = NULL,
+                  updated_at = ?
+              WHERE job_id = ?
+                AND status IN (
+                  'previewed', 'approved', 'executing', 'database_completed',
+                  'failed_retryable'
+                )`,
+        args: [nowIso, nowIso, nowIso, job.jobId],
+      });
+      if ((started.rowsAffected ?? 0) !== 1) {
+        throw jobUnavailable("Account deletion execution could not start safely.");
+      }
+
+      const results = await activeTransaction.batch([
+        ...options.buildGraphStatements({
+          graph: currentGraph.graph,
+          jobId: job.jobId,
+          targetId: targetForFailure.targetId,
+        }),
+        {
+          sql: `UPDATE account_deletion_job_targets
+                SET status = 'database_completed',
+                    attempt_count = attempt_count + 1,
+                    started_at = COALESCE(started_at, ?),
+                    last_error_code = NULL,
+                    last_error_summary = NULL,
+                    updated_at = ?
+                WHERE target_id = ?
+                  AND status NOT IN ('database_completed', 'completed')`,
+          args: [nowIso, nowIso, targetForFailure.targetId],
+        },
+      ]);
+      if ((results.at(-1)?.rowsAffected ?? 0) !== 1) {
+        throw jobUnavailable("Account deletion target could not be completed safely.");
+      }
+      await activeTransaction.commit();
+    } catch (error) {
+      if (transaction) {
+        await transaction.rollback().catch(() => undefined);
+      }
+      if (
+        error instanceof AccountDeletionJobError &&
+        (error.code === "stale_preview" ||
+          error.code === "account_deletion_manual_review" ||
+          error.code === "expired_preview" ||
+          error.code === "account_deletion_job_forbidden" ||
+          error.code === "account_deletion_job_not_found")
+      ) {
+        if (error.code === "stale_preview" && targetForFailure) {
+          try {
+            await client.batch(
+              [
+                {
+                  sql: `UPDATE account_deletion_job_targets
+                        SET status = 'manual_review',
+                            last_error_code = 'stale_preview',
+                            last_error_summary = 'The current deletion scope changed.',
+                            updated_at = ?
+                        WHERE target_id = ?
+                          AND status NOT IN ('database_completed', 'completed')`,
+                  args: [nowIso, targetForFailure.targetId],
+                },
+                {
+                  sql: `UPDATE account_deletion_jobs
+                        SET status = 'manual_review',
+                            last_error_code = 'stale_preview',
+                            last_error_summary = 'The current deletion scope changed.',
+                            updated_at = ?
+                        WHERE job_id = ? AND status <> 'completed'
+                          AND EXISTS (
+                            SELECT 1 FROM account_deletion_job_targets target
+                            WHERE target.target_id = ?
+                              AND target.status NOT IN (
+                                'database_completed', 'storage_pending', 'completed'
+                              )
+                          )`,
+                  args: [nowIso, options.jobId, targetForFailure.targetId],
+                },
+              ],
+              "write",
+            );
+          } catch {
+            throw jobUnavailable(
+              "Account deletion stale-preview state could not be persisted safely.",
+            );
+          }
+        }
+        throw error;
+      }
+      if (!targetForFailure) {
+        throw jobUnavailable("Account deletion execution could not start safely.");
       }
       try {
         await markRetryableFailure({
           client,
-          jobId: job.jobId,
-          targetId: target.targetId,
+          jobId: options.jobId,
+          targetId: targetForFailure.targetId,
           error,
-          nowIso: now.toISOString(),
+          nowIso,
         });
       } catch {
-        throw new AccountDeletionJobError(
-          "account_deletion_job_unavailable",
+        throw jobUnavailable(
           "Account deletion failure state could not be persisted safely.",
-          503,
         );
       }
       throw new AccountDeletionJobError(
@@ -845,12 +927,14 @@ export async function executeAccountDeletionJob(options: {
         "Account deletion stopped after a retryable database failure.",
         503,
       );
+    } finally {
+      transaction?.close();
     }
   }
 
   let remaining: PersistedTarget[];
   try {
-    remaining = (await readTargets(client, job.jobId)).filter(
+    remaining = (await readTargets(client, initialJob.jobId)).filter(
       (target) =>
         target.status !== "database_completed" &&
         target.status !== "completed",
@@ -871,7 +955,7 @@ export async function executeAccountDeletionJob(options: {
       sql: `SELECT COUNT(*) AS count
             FROM account_deletion_storage_outbox
             WHERE job_id = ?`,
-      args: [job.jobId],
+      args: [initialJob.jobId],
     });
     storageCount = Number(storage.rows[0]?.count ?? 0);
   } catch {
@@ -887,13 +971,13 @@ export async function executeAccountDeletionJob(options: {
             sql: `UPDATE account_deletion_job_targets
                   SET status = 'storage_pending', updated_at = ?
                   WHERE job_id = ? AND status = 'database_completed'`,
-            args: [now.toISOString(), job.jobId],
+            args: [nowIso, initialJob.jobId],
           },
           {
             sql: `UPDATE account_deletion_jobs
                   SET status = 'storage_pending', updated_at = ?
                   WHERE job_id = ? AND status <> 'completed'`,
-            args: [now.toISOString(), job.jobId],
+            args: [nowIso, initialJob.jobId],
           },
         ],
         "write",
@@ -904,9 +988,9 @@ export async function executeAccountDeletionJob(options: {
       );
     }
     return {
-      jobId: job.jobId,
+      jobId: initialJob.jobId,
       status: "storage_pending" as const,
-      expiresAt: job.previewExpiresAt,
+      expiresAt: initialJob.previewExpiresAt,
       replayed: false,
     };
   }
@@ -917,19 +1001,19 @@ export async function executeAccountDeletionJob(options: {
         sql: `UPDATE account_deletion_jobs
               SET status = 'database_completed', updated_at = ?
               WHERE job_id = ? AND status <> 'completed'`,
-        args: [now.toISOString(), job.jobId],
+        args: [nowIso, initialJob.jobId],
       },
       {
         sql: `UPDATE account_deletion_job_targets
               SET status = 'completed', completed_at = ?, updated_at = ?
               WHERE job_id = ? AND status = 'database_completed'`,
-        args: [now.toISOString(), now.toISOString(), job.jobId],
+        args: [nowIso, nowIso, initialJob.jobId],
       },
       {
         sql: `UPDATE account_deletion_jobs
               SET status = 'completed', completed_at = ?, updated_at = ?
               WHERE job_id = ? AND status = 'database_completed'`,
-        args: [now.toISOString(), now.toISOString(), job.jobId],
+        args: [nowIso, nowIso, initialJob.jobId],
       },
       ],
       "write",
@@ -941,7 +1025,7 @@ export async function executeAccountDeletionJob(options: {
   }
   let completed: PersistedJob | null;
   try {
-    completed = await readJobById(client, job.jobId);
+    completed = await readJobById(client, initialJob.jobId);
   } catch {
     throw jobUnavailable();
   }
@@ -953,9 +1037,9 @@ export async function executeAccountDeletionJob(options: {
     );
   }
   return {
-    jobId: job.jobId,
+    jobId: initialJob.jobId,
     status: "completed" as const,
-    expiresAt: job.previewExpiresAt,
+    expiresAt: initialJob.previewExpiresAt,
     replayed: false,
   };
 }
