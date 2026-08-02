@@ -1,6 +1,6 @@
 import type { InStatement } from "@libsql/client";
 import type { AccountDeletionGraphPlan } from "./account-deletion-planner.ts";
-import { ACCOUNT_DELETION_RECONCILIATION_METADATA } from "./purchase-settlement-retention.ts";
+import { buildPurchaseFinancialRetentionStatements } from "./purchase-settlement-retention.ts";
 
 function placeholders(values: readonly unknown[]) {
   return values.map(() => "?").join(", ");
@@ -27,35 +27,10 @@ export function buildAccountDeletionGraphCleanupStatements(options: {
   if (identityNodes.length > 0) {
     const nodeList = placeholders(identityNodes);
     statements.push(
-      {
-        sql: `UPDATE purchase_reconciliation_actions
-              SET metadata_json = CASE
-                    WHEN metadata_json IS NULL THEN NULL
-                    ELSE ?
-                  END
-              WHERE purchase_transaction_id IN (
-                      SELECT row_id
-                      FROM credit_purchase_transactions
-                      WHERE anon_user_id IN (${nodeList})
-                    )
-                 OR ledger_entry_id IN (
-                      SELECT entry_id
-                      FROM credit_ledger_entries
-                      WHERE anon_user_id IN (${nodeList})
-                    )`,
-        args: [
-          ACCOUNT_DELETION_RECONCILIATION_METADATA,
-          ...identityNodes,
-          ...identityNodes,
-        ],
-      },
-      {
-        sql: `UPDATE credit_purchase_transactions
-              SET anon_user_id = ?, payload_json = '{}',
-                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-              WHERE anon_user_id IN (${nodeList})`,
-        args: [options.deletedPurchaseOwner, ...identityNodes],
-      },
+      ...buildPurchaseFinancialRetentionStatements({
+        identityNodes,
+        pseudonymousOwner: options.deletedPurchaseOwner,
+      }),
       deleteWhereIn("cookbook_recipes", "anon_user_id", identityNodes),
       deleteWhereIn("credit_balances", "anon_user_id", identityNodes),
       deleteWhereIn("credit_reservations", "anon_user_id", identityNodes),

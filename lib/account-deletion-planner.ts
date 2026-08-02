@@ -13,6 +13,7 @@ export type AccountDeletionBlocker =
   | "conflicting_authenticated_owners"
   | "canonical_is_alias"
   | "alias_cycle"
+  | "conflicting_financial_ownership"
   | "invalid_identity";
 
 export type AccountDeletionInventory = {
@@ -27,6 +28,8 @@ export type AccountDeletionInventory = {
   activeCreditReservations: number;
   expiredCreditReservations: number;
   creditLedgerEntries: number;
+  financialLedgerEntriesRetained: number;
+  operationalLedgerEntriesDeleted: number;
   dailyUsageRows: number;
   purchaseTransactionsPreserved: number;
   purchaseLedgerLinks: number;
@@ -108,6 +111,8 @@ function emptyInventory(): AccountDeletionInventory {
     activeCreditReservations: 0,
     expiredCreditReservations: 0,
     creditLedgerEntries: 0,
+    financialLedgerEntriesRetained: 0,
+    operationalLedgerEntriesDeleted: 0,
     dailyUsageRows: 0,
     purchaseTransactionsPreserved: 0,
     purchaseLedgerLinks: 0,
@@ -249,6 +254,49 @@ async function readDeviceKeys(
   return sortedUnique(keys);
 }
 
+async function hasConflictingFinancialOwnership(
+  client: PlanningClient,
+  identityNodes: string[],
+) {
+  if (identityNodes.length === 0) {
+    return false;
+  }
+  const result = await client.execute({
+    sql: `WITH ${valueCte("graph_nodes", identityNodes)}
+          SELECT EXISTS (
+            SELECT 1
+            FROM credit_purchase_ledger_links links
+            JOIN credit_purchase_transactions purchase
+              ON purchase.row_id = links.purchase_transaction_id
+            JOIN credit_ledger_entries ledger
+              ON ledger.entry_id = links.ledger_entry_id
+            WHERE (
+              purchase.anon_user_id IN (SELECT value FROM graph_nodes)
+              AND ledger.anon_user_id NOT IN (SELECT value FROM graph_nodes)
+            ) OR (
+              ledger.anon_user_id IN (SELECT value FROM graph_nodes)
+              AND purchase.anon_user_id NOT IN (SELECT value FROM graph_nodes)
+            )
+            UNION ALL
+            SELECT 1
+            FROM purchase_reconciliation_actions actions
+            JOIN credit_purchase_transactions purchase
+              ON purchase.row_id = actions.purchase_transaction_id
+            JOIN credit_ledger_entries ledger
+              ON ledger.entry_id = actions.ledger_entry_id
+            WHERE (
+              purchase.anon_user_id IN (SELECT value FROM graph_nodes)
+              AND ledger.anon_user_id NOT IN (SELECT value FROM graph_nodes)
+            ) OR (
+              ledger.anon_user_id IN (SELECT value FROM graph_nodes)
+              AND purchase.anon_user_id NOT IN (SELECT value FROM graph_nodes)
+            )
+          ) AS has_conflict`,
+    args: identityNodes,
+  });
+  return asCount(result.rows[0]?.has_conflict) === 1;
+}
+
 function hasAliasCycle(edges: AccountDeletionAliasEdge[]) {
   const nextByNode = new Map(
     edges
@@ -316,6 +364,36 @@ async function readInventory(
                   OR expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now'))) AS expired_credit_reservations,
             (SELECT COUNT(*) FROM credit_ledger_entries
               WHERE anon_user_id IN (SELECT value FROM graph_nodes)) AS credit_ledger_entries,
+            (SELECT COUNT(*) FROM credit_ledger_entries ledger
+              WHERE ledger.anon_user_id IN (SELECT value FROM graph_nodes)
+                AND (
+                  ledger.event_type IN (
+                    'purchase_grant',
+                    'purchase_adjustment',
+                    'purchase_reversal'
+                  )
+                  OR ledger.entry_id IN (
+                    SELECT links.ledger_entry_id
+                    FROM credit_purchase_ledger_links links
+                    JOIN credit_purchase_transactions purchase
+                      ON purchase.row_id = links.purchase_transaction_id
+                    WHERE purchase.anon_user_id IN (SELECT value FROM graph_nodes)
+                  )
+                )) AS financial_ledger_entries_retained,
+            (SELECT COUNT(*) FROM credit_ledger_entries ledger
+              WHERE ledger.anon_user_id IN (SELECT value FROM graph_nodes)
+                AND ledger.event_type NOT IN (
+                  'purchase_grant',
+                  'purchase_adjustment',
+                  'purchase_reversal'
+                )
+                AND ledger.entry_id NOT IN (
+                  SELECT links.ledger_entry_id
+                  FROM credit_purchase_ledger_links links
+                  JOIN credit_purchase_transactions purchase
+                    ON purchase.row_id = links.purchase_transaction_id
+                  WHERE purchase.anon_user_id IN (SELECT value FROM graph_nodes)
+                )) AS operational_ledger_entries_deleted,
             (SELECT COUNT(*) FROM credit_daily_usage
               WHERE anon_user_id IN (SELECT value FROM graph_nodes)) AS daily_usage_rows,
             (SELECT COUNT(*) FROM credit_purchase_transactions
@@ -354,6 +432,12 @@ async function readInventory(
     activeCreditReservations: asCount(row.active_credit_reservations),
     expiredCreditReservations: asCount(row.expired_credit_reservations),
     creditLedgerEntries: asCount(row.credit_ledger_entries),
+    financialLedgerEntriesRetained: asCount(
+      row.financial_ledger_entries_retained,
+    ),
+    operationalLedgerEntriesDeleted: asCount(
+      row.operational_ledger_entries_deleted,
+    ),
     dailyUsageRows: asCount(row.daily_usage_rows),
     purchaseTransactionsPreserved: asCount(row.purchase_transactions_preserved),
     purchaseLedgerLinks: asCount(row.purchase_ledger_links),
@@ -487,6 +571,9 @@ export async function planAccountDeletion(options: {
     }
     if (hasAliasCycle(aliasEdges)) {
       blockers.add("alias_cycle");
+    }
+    if (await hasConflictingFinancialOwnership(client, identityNodes)) {
+      blockers.add("conflicting_financial_ownership");
     }
 
     const graphAuthUserIds = sortedUnique(ownerAuthUserIds);

@@ -72,6 +72,7 @@ import {
   type IdempotencyContext,
 } from "@/lib/idempotency";
 import { executeTurso, executeTursoBatch } from "@/lib/turso";
+import { createAccountDeletionPseudonym } from "@/lib/purchase-settlement-retention";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -990,6 +991,12 @@ function sumDeletionCounts(targets: DeleteTarget[]) {
         expiredCreditReservations:
           total.expiredCreditReservations + target.counts.expiredCreditReservations,
         creditLedgerEntries: total.creditLedgerEntries + target.counts.creditLedgerEntries,
+        financialLedgerEntriesRetained:
+          total.financialLedgerEntriesRetained +
+          target.counts.financialLedgerEntriesRetained,
+        operationalLedgerEntriesDeleted:
+          total.operationalLedgerEntriesDeleted +
+          target.counts.operationalLedgerEntriesDeleted,
         dailyUsageRows: total.dailyUsageRows + target.counts.dailyUsageRows,
         purchaseTransactionsPreserved:
           total.purchaseTransactionsPreserved + target.counts.purchaseTransactionsPreserved,
@@ -1063,8 +1070,10 @@ async function deleteReadyAccounts(params: {
   for (const graphTargets of targetsByGraph.values()) {
     const graph = graphTargets[0].graph;
     const canonical = graph.canonicalIdentityIds[0] ?? graph.identityNodes[0] ?? "";
-    const primaryAuthUserId = graph.ownerAuthUserIds[0] ?? "unknown";
-    const deletedPurchaseOwner = `deleted:${primaryAuthUserId}`;
+    const deletedPurchaseOwner = createAccountDeletionPseudonym({
+      authUserIds: graph.ownerAuthUserIds,
+      identityNodes: graph.identityNodes,
+    });
     const deletionEventStatements = graphTargets.map((target) => ({
       sql: `INSERT INTO account_deletion_events (
               deletion_id,
