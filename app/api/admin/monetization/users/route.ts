@@ -15,6 +15,7 @@ import {
 } from "@/lib/account-deletion-schema";
 import { runAccountDeletionPreflight } from "@/lib/account-deletion-preflight";
 import { buildAccountDeletionGraphCleanupStatements } from "@/lib/account-deletion-execution";
+import { buildDeletedIdentityTombstoneStatements } from "@/lib/deleted-identity-tombstones";
 import {
   AccountDeletionJobError,
   createAccountDeletionOperationalReference,
@@ -1138,6 +1139,10 @@ function buildReadyGraphDeletionStatements(params: {
       graph: params.graph,
       jobId: params.jobId,
       targetId: params.targetId,
+    }),
+    ...buildDeletedIdentityTombstoneStatements({
+      identityNodes: params.graph.identityNodes,
+      deletionJobId: params.jobId,
     }),
     ...buildAccountDeletionGraphCleanupStatements({
       graph: params.graph,

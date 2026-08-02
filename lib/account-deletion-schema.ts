@@ -205,6 +205,14 @@ const REQUIRED_TABLE_COLUMNS: Record<string, readonly string[]> = {
     "attempted_at",
     "completed_at",
   ],
+  deleted_identity_tombstones: [
+    "identity_ref",
+    "identity_kind",
+    "deletion_job_id",
+    "reason_category",
+    "schema_version",
+    "created_at",
+  ],
 };
 
 const REQUIRED_PUR01_OBJECTS: Record<string, "index" | "trigger" | "view"> = {
@@ -227,6 +235,8 @@ const REQUIRED_PUR01_OBJECTS: Record<string, "index" | "trigger" | "view"> = {
   idx_account_deletion_outbox_target_status: "index",
   idx_account_deletion_outbox_status_updated: "index",
   idx_account_deletion_outbox_created: "index",
+  idx_deleted_identity_tombstones_job: "index",
+  idx_deleted_identity_tombstones_kind_created: "index",
 };
 
 export class AccountDeletionSchemaError extends Error {

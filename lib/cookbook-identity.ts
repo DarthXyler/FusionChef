@@ -9,6 +9,10 @@ import {
   resolveCookbookIdentityCore,
   type CookbookIdentity,
 } from "@/lib/cookbook-identity-core";
+import {
+  filterDeletedIdentityCandidates,
+  getDeletedIdentityWriteGuard,
+} from "@/lib/deleted-identity-tombstones";
 import { executeTurso } from "@/lib/turso";
 
 const MOBILE_DEVICE_KEY_HEADER = "x-flavor-fusion-device-key";
@@ -123,31 +127,55 @@ async function belongsToAnyAuthUser(canonicalAnonUserId: string) {
 }
 
 async function upsertCanonicalIdForDevice(deviceKey: string, canonicalAnonUserId: string) {
-  await executeTurso({
+  const guard = getDeletedIdentityWriteGuard([canonicalAnonUserId]);
+  const result = await executeTurso({
     sql: `INSERT INTO mobile_identity_links (
             device_key,
             canonical_anon_user_id,
             updated_at
-          ) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+          ) SELECT ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            WHERE ${guard.sql}
           ON CONFLICT(device_key) DO UPDATE SET
             canonical_anon_user_id = excluded.canonical_anon_user_id,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
-    args: [deviceKey, canonicalAnonUserId],
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+          WHERE ${guard.sql}
+          RETURNING device_key`,
+    args: [
+      deviceKey,
+      canonicalAnonUserId,
+      ...guard.args,
+      ...guard.args,
+    ],
   });
+  if (result.rows.length !== 1) {
+    throw new Error("Deleted identity device mapping was rejected.");
+  }
 }
 
 async function upsertCanonicalIdForAuthUser(authUserId: string, canonicalAnonUserId: string) {
-  await executeTurso({
+  const guard = getDeletedIdentityWriteGuard([canonicalAnonUserId]);
+  const result = await executeTurso({
     sql: `INSERT INTO auth_identity_links (
             auth_user_id,
             canonical_anon_user_id,
             updated_at
-          ) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+          ) SELECT ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            WHERE ${guard.sql}
           ON CONFLICT(auth_user_id) DO UPDATE SET
             canonical_anon_user_id = excluded.canonical_anon_user_id,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
-    args: [authUserId, canonicalAnonUserId],
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+          WHERE ${guard.sql}
+          RETURNING auth_user_id`,
+    args: [
+      authUserId,
+      canonicalAnonUserId,
+      ...guard.args,
+      ...guard.args,
+    ],
   });
+  if (result.rows.length !== 1) {
+    throw new Error("Deleted identity auth mapping was rejected.");
+  }
 }
 
 async function readAliasForAnonId(anonUserId: string) {
@@ -169,17 +197,32 @@ async function readAliasForAnonId(anonUserId: string) {
 }
 
 async function upsertAliasForAnonId(anonUserId: string, canonicalAnonUserId: string) {
-  await executeTurso({
+  const guard = getDeletedIdentityWriteGuard([
+    anonUserId,
+    canonicalAnonUserId,
+  ]);
+  const result = await executeTurso({
     sql: `INSERT INTO mobile_identity_aliases (
             anon_user_id,
             canonical_anon_user_id,
             updated_at
-          ) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+          ) SELECT ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            WHERE ${guard.sql}
           ON CONFLICT(anon_user_id) DO UPDATE SET
             canonical_anon_user_id = excluded.canonical_anon_user_id,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
-    args: [anonUserId, canonicalAnonUserId],
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+          WHERE ${guard.sql}
+          RETURNING anon_user_id`,
+    args: [
+      anonUserId,
+      canonicalAnonUserId,
+      ...guard.args,
+      ...guard.args,
+    ],
   });
+  if (result.rows.length !== 1) {
+    throw new Error("Deleted identity alias mapping was rejected.");
+  }
 }
 
 async function resolveAliasCanonicalId(anonUserId: string) {
@@ -303,6 +346,7 @@ export async function resolveCookbookIdentity(
         readCanonicalIdForDevice,
         readCanonicalIdForAuthUser,
         resolveAliasCanonicalId,
+        filterDeletedIdentityCandidates,
         filterCandidatesForAuthUser,
         filterCandidatesForSignedOutUser,
         pickCanonicalAnonId,

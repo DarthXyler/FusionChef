@@ -11,6 +11,7 @@ export type IdentityResolutionStage =
   | "device_link_lookup"
   | "auth_link_lookup"
   | "alias_resolution"
+  | "tombstone_filtering"
   | "ownership_filtering"
   | "canonical_selection"
   | "cookbook_merge"
@@ -39,6 +40,9 @@ export type CookbookIdentityCoreDependencies = {
   readCanonicalIdForDevice: (deviceKey: string) => Promise<string | null>;
   readCanonicalIdForAuthUser: (authUserId: string) => Promise<string | null>;
   resolveAliasCanonicalId: (anonUserId: string) => Promise<string>;
+  filterDeletedIdentityCandidates: (
+    candidateIds: string[],
+  ) => Promise<string[]>;
   filterCandidatesForAuthUser: (
     candidateIds: string[],
     authUserId: string,
@@ -145,10 +149,6 @@ export async function resolveCookbookIdentityCore(
   if (params.authUserId !== null && !authUserId) {
     throw new IdentityResolutionError("auth_link_lookup");
   }
-  if (!params.deviceKey && !authUserId) {
-    return baseIdentity;
-  }
-
   await runIdentityStage("schema_readiness", dependencies.ensureSchema);
   const deviceCanonical = params.deviceKey
     ? await runIdentityStage("device_link_lookup", () =>
@@ -169,20 +169,28 @@ export async function resolveCookbookIdentityCore(
     aliasCanonical,
     baseIdentity.anonUserId,
   ]);
+  const nonDeletedCandidateIds = await runIdentityStage(
+    "tombstone_filtering",
+    () => dependencies.filterDeletedIdentityCandidates(rawCandidateIds),
+  );
   const candidateIds = await runIdentityStage("ownership_filtering", () =>
     authUserId
-      ? dependencies.filterCandidatesForAuthUser(rawCandidateIds, authUserId)
-      : dependencies.filterCandidatesForSignedOutUser(rawCandidateIds),
+      ? dependencies.filterCandidatesForAuthUser(nonDeletedCandidateIds, authUserId)
+      : dependencies.filterCandidatesForSignedOutUser(nonDeletedCandidateIds),
   );
+  const safeAuthCanonical =
+    authCanonical && nonDeletedCandidateIds.includes(authCanonical)
+      ? authCanonical
+      : null;
   const safeCandidateIds =
     candidateIds.length > 0
       ? candidateIds
-      : uniqueValidIds([authCanonical, dependencies.createAnonymousId()]);
+      : uniqueValidIds([safeAuthCanonical, dependencies.createAnonymousId()]);
   if (safeCandidateIds.length < 1) {
     throw new IdentityResolutionError("canonical_selection");
   }
-  const canonicalAnonUserId = authCanonical
-    ? authCanonical
+  const canonicalAnonUserId = safeAuthCanonical
+    ? safeAuthCanonical
     : await runIdentityStage("canonical_selection", () =>
         dependencies.pickCanonicalAnonId(safeCandidateIds, deviceCanonical),
       );
@@ -227,7 +235,9 @@ export async function resolveCookbookIdentityCore(
 
   return {
     anonUserId: canonicalAnonUserId,
-    shouldSetCookie: baseIdentity.shouldSetCookie,
+    shouldSetCookie:
+      baseIdentity.shouldSetCookie ||
+      !nonDeletedCandidateIds.includes(baseIdentity.anonUserId),
   };
 }
 
