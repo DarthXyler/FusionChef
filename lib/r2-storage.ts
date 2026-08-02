@@ -4,64 +4,90 @@
  */
 import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
-const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
-const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
-const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
-const R2_BUCKET = process.env.R2_BUCKET;
-const R2_PUBLIC_BASE_URL = process.env.R2_PUBLIC_BASE_URL;
-
 export function getR2StorageClient() {
+  const accountId = process.env.R2_ACCOUNT_ID;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
   // Creates S3-compatible client for R2.
-  if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
+  if (!accountId || !accessKeyId || !secretAccessKey) {
     return null;
   }
 
   return new S3Client({
     region: "auto",
-    endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
     credentials: {
-      accessKeyId: R2_ACCESS_KEY_ID,
-      secretAccessKey: R2_SECRET_ACCESS_KEY,
+      accessKeyId,
+      secretAccessKey,
     },
   });
 }
 
-export function getR2ObjectKeyFromPublicUrl(imageUrl: string) {
+export function isValidR2ObjectKey(key: string) {
+  return (
+    key.length >= 1 &&
+    key.length <= 1024 &&
+    key === key.trim() &&
+    !key.startsWith("/") &&
+    !key.includes("://") &&
+    !key.includes("\0") &&
+    key !== ".." &&
+    !key.startsWith("../") &&
+    !key.includes("/../") &&
+    !key.endsWith("/..")
+  );
+}
+
+export function getR2ObjectKeyFromPublicUrl(
+  imageUrl: string,
+  publicBaseUrl = process.env.R2_PUBLIC_BASE_URL ?? "",
+) {
   // Ensures only this app's R2 public URLs are accepted.
-  if (!R2_PUBLIC_BASE_URL) {
+  if (!publicBaseUrl) {
     return null;
   }
 
-  const baseUrl = R2_PUBLIC_BASE_URL.replace(/\/$/, "");
+  const baseUrl = publicBaseUrl.replace(/\/$/, "");
   if (!imageUrl.startsWith(`${baseUrl}/`)) {
     return null;
   }
 
   const rawKey = imageUrl.slice(baseUrl.length + 1).split(/[?#]/)[0] ?? "";
-  const key = decodeURIComponent(rawKey).trim();
-  return key.length > 0 ? key : null;
+  try {
+    const key = decodeURIComponent(rawKey).trim();
+    return isValidR2ObjectKey(key) ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteR2ObjectByKey(
+  key: string,
+  options: {
+    bucket?: string;
+    client?: Pick<S3Client, "send"> | null;
+  } = {},
+) {
+  if (!isValidR2ObjectKey(key)) {
+    throw new Error("R2 object key is invalid.");
+  }
+  const bucket = options.bucket ?? process.env.R2_BUCKET;
+  if (!bucket) {
+    throw new Error("R2 bucket config missing.");
+  }
+  const client = options.client ?? getR2StorageClient();
+  if (!client) {
+    throw new Error("R2 credentials missing.");
+  }
+  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
 
 export async function deleteR2ImageByPublicUrl(imageUrl: string) {
   // Converts public URL to key and removes object from R2 bucket.
-  if (!R2_BUCKET) {
-    throw new Error("R2 bucket config missing.");
-  }
-
-  const client = getR2StorageClient();
-  if (!client) {
-    throw new Error("R2 credentials missing.");
-  }
-
   const key = getR2ObjectKeyFromPublicUrl(imageUrl);
   if (!key) {
     throw new Error("Image URL is not a valid R2 URL for this app.");
   }
 
-  await client.send(
-    new DeleteObjectCommand({
-      Bucket: R2_BUCKET,
-      Key: key,
-    }),
-  );
+  await deleteR2ObjectByKey(key);
 }

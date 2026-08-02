@@ -20,6 +20,10 @@ import {
   executeAccountDeletionJob,
 } from "@/lib/account-deletion-jobs";
 import {
+  buildAccountDeletionStorageOutboxStatements,
+  processAccountDeletionStorageOutbox,
+} from "@/lib/account-deletion-storage";
+import {
   getEmptyAccountDeletionInventory,
   planAccountDeletion,
   type AccountDeletionGraphPlan,
@@ -1137,6 +1141,11 @@ function buildReadyGraphDeletionStatements(params: {
     }));
   return [
     ...deletionEventStatements,
+    ...buildAccountDeletionStorageOutboxStatements({
+      graph: params.graph,
+      jobId: params.jobId,
+      targetId: params.targetId,
+    }),
     ...buildAccountDeletionGraphCleanupStatements({
       graph: params.graph,
       deletedPurchaseOwner,
@@ -1248,6 +1257,28 @@ export async function POST(request: NextRequest) {
             targetId,
           }),
       });
+      let finalJobStatus: string = execution.status;
+      let storageResult:
+        | Awaited<ReturnType<typeof processAccountDeletionStorageOutbox>>
+        | null = null;
+      if (
+        execution.status === "storage_pending" ||
+        execution.status === "database_completed"
+      ) {
+        try {
+          storageResult = await processAccountDeletionStorageOutbox({
+            jobId: execution.jobId,
+          });
+          finalJobStatus = storageResult.status;
+        } catch {
+          logMonetizationAudit({
+            requestId: deletionAdmin.context.requestId,
+            event: "account_delete_storage_processing_unavailable",
+            actor: deletionAdmin.context.actor,
+            jobId: execution.jobId,
+          });
+        }
+      }
       const responseBody = buildDeleteResponse({
         mode: payload.mode,
         targets,
@@ -1256,7 +1287,7 @@ export async function POST(request: NextRequest) {
           jobId: execution.jobId,
           fingerprint: payload.fingerprint,
           expiresAt: execution.expiresAt,
-          status: execution.status,
+          status: finalJobStatus,
           replayed: execution.replayed,
         },
       });
@@ -1270,6 +1301,9 @@ export async function POST(request: NextRequest) {
         deleted: plan.selectedAuthUserIds.length,
         jobId: execution.jobId,
         replayed: execution.replayed,
+        storageStatus: finalJobStatus,
+        storageAttempted: storageResult?.attempted ?? 0,
+        storageFailed: storageResult?.failed ?? 0,
       });
       const response = NextResponse.json(responseBody);
       response.headers.set(

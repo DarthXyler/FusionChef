@@ -46,6 +46,7 @@ function jobUnavailable(message = "Account deletion job persistence is unavailab
 type PersistedJob = {
   jobId: string;
   actingAdminRef: string;
+  reason: string;
   previewFingerprint: string;
   previewExpiresAt: string;
   status: AccountDeletionJobStatus;
@@ -54,6 +55,7 @@ type PersistedJob = {
 type PersistedTarget = {
   targetId: string;
   targetRef: string;
+  graphFingerprint: string;
   status: AccountDeletionJobStatus;
 };
 
@@ -209,7 +211,7 @@ async function readJobByIdempotency(
   idempotencyKey: string,
 ): Promise<PersistedJob | null> {
   const result = await client.execute({
-    sql: `SELECT job_id, acting_admin_ref, preview_fingerprint,
+    sql: `SELECT job_id, acting_admin_ref, reason, preview_fingerprint,
                  preview_expires_at, status
           FROM account_deletion_jobs
           WHERE request_source = ? AND idempotency_key = ?
@@ -221,6 +223,7 @@ async function readJobByIdempotency(
     ? {
         jobId: asString(row.job_id),
         actingAdminRef: asString(row.acting_admin_ref),
+        reason: asString(row.reason),
         previewFingerprint: asString(row.preview_fingerprint),
         previewExpiresAt: asString(row.preview_expires_at),
         status: asString(row.status) as AccountDeletionJobStatus,
@@ -233,7 +236,7 @@ async function readJobById(
   jobId: string,
 ): Promise<PersistedJob | null> {
   const result = await client.execute({
-    sql: `SELECT job_id, acting_admin_ref, preview_fingerprint,
+    sql: `SELECT job_id, acting_admin_ref, reason, preview_fingerprint,
                  preview_expires_at, status
           FROM account_deletion_jobs
           WHERE job_id = ?
@@ -245,6 +248,7 @@ async function readJobById(
     ? {
         jobId: asString(row.job_id),
         actingAdminRef: asString(row.acting_admin_ref),
+        reason: asString(row.reason),
         previewFingerprint: asString(row.preview_fingerprint),
         previewExpiresAt: asString(row.preview_expires_at),
         status: asString(row.status) as AccountDeletionJobStatus,
@@ -254,7 +258,7 @@ async function readJobById(
 
 async function readTargets(client: JobClient, jobId: string) {
   const result = await client.execute({
-    sql: `SELECT target_id, target_ref, status
+    sql: `SELECT target_id, target_ref, graph_fingerprint, status
           FROM account_deletion_job_targets
           WHERE job_id = ?
           ORDER BY target_id`,
@@ -264,6 +268,7 @@ async function readTargets(client: JobClient, jobId: string) {
     (row): PersistedTarget => ({
       targetId: asString(row.target_id),
       targetRef: asString(row.target_ref),
+      graphFingerprint: asString(row.graph_fingerprint),
       status: asString(row.status) as AccountDeletionJobStatus,
     }),
   );
@@ -527,6 +532,24 @@ export async function executeAccountDeletionJob(options: {
       409,
     );
   }
+  if (
+    job.status === "database_completed" ||
+    job.status === "storage_pending"
+  ) {
+    if (job.reason !== options.reason.trim()) {
+      throw new AccountDeletionJobError(
+        "stale_preview",
+        "The account deletion reason no longer matches the approved preview.",
+        409,
+      );
+    }
+    return {
+      jobId: job.jobId,
+      status: job.status,
+      expiresAt: job.previewExpiresAt,
+      replayed: true,
+    };
+  }
   const now = (options.now ?? (() => new Date()))();
   if (now.getTime() >= Date.parse(job.previewExpiresAt)) {
     try {
@@ -547,11 +570,55 @@ export async function executeAccountDeletionJob(options: {
       409,
     );
   }
+  let targets: PersistedTarget[];
+  try {
+    targets = await readTargets(client, job.jobId);
+  } catch {
+    throw jobUnavailable();
+  }
+  const graphsByRef = new Map(
+    options.currentPlan.graphs.map((graph) => {
+      const targetRef = hmacReference("graph", graph.graphId, secret);
+      return [
+        targetRef,
+        {
+          graph,
+          graphFingerprint: fingerprintValue(stableGraphScope(graph), secret),
+        },
+      ] as const;
+    }),
+  );
+  const resumable =
+    job.status === "failed_retryable" || job.status === "executing";
   const currentFingerprint = fingerprintValue(
     stablePlanScope(options.currentPlan, options.reason),
     secret,
   );
-  if (currentFingerprint !== job.previewFingerprint) {
+  const targetsByRef = new Map(
+    targets.map((target) => [target.targetRef, target]),
+  );
+  const currentGraphMismatch = [...graphsByRef].some(
+    ([targetRef, current]) => {
+      const persisted = targetsByRef.get(targetRef);
+      return (
+        !persisted ||
+        persisted.graphFingerprint !== current.graphFingerprint
+      );
+    },
+  );
+  const unfinishedGraphMissing = targets.some((target) => {
+    const databaseFinished =
+      target.status === "database_completed" ||
+      target.status === "storage_pending" ||
+      target.status === "completed";
+    return !databaseFinished && !graphsByRef.has(target.targetRef);
+  });
+  const scopeChanged = resumable
+    ? job.reason !== options.reason.trim() ||
+      currentGraphMismatch ||
+      unfinishedGraphMissing
+    : currentFingerprint !== job.previewFingerprint;
+  if (scopeChanged) {
     try {
       await client.execute({
         sql: `UPDATE account_deletion_jobs
@@ -600,18 +667,6 @@ export async function executeAccountDeletionJob(options: {
     );
   }
 
-  const graphsByRef = new Map(
-    options.currentPlan.graphs.map((graph) => [
-      hmacReference("graph", graph.graphId, secret),
-      graph,
-    ]),
-  );
-  let targets: PersistedTarget[];
-  try {
-    targets = await readTargets(client, job.jobId);
-  } catch {
-    throw jobUnavailable();
-  }
   for (const target of targets) {
     if (target.status === "completed" || target.status === "database_completed") {
       continue;
@@ -623,7 +678,8 @@ export async function executeAccountDeletionJob(options: {
         409,
       );
     }
-    const graph = graphsByRef.get(target.targetRef);
+    const currentGraph = graphsByRef.get(target.targetRef);
+    const graph = currentGraph?.graph;
     if (!graph || graph.status !== "ready") {
       throw new AccountDeletionJobError(
         "stale_preview",
@@ -703,6 +759,51 @@ export async function executeAccountDeletionJob(options: {
       "Account deletion has unfinished retryable targets.",
       503,
     );
+  }
+  let storageCount = 0;
+  try {
+    const storage = await client.execute({
+      sql: `SELECT COUNT(*) AS count
+            FROM account_deletion_storage_outbox
+            WHERE job_id = ?`,
+      args: [job.jobId],
+    });
+    storageCount = Number(storage.rows[0]?.count ?? 0);
+  } catch {
+    throw jobUnavailable(
+      "Account deletion storage state could not be persisted safely.",
+    );
+  }
+  if (storageCount > 0) {
+    try {
+      await client.batch(
+        [
+          {
+            sql: `UPDATE account_deletion_job_targets
+                  SET status = 'storage_pending', updated_at = ?
+                  WHERE job_id = ? AND status = 'database_completed'`,
+            args: [now.toISOString(), job.jobId],
+          },
+          {
+            sql: `UPDATE account_deletion_jobs
+                  SET status = 'storage_pending', updated_at = ?
+                  WHERE job_id = ? AND status <> 'completed'`,
+            args: [now.toISOString(), job.jobId],
+          },
+        ],
+        "write",
+      );
+    } catch {
+      throw jobUnavailable(
+        "Account deletion storage state could not be persisted safely.",
+      );
+    }
+    return {
+      jobId: job.jobId,
+      status: "storage_pending" as const,
+      expiresAt: job.previewExpiresAt,
+      replayed: false,
+    };
   }
   try {
     await client.batch(

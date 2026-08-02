@@ -134,6 +134,20 @@ const REQUIRED_TABLE_COLUMNS: Record<string, readonly string[]> = {
     "updated_at",
     "completed_at",
   ],
+  account_deletion_storage_outbox: [
+    "outbox_id",
+    "job_id",
+    "target_id",
+    "object_key",
+    "object_category",
+    "status",
+    "attempt_count",
+    "last_safe_error",
+    "created_at",
+    "updated_at",
+    "attempted_at",
+    "completed_at",
+  ],
 };
 
 const REQUIRED_PUR01_OBJECTS: Record<string, "index" | "trigger" | "view"> = {
@@ -151,6 +165,11 @@ const REQUIRED_PUR01_OBJECTS: Record<string, "index" | "trigger" | "view"> = {
   idx_account_deletion_jobs_created: "index",
   idx_account_deletion_targets_job_status: "index",
   idx_account_deletion_targets_status_updated: "index",
+  ux_account_deletion_targets_job_target: "index",
+  idx_account_deletion_outbox_job_status: "index",
+  idx_account_deletion_outbox_target_status: "index",
+  idx_account_deletion_outbox_status_updated: "index",
+  idx_account_deletion_outbox_created: "index",
 };
 
 export class AccountDeletionSchemaError extends Error {
