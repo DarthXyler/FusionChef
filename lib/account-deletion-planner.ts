@@ -42,6 +42,11 @@ export type AccountDeletionAliasEdge = {
   canonicalAnonUserId: string;
 };
 
+export type AccountDeletionStorageReference = {
+  category: "cookbook_image" | "profile_avatar";
+  value: string;
+};
+
 export type AccountDeletionGraphPlan = {
   graphId: string;
   status: "ready" | "manual_review";
@@ -53,6 +58,7 @@ export type AccountDeletionGraphPlan = {
   canonicalIdentityIds: string[];
   aliasEdges: AccountDeletionAliasEdge[];
   deviceKeys: string[];
+  storageReferences: AccountDeletionStorageReference[];
   inventory: AccountDeletionInventory;
 };
 
@@ -252,6 +258,55 @@ async function readDeviceKeys(
     result.rows.forEach((row) => keys.add(asString(row.device_key)));
   }
   return sortedUnique(keys);
+}
+
+async function readStorageReferences(
+  client: PlanningClient,
+  authUserIds: string[],
+  identityNodes: string[],
+) {
+  const references = new Map<string, AccountDeletionStorageReference>();
+  for (const part of chunks(authUserIds)) {
+    const result = await client.execute({
+      sql: `SELECT avatar_url
+            FROM auth_users
+            WHERE id IN (${placeholders(part)})
+              AND avatar_url IS NOT NULL
+              AND trim(avatar_url) <> ''`,
+      args: part,
+    });
+    result.rows.forEach((row) => {
+      const value = asString(row.avatar_url);
+      if (value) {
+        references.set(`profile_avatar\u0000${value}`, {
+          category: "profile_avatar",
+          value,
+        });
+      }
+    });
+  }
+  for (const part of chunks(identityNodes)) {
+    const result = await client.execute({
+      sql: `SELECT image_url
+            FROM cookbook_recipes
+            WHERE anon_user_id IN (${placeholders(part)})
+              AND image_url IS NOT NULL
+              AND trim(image_url) <> ''`,
+      args: part,
+    });
+    result.rows.forEach((row) => {
+      const value = asString(row.image_url);
+      if (value) {
+        references.set(`cookbook_image\u0000${value}`, {
+          category: "cookbook_image",
+          value,
+        });
+      }
+    });
+  }
+  return [...references.values()].sort((left, right) =>
+    `${left.category}:${left.value}`.localeCompare(`${right.category}:${right.value}`),
+  );
 }
 
 async function hasConflictingFinancialOwnership(
@@ -591,6 +646,11 @@ export async function planAccountDeletion(options: {
       deviceKeys: identityNodes.length
         ? await readDeviceKeys(client, identityNodes)
         : [],
+      storageReferences: await readStorageReferences(
+        client,
+        graphAuthUserIds,
+        identityNodes,
+      ),
       inventory: await readInventory(
         client,
         graphAuthUserIds,

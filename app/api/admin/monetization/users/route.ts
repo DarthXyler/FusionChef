@@ -3,7 +3,8 @@
  * Admin-only logged-in user listing, CSV-export support, and batch credit grant workflow.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac, randomUUID } from "crypto";
+import { createHash, createHmac } from "crypto";
+import type { InStatement } from "@libsql/client";
 import {
   assertAccountDeletionDoesNotIncludeActor,
   requireAccountDeletionAdmin,
@@ -13,6 +14,11 @@ import {
   assertAccountDeletionSchemaReady,
 } from "@/lib/account-deletion-schema";
 import { buildAccountDeletionGraphCleanupStatements } from "@/lib/account-deletion-execution";
+import {
+  AccountDeletionJobError,
+  createAccountDeletionPreview,
+  executeAccountDeletionJob,
+} from "@/lib/account-deletion-jobs";
 import {
   getEmptyAccountDeletionInventory,
   planAccountDeletion,
@@ -71,7 +77,7 @@ import {
   getIdempotencyKeyFromHeaders,
   type IdempotencyContext,
 } from "@/lib/idempotency";
-import { executeTurso, executeTursoBatch } from "@/lib/turso";
+import { executeTurso } from "@/lib/turso";
 import { createAccountDeletionPseudonym } from "@/lib/purchase-settlement-retention";
 
 const UUID_PATTERN =
@@ -691,8 +697,10 @@ function parseDeletePayload(body: unknown) {
     throw new RequestValidationError("mode must be dry_run or commit.");
   }
   const reason = asString(body.reason).trim().slice(0, 500);
-  if (mode === "commit" && !reason) {
-    throw new RequestValidationError("reason is required before deleting an account.");
+  if (!reason) {
+    throw new RequestValidationError(
+      "reason is required before previewing or deleting an account.",
+    );
   }
   const confirmation = asString(body.confirmation).trim();
   if (mode === "commit" && confirmation !== "DELETE") {
@@ -708,7 +716,14 @@ function parseDeletePayload(body: unknown) {
   if (identifiers.length > MAX_BATCH_IDENTIFIERS) {
     throw new RequestValidationError(`Batch cannot exceed ${MAX_BATCH_IDENTIFIERS} identifiers.`);
   }
-  return { mode, reason, confirmation, identifiers };
+  const jobId = asString(body.jobId).trim();
+  const fingerprint = asString(body.fingerprint).trim();
+  if (mode === "commit" && (!UUID_PATTERN.test(jobId) || !/^[0-9a-f]{64}$/.test(fingerprint))) {
+    throw new RequestValidationError(
+      "A valid preview jobId and fingerprint are required before deletion.",
+    );
+  }
+  return { mode, reason, confirmation, identifiers, jobId, fingerprint };
 }
 
 async function fetchResolvedUsers(column: "normalized_email" | "id" | "canonical", values: string[]) {
@@ -929,7 +944,7 @@ async function resolveDeleteTargets(identifiers: string[]) {
       graph,
     });
   }
-  return output;
+  return { targets: output, plan };
 }
 
 function buildBatchResponse(params: {
@@ -1014,7 +1029,14 @@ function sumDeletionCounts(targets: DeleteTarget[]) {
 function buildDeleteResponse(params: {
   mode: "dry_run" | "commit";
   targets: DeleteTarget[];
-  deleted?: Array<{ authUserId: string; email: string; canonicalAnonUserId: string }>;
+  deletedCount?: number;
+  job?: {
+    jobId: string;
+    fingerprint: string;
+    expiresAt: string;
+    status: string;
+    replayed: boolean;
+  };
 }) {
   return {
     operation: "account_delete",
@@ -1028,7 +1050,7 @@ function buildDeleteResponse(params: {
       blockedSharedIdentity: params.targets.filter((target) => target.status === "blocked_shared_identity").length,
       duplicateInputs: params.targets.filter((target) => target.status === "duplicate_input").length,
       duplicateTargets: params.targets.filter((target) => target.status === "duplicate_target").length,
-      deleted: params.deleted?.length ?? 0,
+      deleted: params.deletedCount ?? 0,
       counts: sumDeletionCounts(params.targets),
     },
     targets: params.targets.slice(0, 500).map((target) => ({
@@ -1046,35 +1068,44 @@ function buildDeleteResponse(params: {
         : null,
     })),
     previewTruncated: params.targets.length > 500,
-    deleted: params.deleted ?? [],
+    deleted: [],
+    job: params.job ?? null,
   };
 }
 
-async function deleteReadyAccounts(params: {
-  targets: Array<DeleteTarget & { user: ResolvedUser; graph: AccountDeletionGraphPlan }>;
+function buildReadyGraphDeletionStatements(params: {
+  graph: AccountDeletionGraphPlan;
+  targets: DeleteTarget[];
   actor: string;
   reason: string;
-  batchId: string;
-}) {
-  const deleted: Array<{ authUserId: string; email: string; canonicalAnonUserId: string }> = [];
-  const targetsByGraph = new Map<
-    string,
-    Array<DeleteTarget & { user: ResolvedUser; graph: AccountDeletionGraphPlan }>
-  >();
-  for (const target of params.targets) {
-    const existing = targetsByGraph.get(target.graph.graphId) ?? [];
-    existing.push(target);
-    targetsByGraph.set(target.graph.graphId, existing);
-  }
-
-  for (const graphTargets of targetsByGraph.values()) {
-    const graph = graphTargets[0].graph;
-    const canonical = graph.canonicalIdentityIds[0] ?? graph.identityNodes[0] ?? "";
-    const deletedPurchaseOwner = createAccountDeletionPseudonym({
-      authUserIds: graph.ownerAuthUserIds,
-      identityNodes: graph.identityNodes,
-    });
-    const deletionEventStatements = graphTargets.map((target) => ({
+  jobId: string;
+  targetId: string;
+}): InStatement[] {
+  const canonical =
+    params.graph.canonicalIdentityIds[0] ??
+    params.graph.identityNodes[0] ??
+    "";
+  const usersById = new Map(
+    params.targets.flatMap((target) =>
+      target.user ? [[target.user.authUserId, target.user] as const] : [],
+    ),
+  );
+  const graphUsers = params.graph.ownerAuthUserIds.map((authUserId) => {
+    const user = usersById.get(authUserId);
+    if (!user) {
+      throw new AccountDeletionJobError(
+        "stale_preview",
+        "The account deletion target no longer matches its approved graph.",
+        409,
+      );
+    }
+    return user;
+  });
+  const deletedPurchaseOwner = createAccountDeletionPseudonym({
+    authUserIds: params.graph.ownerAuthUserIds,
+    identityNodes: params.graph.identityNodes,
+  });
+  const deletionEventStatements: InStatement[] = graphUsers.map((user) => ({
       sql: `INSERT INTO account_deletion_events (
               deletion_id,
               auth_user_id,
@@ -1089,35 +1120,28 @@ async function deleteReadyAccounts(params: {
               idempotency_key
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        randomUUID(),
-        target.user.authUserId,
+        `deletion:${createHash("sha256")
+          .update(`${params.jobId}\u0000${params.targetId}\u0000${user.authUserId}`)
+          .digest("hex")}`,
+        user.authUserId,
         canonical,
-        hashDeletedEmail(target.user.email),
-        target.user.provider || "unknown",
-        target.user.role || "user",
+        hashDeletedEmail(user.email),
+        user.provider || "unknown",
+        user.role || "user",
         params.actor,
         params.reason,
-        JSON.stringify(target.counts),
-        target.counts.purchaseTransactionsPreserved,
-        params.batchId,
+        JSON.stringify(params.graph.inventory),
+        params.graph.inventory.purchaseTransactionsPreserved,
+        params.jobId,
       ],
     }));
-    await executeTursoBatch([
-      ...deletionEventStatements,
-      ...buildAccountDeletionGraphCleanupStatements({
-        graph,
-        deletedPurchaseOwner,
-      }),
-    ], 30_000);
-    graphTargets.forEach((target) => {
-      deleted.push({
-        authUserId: target.user.authUserId,
-        email: target.user.email,
-        canonicalAnonUserId: canonical,
-      });
-    });
-  }
-  return deleted;
+  return [
+    ...deletionEventStatements,
+    ...buildAccountDeletionGraphCleanupStatements({
+      graph: params.graph,
+      deletedPurchaseOwner,
+    }),
+  ];
 }
 
 export async function POST(request: NextRequest) {
@@ -1165,7 +1189,7 @@ export async function POST(request: NextRequest) {
         );
       }
       const payload = parseDeletePayload(rawBody);
-      const targets = await resolveDeleteTargets(payload.identifiers);
+      const { targets, plan } = await resolveDeleteTargets(payload.identifiers);
       try {
         assertAccountDeletionDoesNotIncludeActor(
           deletionAdmin.context.actorAuthUserId,
@@ -1189,88 +1213,53 @@ export async function POST(request: NextRequest) {
       }
 
       if (payload.mode === "dry_run") {
-        const response = NextResponse.json(buildDeleteResponse({ mode: payload.mode, targets }));
+        const preview = await createAccountDeletionPreview({
+          plan,
+          reason: payload.reason,
+          actingAdminAuthUserId: deletionAdmin.context.actorAuthUserId,
+          requestId: deletionAdmin.context.requestId,
+          idempotencyKey:
+            getIdempotencyKeyFromHeaders(request.headers) ?? undefined,
+        });
+        const response = NextResponse.json(
+          buildDeleteResponse({
+            mode: payload.mode,
+            targets,
+            job: preview,
+          }),
+        );
         withNoStore(response);
         return response;
       }
 
-      const ready = targets.filter(
-        (
-          target,
-        ): target is DeleteTarget & {
-          user: ResolvedUser;
-          graph: AccountDeletionGraphPlan;
-        } =>
-          target.status === "ready" &&
-          target.user !== null &&
-          target.graph !== null,
-      );
-      if (ready.length < 1) {
-        return NextResponse.json(
-          { error: "No accounts are ready to delete. Run dry-run and resolve blocked rows first." },
-          { status: 409 },
-        );
-      }
-      if (
-        targets.some(
-          (target) =>
-            target.status === "blocked_shared_identity" ||
-            target.status === "manual_review",
-        )
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              "One or more identity graphs require manual review. Resolve the dry-run blockers first.",
-          },
-          { status: 409 },
-        );
-      }
-
-      const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
-      if (!idempotencyKey) {
-        return NextResponse.json({ error: "idempotency-key header is required." }, { status: 400 });
-      }
-      const idempotency = await beginIdempotentRequest({
-        key: idempotencyKey,
-        scope: "admin-monetization-users:account-delete",
-        requestPayload: {
-          actor: deletionAdmin.context.actor,
-          reason: payload.reason,
-          identifiers: payload.identifiers.map(normalizeIdentifier),
+      const execution = await executeAccountDeletionJob({
+        jobId: payload.jobId,
+        fingerprint: payload.fingerprint,
+        currentPlan: plan,
+        reason: payload.reason,
+        actingAdminAuthUserId: deletionAdmin.context.actorAuthUserId,
+        buildGraphStatements: ({ graph, jobId, targetId }) =>
+          buildReadyGraphDeletionStatements({
+            graph,
+            targets,
+            actor: deletionAdmin.context.actor,
+            reason: payload.reason,
+            jobId,
+            targetId,
+          }),
+      });
+      const responseBody = buildDeleteResponse({
+        mode: payload.mode,
+        targets,
+        deletedCount: plan.selectedAuthUserIds.length,
+        job: {
+          jobId: execution.jobId,
+          fingerprint: payload.fingerprint,
+          expiresAt: execution.expiresAt,
+          status: execution.status,
+          replayed: execution.replayed,
         },
       });
-      if (idempotency.state === "in_progress") {
-        return NextResponse.json({ error: "This delete request is already processing." }, { status: 409 });
-      }
-      if (idempotency.state === "conflict") {
-        return NextResponse.json(
-          { error: "Idempotency key was reused with a different delete request." },
-          { status: 409 },
-        );
-      }
-      if (idempotency.state === "replay") {
-        const response = NextResponse.json(idempotency.responseBody, {
-          status: idempotency.responseStatus,
-        });
-        response.headers.set("Idempotency-Status", "replayed");
-        withNoStore(response);
-        return response;
-      }
-      if (idempotency.state === "started") {
-        idempotencyContext = idempotency.context;
-      }
-
-      const deleted = await deleteReadyAccounts({
-        targets: ready,
-        actor: deletionAdmin.context.actor,
-        reason: payload.reason,
-        batchId: idempotencyKey,
-      });
-      const responseBody = buildDeleteResponse({ mode: payload.mode, targets, deleted });
-      if (idempotencyContext) {
-        await completeIdempotentRequest(idempotencyContext, 200, responseBody);
-      }
       logMonetizationAudit({
         requestId: deletionAdmin.context.requestId,
         event: "account_delete_succeeded",
@@ -1278,10 +1267,15 @@ export async function POST(request: NextRequest) {
         actorAuthUserId: deletionAdmin.context.actorAuthUserId,
         actorEmail: deletionAdmin.context.actorEmail,
         ip: deletionAdmin.context.ip,
-        deleted: deleted.length,
+        deleted: plan.selectedAuthUserIds.length,
+        jobId: execution.jobId,
+        replayed: execution.replayed,
       });
       const response = NextResponse.json(responseBody);
-      response.headers.set("Idempotency-Status", idempotencyContext ? "stored" : "disabled");
+      response.headers.set(
+        "Idempotency-Status",
+        execution.replayed ? "replayed" : "stored",
+      );
       withNoStore(response);
       return response;
     }
@@ -1408,22 +1402,32 @@ export async function POST(request: NextRequest) {
     }
     const schemaError =
       error instanceof AccountDeletionSchemaError ? error : null;
+    const jobError = error instanceof AccountDeletionJobError ? error : null;
     const isValidationError = error instanceof RequestValidationError;
     return NextResponse.json(
       {
-        error: schemaError
+        error: jobError
+          ? jobError.message
+          : schemaError
           ? schemaError.message
           : isValidationError
             ? error.message
             : "Could not complete user batch operation.",
-        ...(schemaError
+        ...(jobError
+          ? { code: jobError.code }
+          : schemaError
           ? {
               code: schemaError.code,
               missingObjects: schemaError.missingObjects,
             }
           : {}),
       },
-      { status: schemaError?.statusCode ?? (isValidationError ? 400 : 500) },
+      {
+        status:
+          jobError?.statusCode ??
+          schemaError?.statusCode ??
+          (isValidationError ? 400 : 500),
+      },
     );
   }
 }

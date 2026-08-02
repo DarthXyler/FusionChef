@@ -191,7 +191,8 @@ type AccountDeleteTarget = {
     | "ambiguous"
     | "duplicate_input"
     | "duplicate_target"
-    | "blocked_shared_identity";
+    | "blocked_shared_identity"
+    | "manual_review";
   message: string;
   user: AdminUserRow | null;
   linkedAuthUsers: Array<{ authUserId: string; email: string }>;
@@ -206,6 +207,7 @@ type AccountDeleteResult = {
     ready: number;
     missing: number;
     ambiguous: number;
+    manualReview: number;
     blockedSharedIdentity: number;
     duplicateInputs: number;
     duplicateTargets: number;
@@ -214,6 +216,13 @@ type AccountDeleteResult = {
   };
   targets: AccountDeleteTarget[];
   previewTruncated: boolean;
+  job: {
+    jobId: string;
+    fingerprint: string;
+    expiresAt: string;
+    status: string;
+    replayed: boolean;
+  } | null;
 };
 
 type PanelKey =
@@ -1234,6 +1243,12 @@ export function AdminMonetizationConfigPanel({
           identifiersText: deleteIdentifiersText,
           reason: deleteReason,
           confirmation: deleteConfirmation,
+          ...(mode === "commit" && deleteDryRun?.job
+            ? {
+                jobId: deleteDryRun.job.jobId,
+                fingerprint: deleteDryRun.job.fingerprint,
+              }
+            : {}),
         }),
       });
       const payload = (await response.json()) as unknown;
@@ -2668,7 +2683,9 @@ export function AdminMonetizationConfigPanel({
                 isCommittingDelete ||
                 deleteConfirmation !== "DELETE" ||
                 !deleteDryRun ||
+                !deleteDryRun.job ||
                 deleteDryRun.summary.ready < 1 ||
+                deleteDryRun.summary.manualReview > 0 ||
                 deleteDryRun.summary.blockedSharedIdentity > 0
               }
               className="cursor-pointer rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"

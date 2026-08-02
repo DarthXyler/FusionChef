@@ -99,6 +99,41 @@ const REQUIRED_TABLE_COLUMNS: Record<string, readonly string[]> = {
     "idempotency_key",
     "deleted_at",
   ],
+  account_deletion_jobs: [
+    "job_id",
+    "request_id",
+    "request_source",
+    "acting_admin_ref",
+    "reason",
+    "plan_json",
+    "preview_fingerprint",
+    "preview_expires_at",
+    "status",
+    "attempt_count",
+    "last_error_code",
+    "last_error_summary",
+    "idempotency_key",
+    "created_at",
+    "approved_at",
+    "started_at",
+    "updated_at",
+    "completed_at",
+  ],
+  account_deletion_job_targets: [
+    "target_id",
+    "job_id",
+    "target_ref",
+    "graph_fingerprint",
+    "plan_json",
+    "status",
+    "attempt_count",
+    "last_error_code",
+    "last_error_summary",
+    "created_at",
+    "started_at",
+    "updated_at",
+    "completed_at",
+  ],
 };
 
 const REQUIRED_PUR01_OBJECTS: Record<string, "index" | "trigger" | "view"> = {
@@ -111,6 +146,11 @@ const REQUIRED_PUR01_OBJECTS: Record<string, "index" | "trigger" | "view"> = {
   trg_purchase_reconciliation_completed_update: "trigger",
   trg_purchase_reconciliation_completed_delete: "trigger",
   purchase_ledger_backfill_report: "view",
+  idx_account_deletion_jobs_status_updated: "index",
+  idx_account_deletion_jobs_preview_expiration: "index",
+  idx_account_deletion_jobs_created: "index",
+  idx_account_deletion_targets_job_status: "index",
+  idx_account_deletion_targets_status_updated: "index",
 };
 
 export class AccountDeletionSchemaError extends Error {
