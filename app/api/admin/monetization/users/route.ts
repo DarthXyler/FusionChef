@@ -15,7 +15,10 @@ import {
 } from "@/lib/account-deletion-schema";
 import { runAccountDeletionPreflight } from "@/lib/account-deletion-preflight";
 import { buildAccountDeletionGraphCleanupStatements } from "@/lib/account-deletion-execution";
-import { buildDeletedIdentityTombstoneStatements } from "@/lib/deleted-identity-tombstones";
+import {
+  buildDeletedIdentityTombstoneStatements,
+  DeletedIdentityTombstoneConfigurationError,
+} from "@/lib/deleted-identity-tombstones";
 import {
   AccountDeletionJobError,
   createAccountDeletionOperationalReference,
@@ -1474,11 +1477,17 @@ export async function POST(request: NextRequest) {
     const planningError =
       error instanceof AccountDeletionPlanningError ? error : null;
     const jobError = error instanceof AccountDeletionJobError ? error : null;
+    const tombstoneError =
+      error instanceof DeletedIdentityTombstoneConfigurationError
+        ? error
+        : null;
     const isValidationError = error instanceof RequestValidationError;
     return NextResponse.json(
       {
         error: jobError
           ? jobError.message
+          : tombstoneError
+          ? tombstoneError.message
           : planningError
           ? planningError.message
           : schemaError
@@ -1488,6 +1497,8 @@ export async function POST(request: NextRequest) {
             : "Could not complete user batch operation.",
         ...(jobError
           ? { code: jobError.code }
+          : tombstoneError
+          ? { code: tombstoneError.code }
           : planningError
           ? { code: planningError.code }
           : schemaError
@@ -1500,6 +1511,7 @@ export async function POST(request: NextRequest) {
       {
         status:
           jobError?.statusCode ??
+          tombstoneError?.statusCode ??
           planningError?.statusCode ??
           schemaError?.statusCode ??
           (isValidationError ? 400 : 500),

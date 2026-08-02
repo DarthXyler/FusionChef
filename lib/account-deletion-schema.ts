@@ -211,6 +211,16 @@ const REQUIRED_TABLE_COLUMNS: Record<string, readonly string[]> = {
     "deletion_job_id",
     "reason_category",
     "schema_version",
+    "key_version",
+    "key_reference",
+    "created_at",
+  ],
+  deleted_identity_tombstone_key_metadata: [
+    "singleton_id",
+    "key_version",
+    "key_reference",
+    "hmac_algorithm",
+    "schema_version",
     "created_at",
   ],
 };
@@ -237,6 +247,9 @@ const REQUIRED_PUR01_OBJECTS: Record<string, "index" | "trigger" | "view"> = {
   idx_account_deletion_outbox_created: "index",
   idx_deleted_identity_tombstones_job: "index",
   idx_deleted_identity_tombstones_kind_created: "index",
+  idx_deleted_identity_tombstones_key: "index",
+  trg_deleted_identity_tombstone_key_no_update: "trigger",
+  trg_deleted_identity_tombstone_key_no_delete: "trigger",
 };
 
 export class AccountDeletionSchemaError extends Error {

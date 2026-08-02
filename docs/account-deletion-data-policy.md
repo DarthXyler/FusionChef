@@ -25,6 +25,19 @@ settlement-retention implementation. New deletion audit rows store the acting
 administrator and free-form reason as HMAC references; the target-identifier
 columns remain inside the explicit policy boundary below.
 
+## Tombstone key configuration
+
+Deleted-identity tombstones use the dedicated server-only
+`ACCOUNT_DELETION_TOMBSTONE_SECRET`. The application stores only a
+domain-separated HMAC key reference plus fixed algorithm and schema versions;
+it never stores the secret. Missing, short, changed, or version-mismatched key
+configuration fails identity resolution and deletion execution closed.
+
+Tombstone secret rotation is not currently supported. Changing the configured
+secret without a separately reviewed, version-aware data migration is
+prohibited. A future rotation must support controlled old-key and new-key
+verification while preserving every existing tombstone.
+
 ## Unresolved product-policy decision
 
 `account_deletion_events` contains historical raw target `auth_user_id` and

@@ -5,6 +5,10 @@ import {
   type AccountDeletionPlan,
   planAccountDeletion,
 } from "./account-deletion-planner.ts";
+import {
+  DeletedIdentityTombstoneConfigurationError,
+  ensureDeletedIdentityTombstoneKey,
+} from "./deleted-identity-tombstones.ts";
 import { getTursoClient } from "./turso.ts";
 
 type JobClient = Pick<Client, "execute" | "batch">;
@@ -594,6 +598,7 @@ export async function executeAccountDeletionJob(options: {
   client?: JobExecutionClient;
   secret?: string;
   publicBaseUrl?: string;
+  tombstoneSecret?: string;
 }) {
   const client = options.client ?? getTursoClient();
   const secret = getJobSecret(options.secret);
@@ -758,6 +763,11 @@ export async function executeAccountDeletionJob(options: {
         );
       }
 
+      await ensureDeletedIdentityTombstoneKey({
+        client: activeTransaction,
+        secret: options.tombstoneSecret,
+      });
+
       const currentPlan = await replan({
         authUserIds: [...options.authUserIds],
         client: activeTransaction,
@@ -904,6 +914,9 @@ export async function executeAccountDeletionJob(options: {
             );
           }
         }
+        throw error;
+      }
+      if (error instanceof DeletedIdentityTombstoneConfigurationError) {
         throw error;
       }
       if (!targetForFailure) {
