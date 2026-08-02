@@ -211,7 +211,6 @@ type AccountDeletionGraphSummary = {
 };
 
 type AccountDeleteTarget = {
-  input: string;
   status:
     | "ready"
     | "missing"
@@ -221,8 +220,13 @@ type AccountDeleteTarget = {
     | "blocked_shared_identity"
     | "manual_review";
   message: string;
-  user: AdminUserRow | null;
-  linkedAuthUsers: Array<{ authUserId: string; email: string }>;
+  user: {
+    email: string;
+    name: string;
+    accountSetup: AdminUserAccountSetup;
+    accountSetupIssue: AdminUserIdentityIssue | null;
+  } | null;
+  linkedAuthUsers: Array<{ email: string }>;
   counts: AccountDeletionCounts;
   graph: AccountDeletionGraphSummary | null;
 };
@@ -688,8 +692,8 @@ function AccountDeletionPreviewPanel({ result }: { result: AccountDeleteResult }
       <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-700">Authenticated users</h4>
         <div className="mt-2 space-y-2">
-          {result.targets.slice(0, 50).map((target) => (
-            <div key={`${target.input}-${target.status}`} className="border-t border-zinc-200 pt-2 first:border-0 first:pt-0">
+          {result.targets.slice(0, 50).map((target, targetIndex) => (
+            <div key={`${target.user?.email ?? targetIndex}-${target.status}`} className="border-t border-zinc-200 pt-2 first:border-0 first:pt-0">
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="font-semibold text-zinc-900">
                   {target.user?.name || target.user?.email || "Unresolved target"}
@@ -699,6 +703,9 @@ function AccountDeletionPreviewPanel({ result }: { result: AccountDeleteResult }
                   {accountDeletionStatusLabel(target.status)}
                 </span>
                 {target.user ? <span>Account Setup: {getAdminUserAccountSetupLabel(target.user.accountSetup)}</span> : null}
+                {target.user?.accountSetupIssue ? (
+                  <span>{getAdminUserIdentityIssueLabel(target.user.accountSetupIssue)}</span>
+                ) : null}
               </div>
               <p className="mt-1 text-xs text-zinc-600">{target.message}</p>
               {target.linkedAuthUsers.length > 1 ? (
@@ -2912,6 +2919,9 @@ export function AdminMonetizationConfigPanel({
                   className="w-full rounded-2xl border border-red-200 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-red-500"
                   placeholder="user requested deletion"
                 />
+                <span className="block text-xs font-normal text-zinc-600">
+                  Do not include names, email addresses, tokens, receipts, or profile details. The job stores only a pseudonymous reason reference.
+                </span>
               </label>
               <label className="space-y-1 text-sm font-semibold text-red-900">
                 Commit confirmation

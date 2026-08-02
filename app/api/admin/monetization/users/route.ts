@@ -16,6 +16,7 @@ import {
 import { buildAccountDeletionGraphCleanupStatements } from "@/lib/account-deletion-execution";
 import {
   AccountDeletionJobError,
+  createAccountDeletionOperationalReference,
   createAccountDeletionPreview,
   executeAccountDeletionJob,
   getAccountDeletionJobStatus,
@@ -1068,15 +1069,52 @@ function buildDeleteResponse(params: {
       counts: sumDeletionCounts(params.targets),
     },
     targets: params.targets.slice(0, 500).map((target) => ({
-      ...target,
+      status: target.status,
+      message: target.message,
+      user: target.user
+        ? {
+            email: target.user.email,
+            name: target.user.name,
+            accountSetup: target.user.accountSetup,
+            accountSetupIssue: target.user.accountSetupIssue,
+          }
+        : null,
+      linkedAuthUsers: target.linkedAuthUsers.map((user) => ({
+        email: user.email,
+      })),
+      counts: target.counts,
       graph: target.graph
         ? {
-            graphId: target.graph.graphId,
+            graphId: createAccountDeletionOperationalReference({
+              kind: "response-identity",
+              value: target.graph.graphId,
+            }),
             status: target.graph.status,
             blockers: target.graph.blockers,
-            identityNodes: target.graph.identityNodes,
-            canonicalIdentityIds: target.graph.canonicalIdentityIds,
-            aliasEdges: target.graph.aliasEdges,
+            identityNodes: target.graph.identityNodes.map((value) =>
+              createAccountDeletionOperationalReference({
+                kind: "response-identity",
+                value,
+              }),
+            ),
+            canonicalIdentityIds: target.graph.canonicalIdentityIds.map(
+              (value) =>
+                createAccountDeletionOperationalReference({
+                  kind: "response-identity",
+                  value,
+                }),
+            ),
+            aliasEdges: target.graph.aliasEdges.map((edge) => ({
+              anonUserId: createAccountDeletionOperationalReference({
+                kind: "response-identity",
+                value: edge.anonUserId,
+              }),
+              canonicalAnonUserId:
+                createAccountDeletionOperationalReference({
+                  kind: "response-identity",
+                  value: edge.canonicalAnonUserId,
+                }),
+            })),
             deviceMappingCount: target.graph.deviceKeys.length,
             storage: (() => {
               const objects = collectAccountDeletionStorageObjects({
@@ -1107,8 +1145,8 @@ function buildDeleteResponse(params: {
 function buildReadyGraphDeletionStatements(params: {
   graph: AccountDeletionGraphPlan;
   targets: DeleteTarget[];
-  actor: string;
-  reason: string;
+  actorRef: string;
+  reasonRef: string;
   jobId: string;
   targetId: string;
 }): InStatement[] {
@@ -1159,8 +1197,8 @@ function buildReadyGraphDeletionStatements(params: {
         hashDeletedEmail(user.email),
         user.provider || "unknown",
         user.role || "user",
-        params.actor,
-        params.reason,
+        params.actorRef,
+        params.reasonRef,
         JSON.stringify(params.graph.inventory),
         params.graph.inventory.purchaseTransactionsPreserved,
         params.jobId,
@@ -1285,8 +1323,14 @@ export async function POST(request: NextRequest) {
           buildReadyGraphDeletionStatements({
             graph,
             targets,
-            actor: deletionAdmin.context.actor,
-            reason: payload.reason,
+            actorRef: createAccountDeletionOperationalReference({
+              kind: "admin",
+              value: deletionAdmin.context.actorAuthUserId,
+            }),
+            reasonRef: createAccountDeletionOperationalReference({
+              kind: "reason",
+              value: payload.reason,
+            }),
             jobId,
             targetId,
           }),
@@ -1308,7 +1352,10 @@ export async function POST(request: NextRequest) {
           logMonetizationAudit({
             requestId: deletionAdmin.context.requestId,
             event: "account_delete_storage_processing_unavailable",
-            actor: deletionAdmin.context.actor,
+            actorRef: createAccountDeletionOperationalReference({
+              kind: "admin",
+              value: deletionAdmin.context.actorAuthUserId,
+            }),
             jobId: execution.jobId,
           });
         }
@@ -1330,10 +1377,14 @@ export async function POST(request: NextRequest) {
       logMonetizationAudit({
         requestId: deletionAdmin.context.requestId,
         event: "account_delete_succeeded",
-        actor: deletionAdmin.context.actor,
-        actorAuthUserId: deletionAdmin.context.actorAuthUserId,
-        actorEmail: deletionAdmin.context.actorEmail,
-        ip: deletionAdmin.context.ip,
+        actorRef: createAccountDeletionOperationalReference({
+          kind: "admin",
+          value: deletionAdmin.context.actorAuthUserId,
+        }),
+        networkRef: createAccountDeletionOperationalReference({
+          kind: "network",
+          value: deletionAdmin.context.ip,
+        }),
         deleted: plan.selectedAuthUserIds.length,
         jobId: execution.jobId,
         replayed: execution.replayed,

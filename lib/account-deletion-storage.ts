@@ -48,6 +48,16 @@ function classifyStorageReference(
   return null;
 }
 
+function containsUnsafeOperationalDetail(key: string) {
+  return (
+    /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(key) ||
+    /(?:bearer|oauth|provider[-_]?payload|purchase[-_]?token|receipt[-_]?token)/i.test(
+      key,
+    ) ||
+    /[a-z0-9_-]{49,}/i.test(key)
+  );
+}
+
 export function collectAccountDeletionStorageObjects(options: {
   graph: AccountDeletionGraphPlan;
   publicBaseUrl?: string;
@@ -74,6 +84,12 @@ export function collectAccountDeletionStorageObjects(options: {
       throw new AccountDeletionStorageError(
         "storage_reference_invalid",
         "An account deletion storage reference is invalid.",
+      );
+    }
+    if (containsUnsafeOperationalDetail(key)) {
+      throw new AccountDeletionStorageError(
+        "storage_reference_sensitive",
+        "An account deletion storage reference requires manual review.",
       );
     }
     const category = classifyStorageReference(reference.category, key);

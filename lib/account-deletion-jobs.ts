@@ -46,7 +46,7 @@ function jobUnavailable(message = "Account deletion job persistence is unavailab
 type PersistedJob = {
   jobId: string;
   actingAdminRef: string;
-  reason: string;
+  reasonRef: string;
   previewFingerprint: string;
   previewExpiresAt: string;
   status: AccountDeletionJobStatus;
@@ -88,6 +88,18 @@ function hmacReference(kind: string, value: string, secret: string) {
     .update(`flavor-fusion-chef:account-deletion:${kind}:v1\u0000`)
     .update(value)
     .digest("hex")}`;
+}
+
+export function createAccountDeletionOperationalReference(options: {
+  kind: "admin" | "network" | "reason" | "response-identity";
+  value: string;
+  secret?: string;
+}) {
+  return hmacReference(
+    options.kind,
+    options.value.trim(),
+    getJobSecret(options.secret),
+  );
 }
 
 function getPreviewTtlSeconds() {
@@ -226,7 +238,7 @@ async function readJobByIdempotency(
     ? {
         jobId: asString(row.job_id),
         actingAdminRef: asString(row.acting_admin_ref),
-        reason: asString(row.reason),
+        reasonRef: asString(row.reason),
         previewFingerprint: asString(row.preview_fingerprint),
         previewExpiresAt: asString(row.preview_expires_at),
         status: asString(row.status) as AccountDeletionJobStatus,
@@ -251,7 +263,7 @@ async function readJobById(
     ? {
         jobId: asString(row.job_id),
         actingAdminRef: asString(row.acting_admin_ref),
-        reason: asString(row.reason),
+        reasonRef: asString(row.reason),
         previewFingerprint: asString(row.preview_fingerprint),
         previewExpiresAt: asString(row.preview_expires_at),
         status: asString(row.status) as AccountDeletionJobStatus,
@@ -368,6 +380,12 @@ export async function createAccountDeletionPreview(options: {
   const requestSource = options.requestSource ?? "admin_console";
   const idempotencyKey =
     options.idempotencyKey?.trim() || `preview:${options.requestId}`;
+  const idempotencyKeyRef = hmacReference(
+    "idempotency",
+    idempotencyKey,
+    secret,
+  );
+  const reasonRef = hmacReference("reason", options.reason.trim(), secret);
   const now = (options.now ?? (() => new Date()))();
   const expiresAt = new Date(
     now.getTime() +
@@ -387,7 +405,7 @@ export async function createAccountDeletionPreview(options: {
     existing = await readJobByIdempotency(
       client,
       requestSource,
-      idempotencyKey,
+      idempotencyKeyRef,
     );
   } catch {
     throw jobUnavailable();
@@ -434,12 +452,12 @@ export async function createAccountDeletionPreview(options: {
         options.requestId,
         requestSource,
         actingAdminRef,
-        options.reason.trim(),
+        reasonRef,
         JSON.stringify(jobSnapshot),
         fingerprint,
         expiresAt,
         status,
-        idempotencyKey,
+        idempotencyKeyRef,
         now.toISOString(),
         now.toISOString(),
       ],
@@ -471,7 +489,7 @@ export async function createAccountDeletionPreview(options: {
     const raced = await readJobByIdempotency(
       client,
       requestSource,
-      idempotencyKey,
+      idempotencyKeyRef,
     ).catch(() => null);
     if (
       raced?.previewFingerprint === fingerprint &&
@@ -613,7 +631,7 @@ export async function executeAccountDeletionJob(options: {
     job.status === "database_completed" ||
     job.status === "storage_pending"
   ) {
-    if (job.reason !== options.reason.trim()) {
+    if (job.reasonRef !== hmacReference("reason", options.reason.trim(), secret)) {
       throw new AccountDeletionJobError(
         "stale_preview",
         "The account deletion reason no longer matches the approved preview.",
@@ -691,7 +709,7 @@ export async function executeAccountDeletionJob(options: {
     return !databaseFinished && !graphsByRef.has(target.targetRef);
   });
   const scopeChanged = resumable
-    ? job.reason !== options.reason.trim() ||
+    ? job.reasonRef !== hmacReference("reason", options.reason.trim(), secret) ||
       currentGraphMismatch ||
       unfinishedGraphMissing
     : currentFingerprint !== job.previewFingerprint;
