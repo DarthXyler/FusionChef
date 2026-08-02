@@ -28,6 +28,7 @@ import {
   processAccountDeletionStorageOutbox,
 } from "@/lib/account-deletion-storage";
 import {
+  AccountDeletionPlanningError,
   getEmptyAccountDeletionInventory,
   planAccountDeletion,
   type AccountDeletionGraphPlan,
@@ -1445,12 +1446,16 @@ export async function POST(request: NextRequest) {
     }
     const schemaError =
       error instanceof AccountDeletionSchemaError ? error : null;
+    const planningError =
+      error instanceof AccountDeletionPlanningError ? error : null;
     const jobError = error instanceof AccountDeletionJobError ? error : null;
     const isValidationError = error instanceof RequestValidationError;
     return NextResponse.json(
       {
         error: jobError
           ? jobError.message
+          : planningError
+          ? planningError.message
           : schemaError
           ? schemaError.message
           : isValidationError
@@ -1458,6 +1463,8 @@ export async function POST(request: NextRequest) {
             : "Could not complete user batch operation.",
         ...(jobError
           ? { code: jobError.code }
+          : planningError
+          ? { code: planningError.code }
           : schemaError
           ? {
               code: schemaError.code,
@@ -1468,6 +1475,7 @@ export async function POST(request: NextRequest) {
       {
         status:
           jobError?.statusCode ??
+          planningError?.statusCode ??
           schemaError?.statusCode ??
           (isValidationError ? 400 : 500),
       },

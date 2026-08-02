@@ -1,5 +1,6 @@
-import { createHash } from "crypto";
+import { createHash, createHmac } from "crypto";
 import type { Client } from "@libsql/client";
+import { resolveAccountDeletionStorageReference } from "./account-deletion-storage.ts";
 import { getTursoClient } from "./turso.ts";
 
 type PlanningClient = Pick<Client, "execute">;
@@ -59,7 +60,20 @@ export type AccountDeletionGraphPlan = {
   aliasEdges: AccountDeletionAliasEdge[];
   deviceKeys: string[];
   storageReferences: AccountDeletionStorageReference[];
+  mutableFactDigests: AccountDeletionMutableFactDigests;
   inventory: AccountDeletionInventory;
+};
+
+export type AccountDeletionMutableFactDigests = {
+  authAndProfile: string;
+  identityGraph: string;
+  purchases: string;
+  purchaseLinksAndAudit: string;
+  ledger: string;
+  reservations: string;
+  balancesAndUsage: string;
+  cookbookAndActivity: string;
+  storageReferences: string;
 };
 
 export type AccountDeletionPlan = {
@@ -70,6 +84,11 @@ export type AccountDeletionPlan = {
 };
 
 type AuthLink = { authUserId: string; canonicalAnonUserId: string };
+
+export class AccountDeletionPlanningError extends Error {
+  code = "account_deletion_job_unavailable";
+  statusCode = 503;
+}
 
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -94,6 +113,60 @@ function placeholders(values: readonly unknown[]) {
 
 function sortedUnique(values: Iterable<string>) {
   return [...new Set(values)].filter(Boolean).sort();
+}
+
+function getFactDigestSecret(explicitSecret?: string) {
+  const secret =
+    explicitSecret?.trim() ||
+    process.env.ACCOUNT_DELETION_JOB_SECRET?.trim() ||
+    process.env.ACCOUNT_DELETION_PSEUDONYM_SECRET?.trim() ||
+    process.env.AUTH_SESSION_SECRET?.trim() ||
+    "";
+  if (secret.length < 32) {
+    throw new AccountDeletionPlanningError(
+      "Account deletion fact verification is unavailable.",
+    );
+  }
+  return secret;
+}
+
+function canonicalizeFact(value: unknown): unknown {
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeFact);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, canonicalizeFact(child)]),
+    );
+  }
+  return value;
+}
+
+function stableFactRows(rows: Array<Record<string, unknown>>) {
+  return rows
+    .map((row) => JSON.stringify(canonicalizeFact(row)))
+    .sort();
+}
+
+function digestFacts(kind: string, facts: unknown, secret: string) {
+  return `${kind}:v1:${createHmac("sha256", secret)
+    .update(`flavor-fusion-chef:account-deletion-facts:${kind}:v1\u0000`)
+    .update(JSON.stringify(canonicalizeFact(facts)))
+    .digest("hex")}`;
+}
+
+async function readFactRows(
+  client: PlanningClient,
+  sql: string,
+  args: string[],
+) {
+  const result = await client.execute({ sql, args });
+  return result.rows.map((row) => ({ ...row } as Record<string, unknown>));
 }
 
 function graphIdFor(authUserIds: string[], identityNodes: string[]) {
@@ -309,6 +382,233 @@ async function readStorageReferences(
   );
 }
 
+async function readMutableFactDigests(options: {
+  client: PlanningClient;
+  authUserIds: string[];
+  identityNodes: string[];
+  storageReferences: AccountDeletionStorageReference[];
+  secret: string;
+  publicBaseUrl: string;
+}): Promise<AccountDeletionMutableFactDigests> {
+  const authCte = valueCte("graph_auth_users", options.authUserIds);
+  const nodeCte = valueCte("graph_nodes", options.identityNodes);
+  const authArgs = options.authUserIds;
+  const nodeArgs = options.identityNodes;
+  const [
+    authRows,
+    authLinkRows,
+    aliasRows,
+    deviceRows,
+    purchaseRows,
+    purchaseLinkRows,
+    reconciliationRows,
+    ledgerRows,
+    reservationRows,
+    balanceRows,
+    usageRows,
+    cookbookRows,
+    activityRows,
+    priorDeletionRows,
+  ] = await Promise.all([
+    readFactRows(
+      options.client,
+      `WITH ${authCte}
+       SELECT * FROM auth_users
+       WHERE id IN (SELECT value FROM graph_auth_users)`,
+      authArgs,
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${authCte}, ${nodeCte}
+       SELECT * FROM auth_identity_links
+       WHERE auth_user_id IN (SELECT value FROM graph_auth_users)
+          OR canonical_anon_user_id IN (SELECT value FROM graph_nodes)`,
+      [...authArgs, ...nodeArgs],
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${nodeCte}
+       SELECT * FROM mobile_identity_aliases
+       WHERE anon_user_id IN (SELECT value FROM graph_nodes)
+          OR canonical_anon_user_id IN (SELECT value FROM graph_nodes)`,
+      nodeArgs,
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${nodeCte}
+       SELECT * FROM mobile_identity_links
+       WHERE canonical_anon_user_id IN (SELECT value FROM graph_nodes)`,
+      nodeArgs,
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${nodeCte}
+       SELECT * FROM credit_purchase_transactions
+       WHERE anon_user_id IN (SELECT value FROM graph_nodes)`,
+      nodeArgs,
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${nodeCte}
+       SELECT links.*
+       FROM credit_purchase_ledger_links links
+       WHERE links.purchase_transaction_id IN (
+         SELECT row_id FROM credit_purchase_transactions
+         WHERE anon_user_id IN (SELECT value FROM graph_nodes)
+       ) OR links.ledger_entry_id IN (
+         SELECT entry_id FROM credit_ledger_entries
+         WHERE anon_user_id IN (SELECT value FROM graph_nodes)
+       )`,
+      nodeArgs,
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${nodeCte}
+       SELECT actions.*
+       FROM purchase_reconciliation_actions actions
+       WHERE actions.purchase_transaction_id IN (
+         SELECT row_id FROM credit_purchase_transactions
+         WHERE anon_user_id IN (SELECT value FROM graph_nodes)
+       ) OR actions.ledger_entry_id IN (
+         SELECT entry_id FROM credit_ledger_entries
+         WHERE anon_user_id IN (SELECT value FROM graph_nodes)
+       )`,
+      nodeArgs,
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${nodeCte}
+       SELECT * FROM credit_ledger_entries
+       WHERE anon_user_id IN (SELECT value FROM graph_nodes)`,
+      nodeArgs,
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${nodeCte}
+       SELECT * FROM credit_reservations
+       WHERE anon_user_id IN (SELECT value FROM graph_nodes)`,
+      nodeArgs,
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${nodeCte}
+       SELECT * FROM credit_balances
+       WHERE anon_user_id IN (SELECT value FROM graph_nodes)`,
+      nodeArgs,
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${nodeCte}
+       SELECT * FROM credit_daily_usage
+       WHERE anon_user_id IN (SELECT value FROM graph_nodes)`,
+      nodeArgs,
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${nodeCte}
+       SELECT * FROM cookbook_recipes
+       WHERE anon_user_id IN (SELECT value FROM graph_nodes)`,
+      nodeArgs,
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${authCte}
+       SELECT * FROM product_activity_events
+       WHERE auth_user_id IN (SELECT value FROM graph_auth_users)`,
+      authArgs,
+    ),
+    readFactRows(
+      options.client,
+      `WITH ${authCte}, ${nodeCte}
+       SELECT * FROM account_deletion_events
+       WHERE auth_user_id IN (SELECT value FROM graph_auth_users)
+          OR canonical_anon_user_id IN (SELECT value FROM graph_nodes)`,
+      [...authArgs, ...nodeArgs],
+    ),
+  ]);
+
+  return {
+    authAndProfile: digestFacts(
+      "auth-profile",
+      stableFactRows(authRows),
+      options.secret,
+    ),
+    identityGraph: digestFacts(
+      "identity-graph",
+      {
+        authLinks: stableFactRows(authLinkRows),
+        aliases: stableFactRows(aliasRows),
+        devices: stableFactRows(deviceRows),
+        nodes: [...options.identityNodes].sort(),
+        owners: [...options.authUserIds].sort(),
+      },
+      options.secret,
+    ),
+    purchases: digestFacts(
+      "purchases",
+      stableFactRows(purchaseRows),
+      options.secret,
+    ),
+    purchaseLinksAndAudit: digestFacts(
+      "purchase-links-audit",
+      {
+        links: stableFactRows(purchaseLinkRows),
+        reconciliation: stableFactRows(reconciliationRows),
+        priorDeletionEvents: stableFactRows(priorDeletionRows),
+      },
+      options.secret,
+    ),
+    ledger: digestFacts(
+      "ledger",
+      stableFactRows(ledgerRows),
+      options.secret,
+    ),
+    reservations: digestFacts(
+      "reservations",
+      stableFactRows(reservationRows),
+      options.secret,
+    ),
+    balancesAndUsage: digestFacts(
+      "balances-usage",
+      {
+        balances: stableFactRows(balanceRows),
+        usage: stableFactRows(usageRows),
+      },
+      options.secret,
+    ),
+    cookbookAndActivity: digestFacts(
+      "cookbook-activity",
+      {
+        cookbook: stableFactRows(cookbookRows),
+        activity: stableFactRows(activityRows),
+      },
+      options.secret,
+    ),
+    storageReferences: digestFacts(
+      "storage-references",
+      options.storageReferences
+        .map((reference) =>
+          resolveAccountDeletionStorageReference({
+            reference,
+            publicBaseUrl: options.publicBaseUrl,
+          }),
+        )
+        .filter((reference) => reference !== null)
+        .map((reference) => ({
+          source: reference.source,
+          category: reference.category,
+          key: reference.key,
+        }))
+        .sort((left, right) =>
+          `${left.source}:${left.category}:${left.key}`.localeCompare(
+            `${right.source}:${right.category}:${right.key}`,
+          ),
+        ),
+      options.secret,
+    ),
+  };
+}
+
 async function hasConflictingFinancialOwnership(
   client: PlanningClient,
   identityNodes: string[],
@@ -509,8 +809,13 @@ async function readInventory(
 export async function planAccountDeletion(options: {
   authUserIds: string[];
   client?: PlanningClient;
+  secret?: string;
+  publicBaseUrl?: string;
 }): Promise<AccountDeletionPlan> {
   const client = options.client ?? getTursoClient();
+  const factDigestSecret = getFactDigestSecret(options.secret);
+  const publicBaseUrl =
+    options.publicBaseUrl?.trim() || process.env.R2_PUBLIC_BASE_URL?.trim() || "";
   const selectedAuthUserIds = sortedUnique(
     options.authUserIds.map((value) => value.trim()),
   );
@@ -638,6 +943,19 @@ export async function planAccountDeletion(options: {
 
     const graphAuthUserIds = sortedUnique(ownerAuthUserIds);
     const graphId = graphIdFor(graphAuthUserIds, identityNodes);
+    const deviceKeys = identityNodes.length
+      ? await readDeviceKeys(client, identityNodes)
+      : [];
+    const storageReferences = await readStorageReferences(
+      client,
+      graphAuthUserIds,
+      identityNodes,
+    );
+    if (storageReferences.length > 0 && !publicBaseUrl) {
+      throw new AccountDeletionPlanningError(
+        "Account deletion storage verification is unavailable.",
+      );
+    }
     const graph: AccountDeletionGraphPlan = {
       graphId,
       status: blockers.size === 0 ? "ready" : "manual_review",
@@ -648,14 +966,16 @@ export async function planAccountDeletion(options: {
       identityNodes,
       canonicalIdentityIds,
       aliasEdges,
-      deviceKeys: identityNodes.length
-        ? await readDeviceKeys(client, identityNodes)
-        : [],
-      storageReferences: await readStorageReferences(
+      deviceKeys,
+      storageReferences,
+      mutableFactDigests: await readMutableFactDigests({
         client,
-        graphAuthUserIds,
+        authUserIds: graphAuthUserIds,
         identityNodes,
-      ),
+        storageReferences,
+        secret: factDigestSecret,
+        publicBaseUrl,
+      }),
       inventory: await readInventory(
         client,
         graphAuthUserIds,

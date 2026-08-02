@@ -133,13 +133,18 @@ function stableGraphScope(graph: AccountDeletionGraphPlan) {
         `${right.category}:${right.value}`,
       ),
     ),
+    mutableFactDigests: Object.fromEntries(
+      Object.entries(graph.mutableFactDigests).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    ),
     inventory: graph.inventory,
   };
 }
 
 function stablePlanScope(plan: AccountDeletionPlan, reason: string) {
   return {
-    version: 1,
+    version: 2,
     reason: reason.trim(),
     selectedAuthUserIds: [...plan.selectedAuthUserIds].sort(),
     missingAuthUserIds: [...plan.missingAuthUserIds].sort(),
@@ -192,13 +197,18 @@ function minimizedGraphSnapshot(graph: AccountDeletionGraphPlan, secret: string)
           `${right.category}:${right.ref}`,
         ),
       ),
+    mutableFactDigests: Object.fromEntries(
+      Object.entries(graph.mutableFactDigests).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    ),
     inventory: graph.inventory,
   };
 }
 
 function minimizedPlanSnapshot(plan: AccountDeletionPlan, secret: string) {
   return {
-    version: 1,
+    version: 2,
     selectedAuthRefs: plan.selectedAuthUserIds
       .map((value) => hmacReference("auth", value, secret))
       .sort(),
@@ -446,7 +456,7 @@ export async function createAccountDeletionPreview(options: {
               plan_version, plan_json, preview_fingerprint,
               preview_expires_at, status, idempotency_key,
               created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, 2, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         jobId,
         options.requestId,

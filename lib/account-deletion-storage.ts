@@ -58,6 +58,44 @@ function containsUnsafeOperationalDetail(key: string) {
   );
 }
 
+export function resolveAccountDeletionStorageReference(options: {
+  reference: { category: "cookbook_image" | "profile_avatar"; value: string };
+  publicBaseUrl: string;
+}) {
+  const publicBaseUrl = options.publicBaseUrl.replace(/\/$/, "");
+  if (!options.reference.value.startsWith(`${publicBaseUrl}/`)) {
+    return null;
+  }
+  const key = getR2ObjectKeyFromPublicUrl(
+    options.reference.value,
+    options.publicBaseUrl,
+  );
+  if (!key) {
+    throw new AccountDeletionStorageError(
+      "storage_reference_invalid",
+      "An account deletion storage reference is invalid.",
+    );
+  }
+  if (containsUnsafeOperationalDetail(key)) {
+    throw new AccountDeletionStorageError(
+      "storage_reference_sensitive",
+      "An account deletion storage reference requires manual review.",
+    );
+  }
+  const category = classifyStorageReference(options.reference.category, key);
+  if (!category) {
+    throw new AccountDeletionStorageError(
+      "storage_reference_unsupported",
+      "An account deletion storage reference cannot be attributed safely.",
+    );
+  }
+  return {
+    key,
+    category,
+    source: options.reference.category,
+  };
+}
+
 export function collectAccountDeletionStorageObjects(options: {
   graph: AccountDeletionGraphPlan;
   publicBaseUrl?: string;
@@ -73,40 +111,24 @@ export function collectAccountDeletionStorageObjects(options: {
       "Account deletion storage configuration is unavailable.",
     );
   }
-  const baseUrl = publicBaseUrl.replace(/\/$/, "");
   const objects = new Map<string, AccountDeletionStorageObject>();
   for (const reference of options.graph.storageReferences) {
-    if (!reference.value.startsWith(`${baseUrl}/`)) {
-      continue;
-    }
-    const key = getR2ObjectKeyFromPublicUrl(reference.value, publicBaseUrl);
-    if (!key) {
-      throw new AccountDeletionStorageError(
-        "storage_reference_invalid",
-        "An account deletion storage reference is invalid.",
-      );
-    }
-    if (containsUnsafeOperationalDetail(key)) {
-      throw new AccountDeletionStorageError(
-        "storage_reference_sensitive",
-        "An account deletion storage reference requires manual review.",
-      );
-    }
-    const category = classifyStorageReference(reference.category, key);
-    if (!category) {
-      throw new AccountDeletionStorageError(
-        "storage_reference_unsupported",
-        "An account deletion storage reference cannot be attributed safely.",
-      );
-    }
-    const existing = objects.get(key);
-    if (existing && existing.category !== category) {
+    const resolved = resolveAccountDeletionStorageReference({
+      reference,
+      publicBaseUrl,
+    });
+    if (!resolved) continue;
+    const existing = objects.get(resolved.key);
+    if (existing && existing.category !== resolved.category) {
       throw new AccountDeletionStorageError(
         "storage_reference_ambiguous",
         "An account deletion storage reference has ambiguous ownership.",
       );
     }
-    objects.set(key, { key, category });
+    objects.set(resolved.key, {
+      key: resolved.key,
+      category: resolved.category,
+    });
   }
   return [...objects.values()].sort((left, right) =>
     left.key.localeCompare(right.key),
