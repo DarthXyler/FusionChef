@@ -355,7 +355,12 @@ async function hasConflictingFinancialOwnership(
 function hasAliasCycle(edges: AccountDeletionAliasEdge[]) {
   const nextByNode = new Map(
     edges
-      .filter((edge) => edge.anonUserId && edge.canonicalAnonUserId)
+      .filter(
+        (edge) =>
+          edge.anonUserId &&
+          edge.canonicalAnonUserId &&
+          edge.anonUserId !== edge.canonicalAnonUserId,
+      )
       .map((edge) => [edge.anonUserId, edge.canonicalAnonUserId]),
   );
   for (const start of nextByNode.keys()) {
