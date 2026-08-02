@@ -57,6 +57,9 @@ type PersistedTarget = {
   targetRef: string;
   graphFingerprint: string;
   status: AccountDeletionJobStatus;
+  attemptCount: number;
+  lastErrorCode: string | null;
+  lastErrorSummary: string | null;
 };
 
 function asString(value: unknown) {
@@ -258,7 +261,8 @@ async function readJobById(
 
 async function readTargets(client: JobClient, jobId: string) {
   const result = await client.execute({
-    sql: `SELECT target_id, target_ref, graph_fingerprint, status
+    sql: `SELECT target_id, target_ref, graph_fingerprint, status,
+                 attempt_count, last_error_code, last_error_summary
           FROM account_deletion_job_targets
           WHERE job_id = ?
           ORDER BY target_id`,
@@ -270,8 +274,81 @@ async function readTargets(client: JobClient, jobId: string) {
       targetRef: asString(row.target_ref),
       graphFingerprint: asString(row.graph_fingerprint),
       status: asString(row.status) as AccountDeletionJobStatus,
+      attemptCount: Number(row.attempt_count ?? 0),
+      lastErrorCode: asString(row.last_error_code) || null,
+      lastErrorSummary: asString(row.last_error_summary) || null,
     }),
   );
+}
+
+export async function getAccountDeletionJobStatus(options: {
+  jobId: string;
+  actingAdminAuthUserId: string;
+  client?: JobClient;
+  secret?: string;
+}) {
+  const client = options.client ?? getTursoClient();
+  const secret = getJobSecret(options.secret);
+  let job: PersistedJob | null;
+  try {
+    job = await readJobById(client, options.jobId);
+  } catch {
+    throw jobUnavailable();
+  }
+  if (!job) {
+    throw new AccountDeletionJobError(
+      "account_deletion_job_not_found",
+      "The account deletion job was not found.",
+      404,
+    );
+  }
+  const actorRef = hmacReference(
+    "admin",
+    options.actingAdminAuthUserId,
+    secret,
+  );
+  if (job.actingAdminRef !== actorRef) {
+    throw new AccountDeletionJobError(
+      "account_deletion_job_forbidden",
+      "This account deletion job belongs to another administrator.",
+      403,
+    );
+  }
+  let targets: PersistedTarget[];
+  let storageRows;
+  try {
+    [targets, storageRows] = await Promise.all([
+      readTargets(client, job.jobId),
+      client.execute({
+        sql: `SELECT object_category, status, COUNT(*) AS count
+              FROM account_deletion_storage_outbox
+              WHERE job_id = ?
+              GROUP BY object_category, status
+              ORDER BY object_category, status`,
+        args: [job.jobId],
+      }),
+    ]);
+  } catch {
+    throw jobUnavailable();
+  }
+  return {
+    jobId: job.jobId,
+    fingerprint: job.previewFingerprint,
+    expiresAt: job.previewExpiresAt,
+    status: job.status,
+    targets: targets.map((target) => ({
+      targetRef: target.targetRef,
+      status: target.status,
+      attemptCount: target.attemptCount,
+      lastErrorCode: target.lastErrorCode,
+      lastErrorSummary: target.lastErrorSummary,
+    })),
+    storage: storageRows.rows.map((row) => ({
+      category: asString(row.object_category),
+      status: asString(row.status),
+      count: Number(row.count ?? 0),
+    })),
+  };
 }
 
 export async function createAccountDeletionPreview(options: {

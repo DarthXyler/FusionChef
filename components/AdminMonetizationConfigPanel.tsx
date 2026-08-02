@@ -176,11 +176,38 @@ type AccountDeletionCounts = {
   mobileDeviceLinks: number;
   mobileAliases: number;
   cookbookRecipes: number;
+  productActivityEvents: number;
   creditBalanceRows: number;
   creditReservations: number;
+  activeCreditReservations: number;
+  expiredCreditReservations: number;
   creditLedgerEntries: number;
+  financialLedgerEntriesRetained: number;
+  operationalLedgerEntriesDeleted: number;
   dailyUsageRows: number;
   purchaseTransactionsPreserved: number;
+  purchaseLedgerLinks: number;
+  reconciliationActions: number;
+  priorDeletionEvents: number;
+};
+
+type AccountDeletionGraphSummary = {
+  graphId: string;
+  status: "ready" | "manual_review";
+  blockers: string[];
+  identityNodes: string[];
+  canonicalIdentityIds: string[];
+  aliasEdges: Array<{
+    anonUserId: string;
+    canonicalAnonUserId: string;
+  }>;
+  deviceMappingCount: number;
+  storage: {
+    total: number;
+    recipeImages: number;
+    profileAvatars: number;
+    generatedImages: number;
+  };
 };
 
 type AccountDeleteTarget = {
@@ -197,6 +224,7 @@ type AccountDeleteTarget = {
   user: AdminUserRow | null;
   linkedAuthUsers: Array<{ authUserId: string; email: string }>;
   counts: AccountDeletionCounts;
+  graph: AccountDeletionGraphSummary | null;
 };
 
 type AccountDeleteResult = {
@@ -222,6 +250,18 @@ type AccountDeleteResult = {
     expiresAt: string;
     status: string;
     replayed: boolean;
+    targets?: Array<{
+      targetRef: string;
+      status: string;
+      attemptCount: number;
+      lastErrorCode: string | null;
+      lastErrorSummary: string | null;
+    }>;
+    storage?: Array<{
+      category: string;
+      status: string;
+      count: number;
+    }>;
   } | null;
 };
 
@@ -580,6 +620,199 @@ function maskAnonUserId(value: string) {
     return value;
   }
   return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+function accountDeletionStatusLabel(value: string) {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function accountDeletionStatusClass(value: string) {
+  if (value === "completed" || value === "ready" || value === "succeeded") {
+    return "bg-emerald-100 text-emerald-800";
+  }
+  if (
+    value === "storage_pending" ||
+    value === "database_completed" ||
+    value === "pending" ||
+    value === "retryable" ||
+    value === "failed_retryable"
+  ) {
+    return "bg-amber-100 text-amber-800";
+  }
+  return "bg-red-100 text-red-800";
+}
+
+function AccountDeletionPreviewPanel({ result }: { result: AccountDeleteResult }) {
+  const graphs = [
+    ...new Map(
+      result.targets.flatMap((target) =>
+        target.graph ? [[target.graph.graphId, target.graph] as const] : [],
+      ),
+    ).values(),
+  ];
+  const counts = result.summary.counts;
+
+  return (
+    <div className="mt-4 space-y-3 rounded-xl border border-red-100 bg-white p-3 text-sm text-zinc-700">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold text-zinc-950">
+          {result.mode === "dry_run" ? "Deletion preview" : "Deletion job"}
+        </span>
+        {result.job ? (
+          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${accountDeletionStatusClass(result.job.status)}`}>
+            {accountDeletionStatusLabel(result.job.status)}
+          </span>
+        ) : null}
+        {result.job?.replayed ? (
+          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-700">Resumed</span>
+        ) : null}
+      </div>
+      <p className="text-xs text-zinc-600">
+        Ready: <span className="font-semibold text-zinc-950">{result.summary.ready}</span>
+        {" · "}Missing: {result.summary.missing}
+        {" · "}Ambiguous: {result.summary.ambiguous}
+        {" · "}Manual review: {result.summary.manualReview}
+        {" · "}Deleted: {result.summary.deleted}
+      </p>
+      {result.job ? (
+        <p className="text-xs text-zinc-600">
+          Preview expires: <span className="font-medium text-zinc-800">{toIsoLabel(result.job.expiresAt)}</span>
+          {" · "}Plan: <span className="font-mono">{maskAnonUserId(result.job.fingerprint)}</span>
+        </p>
+      ) : null}
+
+      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-700">Authenticated users</h4>
+        <div className="mt-2 space-y-2">
+          {result.targets.slice(0, 50).map((target) => (
+            <div key={`${target.input}-${target.status}`} className="border-t border-zinc-200 pt-2 first:border-0 first:pt-0">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-semibold text-zinc-900">
+                  {target.user?.name || target.user?.email || "Unresolved target"}
+                </span>
+                {target.user?.email && target.user.name ? <span>{target.user.email}</span> : null}
+                <span className={`rounded-full px-2 py-0.5 font-semibold ${accountDeletionStatusClass(target.status)}`}>
+                  {accountDeletionStatusLabel(target.status)}
+                </span>
+                {target.user ? <span>Account Setup: {getAdminUserAccountSetupLabel(target.user.accountSetup)}</span> : null}
+              </div>
+              <p className="mt-1 text-xs text-zinc-600">{target.message}</p>
+              {target.linkedAuthUsers.length > 1 ? (
+                <p className="mt-1 text-xs text-red-700">
+                  Associated authenticated accounts: {target.linkedAuthUsers.map((linked) => linked.email).join(", ")}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {graphs.map((graph, graphIndex) => (
+        <div key={graph.graphId} className="rounded-xl border border-zinc-200 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-700">Identity graph {graphIndex + 1}</h4>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${accountDeletionStatusClass(graph.status)}`}>
+              {accountDeletionStatusLabel(graph.status)}
+            </span>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+            <p><span className="font-semibold text-zinc-900">{graph.canonicalIdentityIds.length}</span><br />Canonical identities</p>
+            <p><span className="font-semibold text-zinc-900">{graph.identityNodes.length}</span><br />Identity nodes</p>
+            <p><span className="font-semibold text-zinc-900">{graph.aliasEdges.length}</span><br />Alias mappings</p>
+            <p><span className="font-semibold text-zinc-900">{graph.deviceMappingCount}</span><br />Device mappings</p>
+          </div>
+          {graph.canonicalIdentityIds.length > 0 ? (
+            <p className="mt-2 text-xs text-zinc-600">Canonical references: {graph.canonicalIdentityIds.map(maskAnonUserId).join(", ")}</p>
+          ) : null}
+          {graph.aliasEdges.length > 0 ? (
+            <div className="mt-2 text-xs text-zinc-600">
+              <p className="font-semibold text-zinc-700">Alias graph</p>
+              {graph.aliasEdges.slice(0, 20).map((edge) => (
+                <p key={`${edge.anonUserId}-${edge.canonicalAnonUserId}`} className="font-mono">
+                  {maskAnonUserId(edge.anonUserId)} → {maskAnonUserId(edge.canonicalAnonUserId)}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {graph.blockers.length > 0 ? (
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-800">
+              <p className="font-semibold">Manual-review blockers</p>
+              {graph.blockers.map((blocker) => <p key={blocker}>{accountDeletionStatusLabel(blocker)}</p>)}
+            </div>
+          ) : null}
+          <div className="mt-3 rounded-lg bg-sky-50 p-2 text-xs">
+            <p className="font-semibold text-sky-900">Storage objects</p>
+            <p>Total: {graph.storage.total}</p>
+            <p>Recipe images: {graph.storage.recipeImages}</p>
+            <p>Profile avatars: {graph.storage.profileAvatars}</p>
+            <p>Generated images: {graph.storage.generatedImages}</p>
+          </div>
+        </div>
+      ))}
+
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        <div className="rounded-lg bg-red-50 p-2 text-xs">
+          <p className="font-semibold text-red-900">Records to delete</p>
+          <p>Authenticated accounts: {counts.authUsers}</p>
+          <p>Identity links: {counts.identityLinks}</p>
+          <p>Device links: {counts.mobileDeviceLinks}</p>
+          <p>Cookbook: {counts.cookbookRecipes}</p>
+          <p>Product activity: {counts.productActivityEvents}</p>
+          <p>Balances: {counts.creditBalanceRows}</p>
+          <p>Reservations: {counts.creditReservations} ({counts.activeCreditReservations} active, {counts.expiredCreditReservations} expired)</p>
+          <p>Operational ledger: {counts.operationalLedgerEntriesDeleted}</p>
+          <p>Daily usage: {counts.dailyUsageRows}</p>
+        </div>
+        <div className="rounded-lg bg-amber-50 p-2 text-xs">
+          <p className="font-semibold text-amber-900">Financial evidence retained</p>
+          <p>Purchases: {counts.purchaseTransactionsPreserved}</p>
+          <p>Financial ledger: {counts.financialLedgerEntriesRetained}</p>
+          <p>Purchase links: {counts.purchaseLedgerLinks}</p>
+          <p>Reconciliation actions: {counts.reconciliationActions}</p>
+          <p>Prior deletion events: {counts.priorDeletionEvents}</p>
+          <p className="mt-1 text-amber-800">Owner references and personal metadata are anonymized.</p>
+        </div>
+      </div>
+
+      {result.job?.targets?.length ? (
+        <div className="rounded-xl border border-zinc-200 p-3 text-xs">
+          <h4 className="font-semibold uppercase tracking-wide text-zinc-700">Per-target job status</h4>
+          <div className="mt-2 space-y-1">
+            {result.job.targets.map((target, index) => (
+              <div key={target.targetRef} className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-1 first:border-0 first:pt-0">
+                <span className="font-semibold">Target {index + 1}</span>
+                <span className={`rounded-full px-2 py-0.5 font-semibold ${accountDeletionStatusClass(target.status)}`}>
+                  {accountDeletionStatusLabel(target.status)}
+                </span>
+                <span>Attempts: {target.attemptCount}</span>
+                {target.lastErrorSummary ? <span className="text-red-700">{target.lastErrorSummary}</span> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {result.job?.storage?.length ? (
+        <div className="rounded-xl border border-zinc-200 p-3 text-xs">
+          <h4 className="font-semibold uppercase tracking-wide text-zinc-700">Storage cleanup status</h4>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {result.job.storage.map((storage) => (
+              <span key={`${storage.category}-${storage.status}`} className={`rounded-full px-2 py-1 font-semibold ${accountDeletionStatusClass(storage.status)}`}>
+                {accountDeletionStatusLabel(storage.category)}: {accountDeletionStatusLabel(storage.status)} ({storage.count})
+              </span>
+            ))}
+          </div>
+          {result.job.storage.some((storage) => storage.status === "failed_retryable") ? (
+            <p className="mt-2 text-amber-800">Retryable storage failures remain pending; retrying this job will not repeat completed database deletion work.</p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function csvEscape(value: unknown) {
@@ -1225,6 +1458,7 @@ export function AdminMonetizationConfigPanel({
   async function runAccountDelete(mode: "dry_run" | "commit") {
     if (mode === "dry_run") {
       setIsRunningDeleteDryRun(true);
+      setDeleteDryRun(null);
     } else {
       setIsCommittingDelete(true);
     }
@@ -1253,10 +1487,21 @@ export function AdminMonetizationConfigPanel({
       });
       const payload = (await response.json()) as unknown;
       if (!response.ok) {
-        throw new Error(
+        const errorCode =
+          isObjectRecord(payload) && typeof payload.code === "string"
+            ? payload.code
+            : "";
+        if (errorCode === "stale_preview" || errorCode === "expired_preview") {
+          setDeleteDryRun(null);
+        }
+        const baseMessage =
           isObjectRecord(payload) && typeof payload.error === "string"
             ? payload.error
-            : "Could not run account deletion.",
+            : "Could not run account deletion.";
+        throw new Error(
+          errorCode === "stale_preview" || errorCode === "expired_preview"
+            ? `${baseMessage} Run a new deletion preview before retrying.`
+            : baseMessage,
         );
       }
       if (!isAccountDeleteResult(payload)) {
@@ -1266,7 +1511,12 @@ export function AdminMonetizationConfigPanel({
       setPanelSuccess(
         "users",
         mode === "commit"
-          ? `Deleted ${payload.summary.deleted} account(s). Purchase transaction rows were preserved for audit.`
+          ? payload.job?.status === "completed"
+            ? `Deleted ${payload.summary.deleted} account(s). Financial evidence was anonymized and retained for audit.`
+            : payload.job?.status === "storage_pending" ||
+                payload.job?.status === "database_completed"
+              ? `Deleted ${payload.summary.deleted} account(s) from the database. Storage cleanup is pending and can be retried safely.`
+              : `Deleted ${payload.summary.deleted} account(s) from the database. Storage cleanup needs manual review.`
           : `Dry run ready: ${payload.summary.ready} account(s), blocked: ${payload.summary.blockedSharedIdentity}.`,
       );
       if (mode === "commit") {
@@ -2638,7 +2888,11 @@ export function AdminMonetizationConfigPanel({
               Users to delete
               <textarea
                 value={deleteIdentifiersText}
-                onChange={(event) => setDeleteIdentifiersText(event.target.value)}
+                onChange={(event) => {
+                  setDeleteIdentifiersText(event.target.value);
+                  setDeleteDryRun(null);
+                  setDeleteConfirmation("");
+                }}
                 rows={6}
                 className="w-full rounded-2xl border border-red-200 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-red-500"
                 placeholder="one email or user id per line"
@@ -2650,7 +2904,11 @@ export function AdminMonetizationConfigPanel({
                 <input
                   type="text"
                   value={deleteReason}
-                  onChange={(event) => setDeleteReason(event.target.value)}
+                  onChange={(event) => {
+                    setDeleteReason(event.target.value);
+                    setDeleteDryRun(null);
+                    setDeleteConfirmation("");
+                  }}
                   className="w-full rounded-2xl border border-red-200 bg-white px-4 py-3 text-sm font-medium text-zinc-900 outline-none transition focus:border-red-500"
                   placeholder="user requested deletion"
                 />
@@ -2684,49 +2942,24 @@ export function AdminMonetizationConfigPanel({
                 deleteConfirmation !== "DELETE" ||
                 !deleteDryRun ||
                 !deleteDryRun.job ||
-                deleteDryRun.summary.ready < 1 ||
+                (deleteDryRun.summary.ready < 1 &&
+                  deleteDryRun.job.status !== "storage_pending" &&
+                  deleteDryRun.job.status !== "database_completed") ||
                 deleteDryRun.summary.manualReview > 0 ||
                 deleteDryRun.summary.blockedSharedIdentity > 0
               }
               className="cursor-pointer rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isCommittingDelete ? "Deleting..." : "Commit Delete"}
+              {isCommittingDelete
+                ? "Deleting..."
+                : deleteDryRun?.job?.status === "storage_pending" ||
+                    deleteDryRun?.job?.status === "database_completed"
+                  ? "Retry Pending Storage"
+                  : "Commit Delete"}
             </button>
           </div>
           {deleteDryRun ? (
-            <div className="mt-4 rounded-xl border border-red-100 bg-white p-3 text-sm text-zinc-700">
-              <p>
-                Ready: <span className="font-semibold text-zinc-950">{deleteDryRun.summary.ready}</span>
-                {" | "}Missing: {deleteDryRun.summary.missing}
-                {" | "}Ambiguous: {deleteDryRun.summary.ambiguous}
-                {" | "}Blocked shared: {deleteDryRun.summary.blockedSharedIdentity}
-                {" | "}Deleted: {deleteDryRun.summary.deleted}
-              </p>
-              <p className="mt-2 text-xs text-zinc-600">
-                Deletes {deleteDryRun.summary.counts.cookbookRecipes} cookbook row(s),{" "}
-                {deleteDryRun.summary.counts.creditLedgerEntries} ledger row(s),{" "}
-                {deleteDryRun.summary.counts.dailyUsageRows} daily usage row(s), and preserves{" "}
-                {deleteDryRun.summary.counts.purchaseTransactionsPreserved} anonymized purchase transaction row(s).
-              </p>
-              <div className="mt-3 max-h-52 overflow-auto">
-                {deleteDryRun.targets.slice(0, 50).map((target) => (
-                  <div key={`${target.input}-${target.status}`} className="border-t border-zinc-100 py-2 text-xs">
-                    <p>
-                      <span className="font-mono">{target.input}</span> -{" "}
-                      <span className={target.status === "ready" ? "text-emerald-700" : "text-red-700"}>
-                        {target.status}
-                      </span>{" "}
-                      {target.message}
-                    </p>
-                    {target.linkedAuthUsers.length > 1 ? (
-                      <p className="mt-1 text-red-700">
-                        Associated accounts: {target.linkedAuthUsers.map((linked) => linked.email).join(", ")}
-                      </p>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <AccountDeletionPreviewPanel result={deleteDryRun} />
           ) : null}
         </div>
 

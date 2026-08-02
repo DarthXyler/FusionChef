@@ -18,9 +18,11 @@ import {
   AccountDeletionJobError,
   createAccountDeletionPreview,
   executeAccountDeletionJob,
+  getAccountDeletionJobStatus,
 } from "@/lib/account-deletion-jobs";
 import {
   buildAccountDeletionStorageOutboxStatements,
+  collectAccountDeletionStorageObjects,
   processAccountDeletionStorageOutbox,
 } from "@/lib/account-deletion-storage";
 import {
@@ -1040,6 +1042,14 @@ function buildDeleteResponse(params: {
     expiresAt: string;
     status: string;
     replayed: boolean;
+    targets?: Array<{
+      targetRef: string;
+      status: string;
+      attemptCount: number;
+      lastErrorCode: string | null;
+      lastErrorSummary: string | null;
+    }>;
+    storage?: Array<{ category: string; status: string; count: number }>;
   };
 }) {
   return {
@@ -1068,6 +1078,23 @@ function buildDeleteResponse(params: {
             canonicalIdentityIds: target.graph.canonicalIdentityIds,
             aliasEdges: target.graph.aliasEdges,
             deviceMappingCount: target.graph.deviceKeys.length,
+            storage: (() => {
+              const objects = collectAccountDeletionStorageObjects({
+                graph: target.graph,
+              });
+              return {
+                total: objects.length,
+                recipeImages: objects.filter(
+                  (object) => object.category === "recipe_image",
+                ).length,
+                profileAvatars: objects.filter(
+                  (object) => object.category === "profile_avatar",
+                ).length,
+                generatedImages: objects.filter(
+                  (object) => object.category === "generated_image",
+                ).length,
+              };
+            })(),
           }
         : null,
     })),
@@ -1230,11 +1257,18 @@ export async function POST(request: NextRequest) {
           idempotencyKey:
             getIdempotencyKeyFromHeaders(request.headers) ?? undefined,
         });
+        const previewStatus = await getAccountDeletionJobStatus({
+          jobId: preview.jobId,
+          actingAdminAuthUserId: deletionAdmin.context.actorAuthUserId,
+        });
         const response = NextResponse.json(
           buildDeleteResponse({
             mode: payload.mode,
             targets,
-            job: preview,
+            job: {
+              ...previewStatus,
+              replayed: preview.replayed,
+            },
           }),
         );
         withNoStore(response);
@@ -1279,14 +1313,16 @@ export async function POST(request: NextRequest) {
           });
         }
       }
+      const persistedJob = await getAccountDeletionJobStatus({
+        jobId: execution.jobId,
+        actingAdminAuthUserId: deletionAdmin.context.actorAuthUserId,
+      });
       const responseBody = buildDeleteResponse({
         mode: payload.mode,
         targets,
         deletedCount: plan.selectedAuthUserIds.length,
         job: {
-          jobId: execution.jobId,
-          fingerprint: payload.fingerprint,
-          expiresAt: execution.expiresAt,
+          ...persistedJob,
           status: finalJobStatus,
           replayed: execution.replayed,
         },
