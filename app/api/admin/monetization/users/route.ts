@@ -5,6 +5,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, randomUUID } from "crypto";
 import {
+  assertAccountDeletionDoesNotIncludeActor,
+  requireAccountDeletionAdmin,
+} from "@/lib/account-deletion-authorization";
+import {
   getAdminUserLinkStatus,
   parseAdminUserLinkStatus,
   type AdminUserRowLinkStatus,
@@ -1160,12 +1164,49 @@ export async function POST(request: NextRequest) {
     if (isRequestBodyTooLarge(request, MAX_BODY_BYTES)) {
       return NextResponse.json({ error: "Request is too large." }, { status: 413 });
     }
-    await ensureAdminUserSchemas();
     const rawBody = (await request.json()) as unknown;
     const operation = isObjectRecord(rawBody) && rawBody.operation === "account_delete" ? "account_delete" : "credit_grant";
+    const deletionAdmin =
+      operation === "account_delete"
+        ? await requireAccountDeletionAdmin(request)
+        : null;
+    if (deletionAdmin && !deletionAdmin.ok) {
+      return deletionAdmin.response;
+    }
+    await ensureAdminUserSchemas();
     if (operation === "account_delete") {
+      if (!deletionAdmin?.ok) {
+        return NextResponse.json(
+          {
+            error: "Account deletion authorization is unavailable.",
+            code: "account_deletion_authorization_unavailable",
+          },
+          { status: 503 },
+        );
+      }
       const payload = parseDeletePayload(rawBody);
       const targets = await resolveDeleteTargets(payload.identifiers);
+      try {
+        assertAccountDeletionDoesNotIncludeActor(
+          deletionAdmin.context.actorAuthUserId,
+          targets.flatMap((target) =>
+            target.user ? [target.user.authUserId] : [],
+          ),
+        );
+      } catch (error) {
+        if (error instanceof Error && "code" in error && "statusCode" in error) {
+          const response = NextResponse.json(
+            {
+              error: error.message,
+              code: String(error.code),
+            },
+            { status: Number(error.statusCode) },
+          );
+          withNoStore(response);
+          return response;
+        }
+        throw error;
+      }
 
       if (payload.mode === "dry_run") {
         const response = NextResponse.json(buildDeleteResponse({ mode: payload.mode, targets }));
@@ -1198,7 +1239,7 @@ export async function POST(request: NextRequest) {
         key: idempotencyKey,
         scope: "admin-monetization-users:account-delete",
         requestPayload: {
-          actor: admin.context.actor,
+          actor: deletionAdmin.context.actor,
           reason: payload.reason,
           identifiers: payload.identifiers.map(normalizeIdentifier),
         },
@@ -1226,7 +1267,7 @@ export async function POST(request: NextRequest) {
 
       const deleted = await deleteReadyAccounts({
         targets: ready,
-        actor: admin.context.actor,
+        actor: deletionAdmin.context.actor,
         reason: payload.reason,
         batchId: idempotencyKey,
       });
@@ -1235,10 +1276,12 @@ export async function POST(request: NextRequest) {
         await completeIdempotentRequest(idempotencyContext, 200, responseBody);
       }
       logMonetizationAudit({
-        requestId: admin.context.requestId,
+        requestId: deletionAdmin.context.requestId,
         event: "account_delete_succeeded",
-        actor: admin.context.actor,
-        ip: admin.context.ip,
+        actor: deletionAdmin.context.actor,
+        actorAuthUserId: deletionAdmin.context.actorAuthUserId,
+        actorEmail: deletionAdmin.context.actorEmail,
+        ip: deletionAdmin.context.ip,
         deleted: deleted.length,
       });
       const response = NextResponse.json(responseBody);

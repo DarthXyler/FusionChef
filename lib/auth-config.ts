@@ -5,6 +5,7 @@
 
 const DEFAULT_ADMIN_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 5;
 const DEFAULT_MOBILE_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const DEFAULT_ACCOUNT_DELETION_RECENT_AUTH_MAX_AGE_SECONDS = 15 * 60;
 
 function parseSessionMaxAgeSeconds(rawValue: string | undefined, fallback: number) {
   const parsed = Number.parseInt(rawValue ?? "", 10);
@@ -48,6 +49,17 @@ export function getMobileSessionMaxAgeSeconds() {
     process.env.AUTH_SESSION_MAX_AGE_SECONDS_MOBILE,
     DEFAULT_MOBILE_SESSION_MAX_AGE_SECONDS,
   );
+}
+
+export function getAccountDeletionRecentAuthMaxAgeSeconds() {
+  const parsed = Number.parseInt(
+    process.env.ACCOUNT_DELETION_RECENT_AUTH_MAX_AGE_SECONDS ?? "",
+    10,
+  );
+  if (!Number.isFinite(parsed) || parsed < 60 || parsed > 60 * 60) {
+    return DEFAULT_ACCOUNT_DELETION_RECENT_AUTH_MAX_AGE_SECONDS;
+  }
+  return parsed;
 }
 
 export function getGoogleOauthConfig() {
