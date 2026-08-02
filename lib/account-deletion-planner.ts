@@ -26,8 +26,15 @@ export type AccountDeletionInventory = {
   productActivityEvents: number;
   creditBalanceRows: number;
   creditReservations: number;
+  creditReservationAmount: number;
   activeCreditReservations: number;
+  activeCreditReservationAmount: number;
   expiredCreditReservations: number;
+  expiredCreditReservationAmount: number;
+  finalizedCreditReservations: number;
+  finalizedCreditReservationAmount: number;
+  malformedCreditReservations: number;
+  malformedCreditReservationAmount: number;
   creditLedgerEntries: number;
   financialLedgerEntriesRetained: number;
   operationalLedgerEntriesDeleted: number;
@@ -187,8 +194,15 @@ function emptyInventory(): AccountDeletionInventory {
     productActivityEvents: 0,
     creditBalanceRows: 0,
     creditReservations: 0,
+    creditReservationAmount: 0,
     activeCreditReservations: 0,
+    activeCreditReservationAmount: 0,
     expiredCreditReservations: 0,
+    expiredCreditReservationAmount: 0,
+    finalizedCreditReservations: 0,
+    finalizedCreditReservationAmount: 0,
+    malformedCreditReservations: 0,
+    malformedCreditReservationAmount: 0,
     creditLedgerEntries: 0,
     financialLedgerEntriesRetained: 0,
     operationalLedgerEntriesDeleted: 0,
@@ -688,6 +702,7 @@ async function readInventory(
   client: PlanningClient,
   authUserIds: string[],
   identityNodes: string[],
+  snapshotIso: string,
 ) {
   if (authUserIds.length === 0) {
     return emptyInventory();
@@ -695,7 +710,25 @@ async function readInventory(
   const result = await client.execute({
     sql: `WITH
             ${valueCte("graph_auth_users", authUserIds)},
-            ${valueCte("graph_nodes", identityNodes)}
+            ${valueCte("graph_nodes", identityNodes)},
+            reservation_inventory AS (
+              SELECT amount,
+                CASE
+                  WHEN status = 'reserved'
+                    AND julianday(expires_at) IS NOT NULL
+                    AND julianday(expires_at) > julianday(?)
+                    THEN 'active'
+                  WHEN status = 'reserved'
+                    AND julianday(expires_at) IS NOT NULL
+                    AND julianday(expires_at) <= julianday(?)
+                    THEN 'expired'
+                  WHEN status IN ('committed', 'released')
+                    THEN 'finalized'
+                  ELSE 'malformed'
+                END AS lifecycle
+              FROM credit_reservations
+              WHERE anon_user_id IN (SELECT value FROM graph_nodes)
+            )
           SELECT
             (SELECT COUNT(*) FROM auth_users WHERE id IN (SELECT value FROM graph_auth_users)) AS auth_users,
             (SELECT COUNT(*) FROM auth_identity_links
@@ -712,16 +745,16 @@ async function readInventory(
               WHERE auth_user_id IN (SELECT value FROM graph_auth_users)) AS product_activity_events,
             (SELECT COUNT(*) FROM credit_balances
               WHERE anon_user_id IN (SELECT value FROM graph_nodes)) AS credit_balance_rows,
-            (SELECT COUNT(*) FROM credit_reservations
-              WHERE anon_user_id IN (SELECT value FROM graph_nodes)) AS credit_reservations,
-            (SELECT COUNT(*) FROM credit_reservations
-              WHERE anon_user_id IN (SELECT value FROM graph_nodes)
-                AND status = 'reserved'
-                AND expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')) AS active_credit_reservations,
-            (SELECT COUNT(*) FROM credit_reservations
-              WHERE anon_user_id IN (SELECT value FROM graph_nodes)
-                AND (status <> 'reserved'
-                  OR expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now'))) AS expired_credit_reservations,
+            (SELECT COUNT(*) FROM reservation_inventory) AS credit_reservations,
+            (SELECT COALESCE(SUM(amount), 0) FROM reservation_inventory) AS credit_reservation_amount,
+            (SELECT COUNT(*) FROM reservation_inventory WHERE lifecycle = 'active') AS active_credit_reservations,
+            (SELECT COALESCE(SUM(amount), 0) FROM reservation_inventory WHERE lifecycle = 'active') AS active_credit_reservation_amount,
+            (SELECT COUNT(*) FROM reservation_inventory WHERE lifecycle = 'expired') AS expired_credit_reservations,
+            (SELECT COALESCE(SUM(amount), 0) FROM reservation_inventory WHERE lifecycle = 'expired') AS expired_credit_reservation_amount,
+            (SELECT COUNT(*) FROM reservation_inventory WHERE lifecycle = 'finalized') AS finalized_credit_reservations,
+            (SELECT COALESCE(SUM(amount), 0) FROM reservation_inventory WHERE lifecycle = 'finalized') AS finalized_credit_reservation_amount,
+            (SELECT COUNT(*) FROM reservation_inventory WHERE lifecycle = 'malformed') AS malformed_credit_reservations,
+            (SELECT COALESCE(SUM(amount), 0) FROM reservation_inventory WHERE lifecycle = 'malformed') AS malformed_credit_reservation_amount,
             (SELECT COUNT(*) FROM credit_ledger_entries
               WHERE anon_user_id IN (SELECT value FROM graph_nodes)) AS credit_ledger_entries,
             (SELECT COUNT(*) FROM credit_ledger_entries ledger
@@ -777,7 +810,7 @@ async function readInventory(
             (SELECT COUNT(*) FROM account_deletion_events
               WHERE auth_user_id IN (SELECT value FROM graph_auth_users)
                  OR canonical_anon_user_id IN (SELECT value FROM graph_nodes)) AS prior_deletion_events`,
-    args: [...authUserIds, ...identityNodes],
+    args: [...authUserIds, ...identityNodes, snapshotIso, snapshotIso],
   });
   const row = result.rows[0] ?? {};
   return {
@@ -789,8 +822,23 @@ async function readInventory(
     productActivityEvents: asCount(row.product_activity_events),
     creditBalanceRows: asCount(row.credit_balance_rows),
     creditReservations: asCount(row.credit_reservations),
+    creditReservationAmount: asCount(row.credit_reservation_amount),
     activeCreditReservations: asCount(row.active_credit_reservations),
+    activeCreditReservationAmount: asCount(
+      row.active_credit_reservation_amount,
+    ),
     expiredCreditReservations: asCount(row.expired_credit_reservations),
+    expiredCreditReservationAmount: asCount(
+      row.expired_credit_reservation_amount,
+    ),
+    finalizedCreditReservations: asCount(row.finalized_credit_reservations),
+    finalizedCreditReservationAmount: asCount(
+      row.finalized_credit_reservation_amount,
+    ),
+    malformedCreditReservations: asCount(row.malformed_credit_reservations),
+    malformedCreditReservationAmount: asCount(
+      row.malformed_credit_reservation_amount,
+    ),
     creditLedgerEntries: asCount(row.credit_ledger_entries),
     financialLedgerEntriesRetained: asCount(
       row.financial_ledger_entries_retained,
@@ -811,9 +859,11 @@ export async function planAccountDeletion(options: {
   client?: PlanningClient;
   secret?: string;
   publicBaseUrl?: string;
+  snapshot?: Date;
 }): Promise<AccountDeletionPlan> {
   const client = options.client ?? getTursoClient();
   const factDigestSecret = getFactDigestSecret(options.secret);
+  const snapshotIso = (options.snapshot ?? new Date()).toISOString();
   const publicBaseUrl =
     options.publicBaseUrl?.trim() || process.env.R2_PUBLIC_BASE_URL?.trim() || "";
   const selectedAuthUserIds = sortedUnique(
@@ -980,6 +1030,7 @@ export async function planAccountDeletion(options: {
         client,
         graphAuthUserIds,
         identityNodes,
+        snapshotIso,
       ),
     };
     graphs.push(graph);

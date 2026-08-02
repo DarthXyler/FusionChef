@@ -937,10 +937,30 @@ function sumDeletionCounts(targets: DeleteTarget[]) {
           total.productActivityEvents + target.counts.productActivityEvents,
         creditBalanceRows: total.creditBalanceRows + target.counts.creditBalanceRows,
         creditReservations: total.creditReservations + target.counts.creditReservations,
+        creditReservationAmount:
+          total.creditReservationAmount + target.counts.creditReservationAmount,
         activeCreditReservations:
           total.activeCreditReservations + target.counts.activeCreditReservations,
+        activeCreditReservationAmount:
+          total.activeCreditReservationAmount +
+          target.counts.activeCreditReservationAmount,
         expiredCreditReservations:
           total.expiredCreditReservations + target.counts.expiredCreditReservations,
+        expiredCreditReservationAmount:
+          total.expiredCreditReservationAmount +
+          target.counts.expiredCreditReservationAmount,
+        finalizedCreditReservations:
+          total.finalizedCreditReservations +
+          target.counts.finalizedCreditReservations,
+        finalizedCreditReservationAmount:
+          total.finalizedCreditReservationAmount +
+          target.counts.finalizedCreditReservationAmount,
+        malformedCreditReservations:
+          total.malformedCreditReservations +
+          target.counts.malformedCreditReservations,
+        malformedCreditReservationAmount:
+          total.malformedCreditReservationAmount +
+          target.counts.malformedCreditReservationAmount,
         creditLedgerEntries: total.creditLedgerEntries + target.counts.creditLedgerEntries,
         financialLedgerEntriesRetained:
           total.financialLedgerEntriesRetained +

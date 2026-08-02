@@ -179,8 +179,15 @@ type AccountDeletionCounts = {
   productActivityEvents: number;
   creditBalanceRows: number;
   creditReservations: number;
+  creditReservationAmount: number;
   activeCreditReservations: number;
+  activeCreditReservationAmount: number;
   expiredCreditReservations: number;
+  expiredCreditReservationAmount: number;
+  finalizedCreditReservations: number;
+  finalizedCreditReservationAmount: number;
+  malformedCreditReservations: number;
+  malformedCreditReservationAmount: number;
   creditLedgerEntries: number;
   financialLedgerEntriesRetained: number;
   operationalLedgerEntriesDeleted: number;
@@ -770,7 +777,12 @@ function AccountDeletionPreviewPanel({ result }: { result: AccountDeleteResult }
           <p>Cookbook: {counts.cookbookRecipes}</p>
           <p>Product activity: {counts.productActivityEvents}</p>
           <p>Balances: {counts.creditBalanceRows}</p>
-          <p>Reservations: {counts.creditReservations} ({counts.activeCreditReservations} active, {counts.expiredCreditReservations} expired)</p>
+          <p>Reservations: {counts.creditReservations} ({counts.creditReservationAmount} credits)</p>
+          <p className="pl-2">Active: {counts.activeCreditReservations} ({counts.activeCreditReservationAmount} credits)</p>
+          <p className="pl-2">Expired: {counts.expiredCreditReservations} ({counts.expiredCreditReservationAmount} credits)</p>
+          <p className="pl-2">Finalized: {counts.finalizedCreditReservations} ({counts.finalizedCreditReservationAmount} credits)</p>
+          <p className="pl-2">Malformed / review: {counts.malformedCreditReservations} ({counts.malformedCreditReservationAmount} credits)</p>
+          <p className="mt-1 text-zinc-600">Open reservations expire at the server-time boundary; committed and released reservations are finalized.</p>
           <p>Operational ledger: {counts.operationalLedgerEntriesDeleted}</p>
           <p>Daily usage: {counts.dailyUsageRows}</p>
         </div>
