@@ -8,11 +8,11 @@ import {
 const profileSource = readFileSync(
   new URL("../src/services/profile.ts", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 const profileScreenSource = readFileSync(
   new URL("../src/screens/ProfileScreen.tsx", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 
 function verifyResponseClassification() {
   for (const operation of ["get", "patch"]) {
