@@ -38,6 +38,7 @@ import {
   parseAdminUserLinkStatus,
   type AdminUserRowLinkStatus,
 } from "@/lib/admin-user-link-status";
+import { resolveAdminUserIdentifierTargets } from "@/lib/admin-user-target-resolution";
 import {
   ADMIN_USER_ACCOUNT_SETUP_ISSUE_SQL,
   ADMIN_USER_ACCOUNT_SETUP_SQL,
@@ -161,10 +162,6 @@ function asInteger(value: unknown, fallback = 0) {
     return Number.isFinite(parsed) ? parsed : fallback;
   }
   return fallback;
-}
-
-function isUuid(value: string) {
-  return UUID_PATTERN.test(value.trim());
 }
 
 function normalizeEmail(value: string) {
@@ -771,88 +768,15 @@ async function fetchResolvedUsers(column: "normalized_email" | "id" | "canonical
   return output;
 }
 
-async function resolveBatchTargets(identifiers: string[]) {
-  const seenInputs = new Set<string>();
-  const normalizedInputs = identifiers.map((input) => ({
-    input,
-    key: normalizeIdentifier(input),
-  }));
-  const emails = [...new Set(normalizedInputs.filter((item) => item.key.includes("@")).map((item) => item.key))];
-  const uuids = [...new Set(normalizedInputs.filter((item) => isUuid(item.key)).map((item) => item.key))];
-  const [emailMatches, authIdMatches, anonIdMatches] = await Promise.all([
-    fetchResolvedUsers("normalized_email", emails),
-    fetchResolvedUsers("id", uuids),
-    fetchResolvedUsers("canonical", uuids),
-  ]);
-
-  const targets: BatchGrantTarget[] = [];
-  const targetAnonIds = new Set<string>();
-  for (const item of normalizedInputs) {
-    if (seenInputs.has(item.key)) {
-      targets.push({
-        input: item.input,
-        status: "duplicate_input",
-        message: "Duplicate input row.",
-        user: null,
-      });
-      continue;
-    }
-    seenInputs.add(item.key);
-
-    const matches = item.key.includes("@")
-      ? emailMatches.get(item.key) ?? []
-      : [...(authIdMatches.get(item.key) ?? []), ...(anonIdMatches.get(item.key) ?? [])];
-    const uniqueMatches = Array.from(
-      new Map(matches.map((record) => [record.authUserId, record])).values(),
-    );
-
-    if (uniqueMatches.length === 0) {
-      targets.push({
-        input: item.input,
-        status: "missing",
-        message: "No logged-in user found.",
-        user: null,
-      });
-      continue;
-    }
-    if (uniqueMatches.length > 1) {
-      targets.push({
-        input: item.input,
-        status: "ambiguous",
-        message: "Identifier matched more than one logged-in user.",
-        user: null,
-      });
-      continue;
-    }
-
-    const user = uniqueMatches[0];
-    if (!user.canonicalAnonUserId) {
-      targets.push({
-        input: item.input,
-        status: "missing",
-        message: "User has not opened the app with this account yet.",
-        user,
-      });
-      continue;
-    }
-    if (targetAnonIds.has(user.canonicalAnonUserId)) {
-      targets.push({
-        input: item.input,
-        status: "duplicate_target",
-        message: "Another row already targets this credit account.",
-        user,
-      });
-      continue;
-    }
-    targetAnonIds.add(user.canonicalAnonUserId);
-    targets.push({
-      input: item.input,
-      status: "ready",
-      message: "Ready to grant.",
-      user,
-    });
-  }
-  return targets;
+async function resolveBatchTargets(
+  identifiers: string[],
+  options: { allowAuthOnly?: boolean } = {},
+): Promise<BatchGrantTarget[]> {
+  return resolveAdminUserIdentifierTargets({
+    identifiers,
+    allowAuthOnly: options.allowAuthOnly === true,
+    fetchUsers: fetchResolvedUsers,
+  });
 }
 
 async function getDeletionOwnerLabels(authUserIds: string[]) {
@@ -879,7 +803,9 @@ async function getDeletionOwnerLabels(authUserIds: string[]) {
 }
 
 async function resolveDeleteTargets(identifiers: string[]) {
-  const baseTargets = await resolveBatchTargets(identifiers);
+  const baseTargets = await resolveBatchTargets(identifiers, {
+    allowAuthOnly: true,
+  });
   const readyAuthIds = [...new Set(
     baseTargets
       .filter((target) => (target.status === "ready" || target.status === "duplicate_target") && target.user)
