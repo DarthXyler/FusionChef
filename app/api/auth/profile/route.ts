@@ -3,6 +3,7 @@ import { enforceRateLimit, isRequestBodyTooLarge } from "@/lib/api-security";
 import { buildInactiveAuthResponse } from "@/lib/auth-api";
 import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import { updateAuthUserProfile } from "@/lib/auth-users";
+import { StorageReferenceClaimError } from "@/lib/storage-reference-claims";
 
 const MAX_PROFILE_BODY_BYTES = 4_000;
 const MAX_NAME_CHARS = 120;
@@ -93,11 +94,22 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "No profile fields were provided." }, { status: 400 });
   }
 
-  const updated = await updateAuthUserProfile({
-    userId: session.userId,
-    ...(typeof name === "string" ? { name } : {}),
-    ...(typeof avatarUrl === "string" ? { avatarUrl } : {}),
-  });
+  let updated;
+  try {
+    updated = await updateAuthUserProfile({
+      userId: session.userId,
+      ...(typeof name === "string" ? { name } : {}),
+      ...(typeof avatarUrl === "string" ? { avatarUrl } : {}),
+    });
+  } catch (error) {
+    if (error instanceof StorageReferenceClaimError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.statusCode },
+      );
+    }
+    throw error;
+  }
   if (!updated) {
     return NextResponse.json({ error: "Profile not found." }, { status: 404 });
   }

@@ -170,28 +170,66 @@ function isMissingObjectError(error: unknown) {
   return /^(NoSuchKey|NotFound|404)$/i.test(code);
 }
 
-async function readActiveReferencedKeys(
-  client: StorageClient,
-  publicBaseUrl: string,
-) {
-  const result = await client.execute(
-    `SELECT image_url AS storage_url
-     FROM cookbook_recipes
-     WHERE image_url IS NOT NULL AND trim(image_url) <> ''
-     UNION ALL
-     SELECT avatar_url AS storage_url
-     FROM auth_users
-     WHERE avatar_url IS NOT NULL AND trim(avatar_url) <> ''`,
-  );
-  const keys = new Set<string>();
-  result.rows.forEach((row) => {
-    const url = asString(row.storage_url);
-    const key = getR2ObjectKeyFromPublicUrl(url, publicBaseUrl);
-    if (key) {
-      keys.add(key);
-    }
+const ACTIVE_STORAGE_REFERENCE_SQL = `EXISTS (
+  SELECT 1
+  FROM cookbook_recipes
+  WHERE trim(image_url) = ?
+     OR trim(image_url) LIKE ? ESCAPE '\\'
+     OR trim(image_url) LIKE ? ESCAPE '\\'
+  UNION ALL
+  SELECT 1
+  FROM auth_users
+  WHERE trim(avatar_url) = ?
+     OR trim(avatar_url) LIKE ? ESCAPE '\\'
+     OR trim(avatar_url) LIKE ? ESCAPE '\\'
+)`;
+
+function escapeLike(value: string) {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+function activeStorageReferenceArgs(publicUrl: string) {
+  const escaped = escapeLike(publicUrl);
+  return [
+    publicUrl,
+    `${escaped}?%`,
+    `${escaped}#%`,
+    publicUrl,
+    `${escaped}?%`,
+    `${escaped}#%`,
+  ];
+}
+
+async function completeStorageClaim(options: {
+  client: StorageClient;
+  outboxId: string;
+  nowIso: string;
+  referenceArgs: string[];
+}) {
+  const completed = await options.client.execute({
+    sql: `UPDATE account_deletion_storage_outbox
+          SET status = 'completed', completed_at = ?, updated_at = ?,
+              last_safe_error = NULL
+          WHERE outbox_id = ? AND status = 'processing'
+            AND NOT ${ACTIVE_STORAGE_REFERENCE_SQL}`,
+    args: [
+      options.nowIso,
+      options.nowIso,
+      options.outboxId,
+      ...options.referenceArgs,
+    ],
   });
-  return keys;
+  if ((completed.rowsAffected ?? 0) === 1) return true;
+  await options.client.execute({
+    sql: `UPDATE account_deletion_storage_outbox
+          SET status = 'manual_review',
+              last_safe_error = 'Object became referenced during storage deletion.',
+              updated_at = ?
+          WHERE outbox_id = ? AND status = 'processing'
+            AND ${ACTIVE_STORAGE_REFERENCE_SQL}`,
+    args: [options.nowIso, options.outboxId, ...options.referenceArgs],
+  });
+  return false;
 }
 
 async function updateJobFromStorageState(
@@ -315,7 +353,6 @@ export async function processAccountDeletionStorageOutbox(options: {
   const staleBefore = new Date(
     now.getTime() - (options.processingLeaseMs ?? 5 * 60 * 1000),
   ).toISOString();
-  const referencedKeys = await readActiveReferencedKeys(client, publicBaseUrl);
   const rows = await client.execute({
     sql: `SELECT outbox_id, object_key, status, attempted_at
           FROM account_deletion_storage_outbox
@@ -334,6 +371,8 @@ export async function processAccountDeletionStorageOutbox(options: {
   for (const row of rows.rows) {
     const outboxId = asString(row.outbox_id);
     const key = asString(row.object_key);
+    const publicUrl = `${publicBaseUrl.replace(/\/$/, "")}/${key}`;
+    const referenceArgs = activeStorageReferenceArgs(publicUrl);
     const claimed = await client.execute({
       sql: `UPDATE account_deletion_storage_outbox
             SET status = 'processing', attempt_count = attempt_count + 1,
@@ -342,45 +381,58 @@ export async function processAccountDeletionStorageOutbox(options: {
               AND (
                 status IN ('pending', 'failed_retryable')
                 OR (status = 'processing' AND attempted_at < ?)
-              )`,
-      args: [nowIso, nowIso, outboxId, staleBefore],
+              )
+              AND NOT ${ACTIVE_STORAGE_REFERENCE_SQL}`,
+      args: [nowIso, nowIso, outboxId, staleBefore, ...referenceArgs],
     });
     if ((claimed.rowsAffected ?? 0) !== 1) {
-      continue;
-    }
-    attempted += 1;
-    if (referencedKeys.has(key)) {
-      await client.execute({
+      const conflicted = await client.execute({
         sql: `UPDATE account_deletion_storage_outbox
               SET status = 'manual_review',
                   last_safe_error = 'Object remains referenced by active application data.',
                   updated_at = ?
-              WHERE outbox_id = ? AND status = 'processing'`,
-        args: [nowIso, outboxId],
+              WHERE outbox_id = ?
+                AND (
+                  status IN ('pending', 'failed_retryable')
+                  OR (status = 'processing' AND attempted_at < ?)
+                )
+                AND ${ACTIVE_STORAGE_REFERENCE_SQL}`,
+        args: [nowIso, outboxId, staleBefore, ...referenceArgs],
       });
-      protectedCount += 1;
+      if ((conflicted.rowsAffected ?? 0) === 1) {
+        protectedCount += 1;
+      }
       continue;
     }
+    attempted += 1;
     try {
       await deleteObject(key);
-      await client.execute({
-        sql: `UPDATE account_deletion_storage_outbox
-              SET status = 'completed', completed_at = ?, updated_at = ?,
-                  last_safe_error = NULL
-              WHERE outbox_id = ? AND status = 'processing'`,
-        args: [nowIso, nowIso, outboxId],
-      });
-      completed += 1;
+      if (
+        await completeStorageClaim({
+          client,
+          outboxId,
+          nowIso,
+          referenceArgs,
+        })
+      ) {
+        completed += 1;
+      } else {
+        protectedCount += 1;
+      }
     } catch (error) {
       if (isMissingObjectError(error)) {
-        await client.execute({
-          sql: `UPDATE account_deletion_storage_outbox
-                SET status = 'completed', completed_at = ?, updated_at = ?,
-                    last_safe_error = NULL
-                WHERE outbox_id = ? AND status = 'processing'`,
-          args: [nowIso, nowIso, outboxId],
-        });
-        completed += 1;
+        if (
+          await completeStorageClaim({
+            client,
+            outboxId,
+            nowIso,
+            referenceArgs,
+          })
+        ) {
+          completed += 1;
+        } else {
+          protectedCount += 1;
+        }
       } else {
         await client.execute({
           sql: `UPDATE account_deletion_storage_outbox

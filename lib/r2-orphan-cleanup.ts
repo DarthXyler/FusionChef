@@ -6,6 +6,7 @@ import { DeleteObjectCommand, ListObjectsV2Command, type ListObjectsV2CommandOut
 import { listAuthUserAvatarUrls } from "@/lib/auth-users";
 import { listCookbookImageUrls } from "@/lib/cookbook-db";
 import { getR2ObjectKeyFromPublicUrl, getR2StorageClient } from "@/lib/r2-storage";
+import { listStorageKeysOwnedByDeletionOutbox } from "@/lib/storage-reference-claims";
 
 const DEFAULT_R2_IMAGE_PREFIXES = ["fusion-images/", "recipe-images/", "profile-photos/"];
 
@@ -55,9 +56,10 @@ export async function runR2OrphanCleanup(
   const cutoff = Date.now() - options.maxAgeMinutes * 60_000;
 
   // Build lookup set of keys that are still referenced by cookbook entries or active profiles.
-  const [cookbookImageUrls, authUserAvatarUrls] = await Promise.all([
+  const [cookbookImageUrls, authUserAvatarUrls, deletionOwnedKeys] = await Promise.all([
     listCookbookImageUrls(),
     listAuthUserAvatarUrls(),
+    listStorageKeysOwnedByDeletionOutbox(),
   ]);
   const imageUrls = [...cookbookImageUrls, ...authUserAvatarUrls];
   const referencedKeys = new Set(
@@ -65,6 +67,7 @@ export async function runR2OrphanCleanup(
       .map((imageUrl) => getR2ObjectKeyFromPublicUrl(imageUrl))
       .filter((key): key is string => typeof key === "string" && key.length > 0),
   );
+  deletionOwnedKeys.forEach((key) => referencedKeys.add(key));
 
   let continuationToken: string | undefined;
   let scanned = 0;

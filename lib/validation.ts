@@ -2,7 +2,7 @@
  * Runtime validators and JSON schema for recipe input/output data.
  * These checks protect the app from malformed API payloads.
  */
-import type { FuseRequest, RecipeFusion } from "@/lib/types";
+import type { FuseRequest, RecipeFusion } from "./types.ts";
 
 // Required keys for the input payload sent to /api/fuse.
 const FUSE_REQUEST_KEYS = [

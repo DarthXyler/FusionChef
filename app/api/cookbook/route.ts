@@ -13,6 +13,7 @@ import { applyAnonymousIdentityCookie } from "@/lib/anon-user";
 import { buildInactiveAuthResponse } from "@/lib/auth-api";
 import { getActiveAuthSessionFromRequest } from "@/lib/auth-session";
 import { getCookbookStats, listCookbookRecipeSummaries, upsertCookbookRecord } from "@/lib/cookbook-db";
+import { StorageReferenceClaimError } from "@/lib/storage-reference-claims";
 import { resolveCookbookIdentityForProductRequest } from "@/lib/cookbook-identity";
 import {
   beginIdempotentRequest,
@@ -271,9 +272,15 @@ export async function POST(request: NextRequest) {
     withCookbookIdentityHeader(response, identity.anonUserId);
     applyAnonymousIdentityCookie(response, identity);
     return response;
-  } catch {
+  } catch (error) {
     if (idempotencyContext) {
       await clearIdempotentRequest(idempotencyContext);
+    }
+    if (error instanceof StorageReferenceClaimError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.statusCode },
+      );
     }
     return NextResponse.json({ error: "Could not save cookbook recipe." }, { status: 500 });
   }

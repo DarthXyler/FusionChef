@@ -3,10 +3,15 @@
  * Handles schema setup, read/write/delete operations, and short-lived in-memory cache.
  */
 import { randomUUID } from "crypto";
-import type { InStatement } from "@libsql/client";
-import type { CookbookRecipeRecord, CookbookRecipeSummary, CookbookStats } from "@/lib/types";
-import { isFuseRequest, isRecipeFusion } from "@/lib/validation";
-import { executeTurso } from "@/lib/turso";
+import type { Client, InStatement } from "@libsql/client";
+import type { CookbookRecipeRecord, CookbookRecipeSummary, CookbookStats } from "./types.ts";
+import { isFuseRequest, isRecipeFusion } from "./validation.ts";
+import { executeTurso } from "./turso.ts";
+import {
+  getPersistedStorageReferenceKey,
+  getStorageReferenceWriteGuard,
+  StorageReferenceClaimError,
+} from "./storage-reference-claims.ts";
 
 type CookbookRow = {
   recipe_json: string;
@@ -448,15 +453,32 @@ export async function getCookbookRecord(anonUserId: string, recipeId: string) {
 export async function upsertCookbookRecord(
   anonUserId: string,
   record: CookbookRecipeRecord,
+  options: {
+    client?: Pick<Client, "execute">;
+    publicBaseUrl?: string;
+    schemaReady?: boolean;
+  } = {},
 ) {
   // Insert or update one recipe by (anon_user_id, recipe_id).
-  await ensureSchema();
+  if (options.schemaReady !== true) {
+    await ensureSchema();
+  }
   const savedAt = record.savedAt || new Date().toISOString();
   const imageUrl = record.recipe.imageUrl ?? null;
   const isFavorite = record.isFavorite === true ? 1 : 0;
   const isToTry = record.isToTry === true ? 1 : 0;
+  const objectKey = getPersistedStorageReferenceKey(
+    imageUrl,
+    options.publicBaseUrl,
+  );
+  const guard = objectKey
+    ? getStorageReferenceWriteGuard(objectKey)
+    : null;
+  const execute = options.client
+    ? options.client.execute.bind(options.client)
+    : executeTurso;
 
-  await executeTurso({
+  const result = await execute({
     sql: `INSERT INTO cookbook_recipes (
             row_id,
             anon_user_id,
@@ -468,7 +490,10 @@ export async function upsertCookbookRecord(
             is_to_try,
             saved_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+          ) ${guard
+            ? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+               WHERE ${guard.sql}`
+            : "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"}
           ON CONFLICT(anon_user_id, recipe_id) DO UPDATE SET
             recipe_json = excluded.recipe_json,
             source_input_json = excluded.source_input_json,
@@ -482,7 +507,9 @@ export async function upsertCookbookRecord(
               ELSE excluded.is_to_try
             END,
             saved_at = excluded.saved_at,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+          ${guard ? `WHERE ${guard.sql}` : ""}
+          RETURNING row_id`,
     args: [
       randomUUID(),
       anonUserId,
@@ -493,8 +520,12 @@ export async function upsertCookbookRecord(
       isFavorite,
       isToTry,
       savedAt,
+      ...(guard ? [...guard.args, ...guard.args] : []),
     ],
   });
+  if (result.rows.length !== 1) {
+    throw new StorageReferenceClaimError();
+  }
 
   const savedRecord: CookbookRecipeRecord = {
     ...record,

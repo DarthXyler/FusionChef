@@ -5,6 +5,11 @@
 import { randomUUID } from "crypto";
 import type { Client } from "@libsql/client";
 import { executeTurso, getTursoClient } from "./turso.ts";
+import {
+  getPersistedStorageReferenceKey,
+  getStorageReferenceWriteGuard,
+  StorageReferenceClaimError,
+} from "./storage-reference-claims.ts";
 
 type OAuthProvider = "google" | "apple";
 
@@ -142,14 +147,22 @@ export async function updateAuthUserProfile(params: {
   userId: string;
   name?: string;
   avatarUrl?: string;
-}) {
-  await ensureAuthSchema();
+}, options: {
+  client?: Pick<Client, "execute">;
+  publicBaseUrl?: string;
+  schemaReady?: boolean;
+} = {}) {
+  if (options.schemaReady !== true) {
+    await ensureAuthSchema();
+  }
   const userId = params.userId.trim();
   if (!userId) {
     return null;
   }
 
-  const existing = await getAuthUserById(userId);
+  const existing = options.client
+    ? await getAuthUserByIdReadOnly(userId, { client: options.client })
+    : await getAuthUserById(userId);
   if (!existing) {
     return null;
   }
@@ -159,15 +172,37 @@ export async function updateAuthUserProfile(params: {
   const nextAvatarUrl =
     typeof params.avatarUrl === "string" ? normalizeAvatarUrl(params.avatarUrl) : existing.avatarUrl;
   const now = new Date().toISOString();
+  const objectKey = getPersistedStorageReferenceKey(
+    nextAvatarUrl,
+    options.publicBaseUrl,
+  );
+  const guard = objectKey
+    ? getStorageReferenceWriteGuard(objectKey)
+    : null;
+  const execute = options.client
+    ? options.client.execute.bind(options.client)
+    : executeTurso;
 
-  await executeTurso({
+  const result = await execute({
     sql: `UPDATE auth_users
           SET name = ?,
               avatar_url = ?,
               updated_at = ?
-          WHERE id = ?`,
-    args: [nextName, nextAvatarUrl, now, userId],
+          WHERE id = ?
+            ${guard ? `AND ${guard.sql}` : ""}
+          RETURNING id`,
+    args: [
+      nextName,
+      nextAvatarUrl,
+      now,
+      userId,
+      ...(guard ? guard.args : []),
+    ],
   });
+  if (result.rows.length !== 1) {
+    if (guard) throw new StorageReferenceClaimError();
+    return null;
+  }
 
   return {
     ...existing,
@@ -197,8 +232,14 @@ export async function upsertOAuthUser(params: {
   name: string;
   avatarUrl?: string;
   role: "user" | "admin";
-}) {
-  await ensureAuthSchema();
+}, options: {
+  client?: Pick<Client, "execute">;
+  publicBaseUrl?: string;
+  schemaReady?: boolean;
+} = {}) {
+  if (options.schemaReady !== true) {
+    await ensureAuthSchema();
+  }
   const now = new Date().toISOString();
   const normalizedEmail = normalizeEmail(params.email);
   const providerSubject = normalizeSubject(params.providerSubject);
@@ -206,8 +247,18 @@ export async function upsertOAuthUser(params: {
   const hasProvidedName = params.name.trim().length > 0;
   const avatarUrl = normalizeAvatarUrl(params.avatarUrl ?? "");
   const candidateUserId = randomUUID();
+  const objectKey = getPersistedStorageReferenceKey(
+    avatarUrl,
+    options.publicBaseUrl,
+  );
+  const guard = objectKey
+    ? getStorageReferenceWriteGuard(objectKey)
+    : null;
+  const execute = options.client
+    ? options.client.execute.bind(options.client)
+    : executeTurso;
 
-  const result = await executeTurso({
+  const result = await execute({
     sql: `INSERT INTO auth_users (
             id,
             email,
@@ -219,7 +270,9 @@ export async function upsertOAuthUser(params: {
             role,
             last_login_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) ${guard
+            ? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${guard.sql}`
+            : "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}
           ON CONFLICT(provider, provider_subject) DO UPDATE SET
             email = excluded.email,
             normalized_email = excluded.normalized_email,
@@ -234,6 +287,7 @@ export async function upsertOAuthUser(params: {
             role = excluded.role,
             last_login_at = excluded.last_login_at,
             updated_at = excluded.updated_at
+          ${guard ? `WHERE ${guard.sql}` : ""}
           RETURNING
             id,
             email,
@@ -253,12 +307,15 @@ export async function upsertOAuthUser(params: {
       params.role,
       now,
       now,
+      ...(guard ? guard.args : []),
       hasProvidedName ? 1 : 0,
+      ...(guard ? guard.args : []),
     ],
   });
 
   const persistedUser = rowToAuthUserRecord(result.rows[0] ?? {});
   if (!persistedUser) {
+    if (guard) throw new StorageReferenceClaimError();
     throw new Error("OAuth user upsert did not return a persisted auth user.");
   }
   return persistedUser;
