@@ -9,6 +9,10 @@ import {
   requireAccountDeletionAdmin,
 } from "@/lib/account-deletion-authorization";
 import {
+  AccountDeletionSchemaError,
+  assertAccountDeletionSchemaReady,
+} from "@/lib/account-deletion-schema";
+import {
   getAdminUserLinkStatus,
   parseAdminUserLinkStatus,
   type AdminUserRowLinkStatus,
@@ -1173,7 +1177,11 @@ export async function POST(request: NextRequest) {
     if (deletionAdmin && !deletionAdmin.ok) {
       return deletionAdmin.response;
     }
-    await ensureAdminUserSchemas();
+    if (operation === "account_delete") {
+      await assertAccountDeletionSchemaReady();
+    } else {
+      await ensureAdminUserSchemas();
+    }
     if (operation === "account_delete") {
       if (!deletionAdmin?.ok) {
         return NextResponse.json(
@@ -1410,14 +1418,24 @@ export async function POST(request: NextRequest) {
     if (idempotencyContext) {
       await clearIdempotentRequest(idempotencyContext);
     }
+    const schemaError =
+      error instanceof AccountDeletionSchemaError ? error : null;
     const isValidationError = error instanceof RequestValidationError;
     return NextResponse.json(
       {
-        error: isValidationError
-          ? error.message
-          : "Could not complete user batch operation.",
+        error: schemaError
+          ? schemaError.message
+          : isValidationError
+            ? error.message
+            : "Could not complete user batch operation.",
+        ...(schemaError
+          ? {
+              code: schemaError.code,
+              missingObjects: schemaError.missingObjects,
+            }
+          : {}),
       },
-      { status: isValidationError ? 400 : 500 },
+      { status: schemaError?.statusCode ?? (isValidationError ? 400 : 500) },
     );
   }
 }
