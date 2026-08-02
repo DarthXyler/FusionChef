@@ -3,7 +3,8 @@
  * New login creates profile automatically; returning login reuses existing profile.
  */
 import { randomUUID } from "crypto";
-import { executeTurso } from "./turso.ts";
+import type { Client } from "@libsql/client";
+import { executeTurso, getTursoClient } from "./turso.ts";
 
 type OAuthProvider = "google" | "apple";
 
@@ -109,12 +110,24 @@ export async function getOAuthUserByProviderSubject(params: {
 
 export async function getAuthUserById(userId: string) {
   await ensureAuthSchema();
+  return getAuthUserByIdReadOnly(userId);
+}
+
+/**
+ * Reads the current persisted auth principal without attempting schema DDL.
+ * Destructive workflows must verify their authoritative schema before this.
+ */
+export async function getAuthUserByIdReadOnly(
+  userId: string,
+  options: { client?: Pick<Client, "execute"> } = {},
+) {
   const normalizedUserId = userId.trim();
   if (!normalizedUserId) {
     return null;
   }
 
-  const result = await executeTurso({
+  const client = options.client ?? getTursoClient();
+  const result = await client.execute({
     sql: `SELECT id, email, name, avatar_url, provider, provider_subject, role
           FROM auth_users
           WHERE id = ?

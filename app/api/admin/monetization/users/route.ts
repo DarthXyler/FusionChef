@@ -13,6 +13,7 @@ import {
   AccountDeletionSchemaError,
   assertAccountDeletionSchemaReady,
 } from "@/lib/account-deletion-schema";
+import { runAccountDeletionPreflight } from "@/lib/account-deletion-preflight";
 import { buildAccountDeletionGraphCleanupStatements } from "@/lib/account-deletion-execution";
 import {
   AccountDeletionJobError,
@@ -1219,20 +1220,6 @@ function buildReadyGraphDeletionStatements(params: {
 }
 
 export async function POST(request: NextRequest) {
-  const admin = requireMonetizationAdmin(request, { requireActor: true });
-  if (!admin.ok) {
-    return admin.response;
-  }
-
-  const limited = await enforceRateLimit(request, {
-    bucket: "api-admin-monetization-users-write",
-    limit: 20,
-    windowMs: 60_000,
-  });
-  if (limited) {
-    return limited;
-  }
-
   let idempotencyContext: IdempotencyContext | null = null;
   try {
     if (isRequestBodyTooLarge(request, MAX_BODY_BYTES)) {
@@ -1240,29 +1227,25 @@ export async function POST(request: NextRequest) {
     }
     const rawBody = (await request.json()) as unknown;
     const operation = isObjectRecord(rawBody) && rawBody.operation === "account_delete" ? "account_delete" : "credit_grant";
-    const deletionAdmin =
-      operation === "account_delete"
-        ? await requireAccountDeletionAdmin(request)
-        : null;
-    if (deletionAdmin && !deletionAdmin.ok) {
-      return deletionAdmin.response;
-    }
     if (operation === "account_delete") {
-      await assertAccountDeletionSchemaReady();
-    } else {
-      await ensureAdminUserSchemas();
-    }
-    if (operation === "account_delete") {
-      if (!deletionAdmin?.ok) {
-        return NextResponse.json(
-          {
-            error: "Account deletion authorization is unavailable.",
-            code: "account_deletion_authorization_unavailable",
-          },
-          { status: 503 },
-        );
-      }
       const payload = parseDeletePayload(rawBody);
+      const preflight = await runAccountDeletionPreflight({
+        verifySchema: () => assertAccountDeletionSchemaReady(),
+        authorize: () => requireAccountDeletionAdmin(request),
+        enforceRateLimit: () =>
+          enforceRateLimit(request, {
+            bucket: "api-admin-monetization-users-write",
+            limit: 20,
+            windowMs: 60_000,
+          }),
+      });
+      if (!preflight.ok) {
+        return preflight.response;
+      }
+      const deletionAdmin = {
+        ok: true as const,
+        context: preflight.context,
+      };
       const { targets, plan } = await resolveDeleteTargets(payload.identifiers);
       try {
         assertAccountDeletionDoesNotIncludeActor(
@@ -1401,6 +1384,19 @@ export async function POST(request: NextRequest) {
       return response;
     }
 
+    const admin = requireMonetizationAdmin(request, { requireActor: true });
+    if (!admin.ok) {
+      return admin.response;
+    }
+    const limited = await enforceRateLimit(request, {
+      bucket: "api-admin-monetization-users-write",
+      limit: 20,
+      windowMs: 60_000,
+    });
+    if (limited) {
+      return limited;
+    }
+    await ensureAdminUserSchemas();
     const payload = parseBatchPayload(rawBody);
     const runtimeConfig = await getMonetizationRuntimeConfig();
     const targets = await resolveBatchTargets(payload.identifiers);

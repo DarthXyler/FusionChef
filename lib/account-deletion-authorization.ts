@@ -5,7 +5,7 @@ import {
   getAccountDeletionRecentAuthMaxAgeSeconds,
   getAllowedAdminEmails,
 } from "./auth-config.ts";
-import { getAuthUserById } from "./auth-users.ts";
+import { getAuthUserByIdReadOnly } from "./auth-users.ts";
 import { getClientIp } from "./api-security.ts";
 import {
   AccountDeletionAuthorizationError,
@@ -39,7 +39,7 @@ export async function requireAccountDeletionAdmin(
       ? verifyAuthSessionToken(cookieToken)
       : null;
     const currentUser = session
-      ? await getAuthUserById(session.userId)
+      ? await getAuthUserByIdReadOnly(session.userId)
       : null;
     const principal = evaluateAccountDeletionAuthorization({
       session,
