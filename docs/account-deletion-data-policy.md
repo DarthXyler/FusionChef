@@ -38,6 +38,11 @@ secret without a separately reviewed, version-aware data migration is
 prohibited. A future rotation must support controlled old-key and new-key
 verification while preserving every existing tombstone.
 
+Production rollout and rollback must follow
+[`account-deletion-rollout-runbook.md`](./account-deletion-rollout-runbook.md).
+Destructive execution defaults off; tombstone consumption and ownership write
+guards remain active regardless of the execution flag.
+
 ## Unresolved product-policy decision
 
 `account_deletion_events` contains historical raw target `auth_user_id` and

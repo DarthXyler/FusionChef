@@ -21,6 +21,7 @@ import {
 } from "@/lib/deleted-identity-tombstones";
 import {
   AccountDeletionJobError,
+  assertAccountDeletionExecutionEnabled,
   createAccountDeletionOperationalReference,
   createAccountDeletionPreview,
   executeAccountDeletionJob,
@@ -1224,6 +1225,10 @@ export async function POST(request: NextRequest) {
         throw error;
       }
 
+      if (payload.mode === "commit") {
+        assertAccountDeletionExecutionEnabled();
+      }
+
       if (payload.mode === "dry_run") {
         const preview = await createAccountDeletionPreview({
           plan,
@@ -1482,7 +1487,7 @@ export async function POST(request: NextRequest) {
         ? error
         : null;
     const isValidationError = error instanceof RequestValidationError;
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         error: jobError
           ? jobError.message
@@ -1517,5 +1522,7 @@ export async function POST(request: NextRequest) {
           (isValidationError ? 400 : 500),
       },
     );
+    withNoStore(response);
+    return response;
   }
 }

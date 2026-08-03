@@ -119,6 +119,24 @@ function getPreviewTtlSeconds() {
     : DEFAULT_PREVIEW_TTL_SECONDS;
 }
 
+export function isAccountDeletionExecutionEnabled(
+  value = process.env.ACCOUNT_DELETION_EXECUTION_ENABLED,
+) {
+  return value?.trim() === "true";
+}
+
+export function assertAccountDeletionExecutionEnabled(
+  enabled = isAccountDeletionExecutionEnabled(),
+) {
+  if (!enabled) {
+    throw new AccountDeletionJobError(
+      "account_deletion_execution_disabled",
+      "Account deletion execution is disabled.",
+      409,
+    );
+  }
+}
+
 function stableGraphScope(graph: AccountDeletionGraphPlan) {
   return {
     graphId: graph.graphId,
@@ -149,9 +167,14 @@ function stableGraphScope(graph: AccountDeletionGraphPlan) {
   };
 }
 
-function stablePlanScope(plan: AccountDeletionPlan, reason: string) {
+function stablePlanScope(
+  plan: AccountDeletionPlan,
+  reason: string,
+  executionEnabled: boolean,
+) {
   return {
-    version: 2,
+    version: 3,
+    executionPolicy: executionEnabled ? "enabled" : "disabled",
     reason: reason.trim(),
     selectedAuthUserIds: [...plan.selectedAuthUserIds].sort(),
     missingAuthUserIds: [...plan.missingAuthUserIds].sort(),
@@ -213,9 +236,14 @@ function minimizedGraphSnapshot(graph: AccountDeletionGraphPlan, secret: string)
   };
 }
 
-function minimizedPlanSnapshot(plan: AccountDeletionPlan, secret: string) {
+function minimizedPlanSnapshot(
+  plan: AccountDeletionPlan,
+  secret: string,
+  executionEnabled: boolean,
+) {
   return {
-    version: 2,
+    version: 3,
+    executionPolicy: executionEnabled ? "enabled" : "disabled",
     selectedAuthRefs: plan.selectedAuthUserIds
       .map((value) => hmacReference("auth", value, secret))
       .sort(),
@@ -232,9 +260,15 @@ export function fingerprintAccountDeletionPlan(options: {
   plan: AccountDeletionPlan;
   reason: string;
   secret?: string;
+  executionEnabled?: boolean;
 }) {
   const secret = getJobSecret(options.secret);
-  return fingerprintValue(stablePlanScope(options.plan, options.reason), secret);
+  const executionEnabled =
+    options.executionEnabled ?? isAccountDeletionExecutionEnabled();
+  return fingerprintValue(
+    stablePlanScope(options.plan, options.reason, executionEnabled),
+    secret,
+  );
 }
 
 async function readJobByIdempotency(
@@ -391,9 +425,12 @@ export async function createAccountDeletionPreview(options: {
   previewTtlSeconds?: number;
   client?: JobClient;
   secret?: string;
+  executionEnabled?: boolean;
 }) {
   const client = options.client ?? getTursoClient();
   const secret = getJobSecret(options.secret);
+  const executionEnabled =
+    options.executionEnabled ?? isAccountDeletionExecutionEnabled();
   const requestSource = options.requestSource ?? "admin_console";
   const idempotencyKey =
     options.idempotencyKey?.trim() || `preview:${options.requestId}`;
@@ -409,7 +446,7 @@ export async function createAccountDeletionPreview(options: {
       (options.previewTtlSeconds ?? getPreviewTtlSeconds()) * 1000,
   ).toISOString();
   const fingerprint = fingerprintValue(
-    stablePlanScope(options.plan, options.reason),
+    stablePlanScope(options.plan, options.reason, executionEnabled),
     secret,
   );
   const actingAdminRef = hmacReference(
@@ -455,7 +492,11 @@ export async function createAccountDeletionPreview(options: {
   const status: AccountDeletionJobStatus = requiresReview
     ? "manual_review"
     : "previewed";
-  const jobSnapshot = minimizedPlanSnapshot(options.plan, secret);
+  const jobSnapshot = minimizedPlanSnapshot(
+    options.plan,
+    secret,
+    executionEnabled,
+  );
   const statements: InStatement[] = [
     {
       sql: `INSERT INTO account_deletion_jobs (
@@ -463,7 +504,7 @@ export async function createAccountDeletionPreview(options: {
               plan_version, plan_json, preview_fingerprint,
               preview_expires_at, status, idempotency_key,
               created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, 2, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, 3, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         jobId,
         options.requestId,
@@ -599,7 +640,11 @@ export async function executeAccountDeletionJob(options: {
   secret?: string;
   publicBaseUrl?: string;
   tombstoneSecret?: string;
+  executionEnabled?: boolean;
 }) {
+  const executionEnabled =
+    options.executionEnabled ?? isAccountDeletionExecutionEnabled();
+  assertAccountDeletionExecutionEnabled(executionEnabled);
   const client = options.client ?? getTursoClient();
   const secret = getJobSecret(options.secret);
   const actorRef = hmacReference(
@@ -804,7 +849,10 @@ export async function executeAccountDeletionJob(options: {
         ? job.reasonRef !== reasonRef ||
           currentGraphMismatch ||
           unfinishedGraphMissing
-        : fingerprintValue(stablePlanScope(currentPlan, options.reason), secret) !==
+        : fingerprintValue(
+            stablePlanScope(currentPlan, options.reason, executionEnabled),
+            secret,
+          ) !==
           job.previewFingerprint;
       const currentGraph = graphsByRef.get(targetForFailure.targetRef);
       if (
