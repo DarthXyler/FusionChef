@@ -269,6 +269,7 @@ type IndexExpectation = {
   unique: boolean;
   partial?: boolean;
   sqlFragments?: readonly string[];
+  wherePredicate?: string;
   label: string;
 };
 
@@ -379,7 +380,7 @@ const REQUIRED_INDEXES: readonly IndexExpectation[] = [
     columns: ["purchase_transaction_id"],
     unique: true,
     partial: true,
-    sqlFragments: ["where link_kind = 'base_grant'"],
+    wherePredicate: "link_kind = 'base_grant'",
     label: "index:ux_credit_purchase_ledger_links_base_grant",
   },
   {
@@ -698,6 +699,492 @@ export class AccountDeletionSchemaError extends Error {
   }
 }
 
+type SqlToken = {
+  kind: "word" | "string" | "number" | "symbol";
+  value: string;
+};
+
+type CheckExpectation = {
+  label: string;
+  expression: string;
+};
+
+type TriggerExpectation = {
+  name: string;
+  action: "update" | "delete";
+  table: string;
+};
+
+const DELETION_STATUS_CHECK = `status IN (
+  'previewed',
+  'approved',
+  'executing',
+  'database_completed',
+  'storage_pending',
+  'completed',
+  'failed_retryable',
+  'manual_review'
+)`;
+
+const COMPLETION_TIMESTAMP_CHECK = `
+  (status = 'completed' AND completed_at IS NOT NULL)
+  OR (status <> 'completed' AND completed_at IS NULL)
+`;
+
+const KEY_REFERENCE_CHECK = `
+  key_reference GLOB 'key:v1:[0-9a-f]*'
+  AND substr(key_reference, 8) NOT GLOB '*[^0-9a-f]*'
+  AND length(key_reference) = 71
+`;
+
+const CRITICAL_CHECKS: Record<string, readonly CheckExpectation[]> = {
+  account_deletion_jobs: [
+    { label: "status", expression: DELETION_STATUS_CHECK },
+    { label: "completion_timestamp", expression: COMPLETION_TIMESTAMP_CHECK },
+  ],
+  account_deletion_job_targets: [
+    { label: "status", expression: DELETION_STATUS_CHECK },
+    { label: "completion_timestamp", expression: COMPLETION_TIMESTAMP_CHECK },
+  ],
+  account_deletion_storage_outbox: [
+    {
+      label: "object_category",
+      expression:
+        "object_category IN ('recipe_image', 'profile_avatar', 'generated_image')",
+    },
+    {
+      label: "status",
+      expression:
+        "status IN ('pending', 'processing', 'completed', 'failed_retryable', 'manual_review')",
+    },
+    { label: "completion_timestamp", expression: COMPLETION_TIMESTAMP_CHECK },
+  ],
+  deleted_identity_tombstones: [
+    {
+      label: "identity_ref_format",
+      expression: `
+        identity_ref GLOB 'identity:v1:[0-9a-f]*'
+        AND substr(identity_ref, 13) NOT GLOB '*[^0-9a-f]*'
+        AND length(identity_ref) = 76
+      `,
+    },
+    { label: "identity_kind", expression: "identity_kind = 'graph_node'" },
+    {
+      label: "reason_category",
+      expression: "reason_category = 'admin_fulfillment'",
+    },
+    { label: "schema_version", expression: "schema_version = 1" },
+    { label: "key_version", expression: "key_version = 1" },
+    { label: "key_reference_format", expression: KEY_REFERENCE_CHECK },
+  ],
+  deleted_identity_tombstone_key_metadata: [
+    { label: "singleton", expression: "singleton_id = 1" },
+    { label: "key_version", expression: "key_version = 1" },
+    { label: "key_reference_format", expression: KEY_REFERENCE_CHECK },
+    {
+      label: "hmac_algorithm",
+      expression: "hmac_algorithm = 'HMAC-SHA256'",
+    },
+    { label: "schema_version", expression: "schema_version = 1" },
+  ],
+};
+
+const TOMBSTONE_METADATA_TRIGGERS: readonly TriggerExpectation[] = [
+  {
+    name: "trg_deleted_identity_tombstone_key_no_update",
+    action: "update",
+    table: "deleted_identity_tombstone_key_metadata",
+  },
+  {
+    name: "trg_deleted_identity_tombstone_key_no_delete",
+    action: "delete",
+    table: "deleted_identity_tombstone_key_metadata",
+  },
+];
+
+const TOMBSTONE_METADATA_IMMUTABLE_MESSAGE =
+  "deleted identity tombstone key metadata is immutable";
+
+/**
+ * Removes SQLite comments without treating comment markers inside quoted SQL as
+ * comments. Characters inside comments are replaced with whitespace so tokens
+ * on either side cannot be accidentally joined.
+ */
+export function stripSqlComments(sql: string) {
+  let result = "";
+  let index = 0;
+  let quote: "single" | "double" | "bracket" | "backtick" | null = null;
+
+  while (index < sql.length) {
+    const character = sql[index];
+    const next = sql[index + 1];
+
+    if (quote) {
+      result += character;
+      if (quote === "single" && character === "'") {
+        if (next === "'") {
+          result += next;
+          index += 2;
+          continue;
+        }
+        quote = null;
+      } else if (quote === "double" && character === '"') {
+        if (next === '"') {
+          result += next;
+          index += 2;
+          continue;
+        }
+        quote = null;
+      } else if (quote === "backtick" && character === "`") {
+        if (next === "`") {
+          result += next;
+          index += 2;
+          continue;
+        }
+        quote = null;
+      } else if (quote === "bracket" && character === "]") {
+        quote = null;
+      }
+      index += 1;
+      continue;
+    }
+
+    if (character === "'") {
+      quote = "single";
+      result += character;
+      index += 1;
+      continue;
+    }
+    if (character === '"') {
+      quote = "double";
+      result += character;
+      index += 1;
+      continue;
+    }
+    if (character === "[") {
+      quote = "bracket";
+      result += character;
+      index += 1;
+      continue;
+    }
+    if (character === "`") {
+      quote = "backtick";
+      result += character;
+      index += 1;
+      continue;
+    }
+
+    if (character === "-" && next === "-") {
+      result += "  ";
+      index += 2;
+      while (index < sql.length && sql[index] !== "\n" && sql[index] !== "\r") {
+        result += " ";
+        index += 1;
+      }
+      continue;
+    }
+
+    if (character === "/" && next === "*") {
+      result += "  ";
+      index += 2;
+      while (index < sql.length) {
+        if (sql[index] === "*" && sql[index + 1] === "/") {
+          result += "  ";
+          index += 2;
+          break;
+        }
+        result += sql[index] === "\n" || sql[index] === "\r" ? sql[index] : " ";
+        index += 1;
+      }
+      continue;
+    }
+
+    result += character;
+    index += 1;
+  }
+
+  return result;
+}
+
+function tokenizeSql(sql: string): SqlToken[] {
+  const source = stripSqlComments(sql);
+  const tokens: SqlToken[] = [];
+  let index = 0;
+
+  while (index < source.length) {
+    const character = source[index];
+    if (/\s/.test(character)) {
+      index += 1;
+      continue;
+    }
+
+    if (character === "'") {
+      let value = "";
+      index += 1;
+      while (index < source.length) {
+        if (source[index] === "'" && source[index + 1] === "'") {
+          value += "'";
+          index += 2;
+          continue;
+        }
+        if (source[index] === "'") {
+          index += 1;
+          break;
+        }
+        value += source[index];
+        index += 1;
+      }
+      tokens.push({ kind: "string", value });
+      continue;
+    }
+
+    if (character === '"' || character === "`" || character === "[") {
+      const closing = character === "[" ? "]" : character;
+      let value = "";
+      index += 1;
+      while (index < source.length) {
+        if (
+          character !== "[" &&
+          source[index] === closing &&
+          source[index + 1] === closing
+        ) {
+          value += closing;
+          index += 2;
+          continue;
+        }
+        if (source[index] === closing) {
+          index += 1;
+          break;
+        }
+        value += source[index];
+        index += 1;
+      }
+      tokens.push({ kind: "word", value: value.toLowerCase() });
+      continue;
+    }
+
+    if (/[A-Za-z_$]/.test(character)) {
+      const start = index;
+      index += 1;
+      while (index < source.length && /[A-Za-z0-9_$]/.test(source[index])) {
+        index += 1;
+      }
+      tokens.push({
+        kind: "word",
+        value: source.slice(start, index).toLowerCase(),
+      });
+      continue;
+    }
+
+    if (/[0-9]/.test(character)) {
+      const start = index;
+      index += 1;
+      while (index < source.length && /[0-9.]/.test(source[index])) {
+        index += 1;
+      }
+      tokens.push({ kind: "number", value: source.slice(start, index) });
+      continue;
+    }
+
+    const threeCharacterOperator = source.slice(index, index + 3);
+    const twoCharacterOperator = source.slice(index, index + 2);
+    if (threeCharacterOperator === "->>") {
+      tokens.push({ kind: "symbol", value: threeCharacterOperator });
+      index += 3;
+      continue;
+    }
+    if (["<>", "!=", "<=", ">=", "==", "||", "->"].includes(twoCharacterOperator)) {
+      tokens.push({ kind: "symbol", value: twoCharacterOperator });
+      index += 2;
+      continue;
+    }
+
+    tokens.push({ kind: "symbol", value: character });
+    index += 1;
+  }
+
+  return tokens;
+}
+
+function withoutTrailingSemicolons(tokens: readonly SqlToken[]) {
+  let end = tokens.length;
+  while (
+    end > 0 &&
+    tokens[end - 1].kind === "symbol" &&
+    tokens[end - 1].value === ";"
+  ) {
+    end -= 1;
+  }
+  return tokens.slice(0, end);
+}
+
+function withoutRedundantOuterParentheses(tokens: readonly SqlToken[]) {
+  let result = withoutTrailingSemicolons(tokens);
+  while (
+    result.length >= 2 &&
+    result[0].kind === "symbol" &&
+    result[0].value === "(" &&
+    result[result.length - 1].kind === "symbol" &&
+    result[result.length - 1].value === ")"
+  ) {
+    let depth = 0;
+    let closesAtEnd = false;
+    for (let index = 0; index < result.length; index += 1) {
+      const token = result[index];
+      if (token.kind === "symbol" && token.value === "(") depth += 1;
+      if (token.kind === "symbol" && token.value === ")") depth -= 1;
+      if (depth === 0) {
+        closesAtEnd = index === result.length - 1;
+        break;
+      }
+    }
+    if (!closesAtEnd) break;
+    result = result.slice(1, -1);
+  }
+  return result;
+}
+
+function sameTokens(left: readonly SqlToken[], right: readonly SqlToken[]) {
+  return (
+    left.length === right.length &&
+    left.every(
+      (token, index) =>
+        token.kind === right[index].kind && token.value === right[index].value,
+    )
+  );
+}
+
+function exactSqlExpressionMatches(
+  actual: readonly SqlToken[],
+  expectedSql: string,
+) {
+  return sameTokens(
+    withoutRedundantOuterParentheses(actual),
+    withoutRedundantOuterParentheses(tokenizeSql(expectedSql)),
+  );
+}
+
+function extractCheckExpressions(sql: string) {
+  const tokens = tokenizeSql(sql);
+  const checks: SqlToken[][] = [];
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    if (
+      tokens[index].kind !== "word" ||
+      tokens[index].value !== "check" ||
+      tokens[index + 1].kind !== "symbol" ||
+      tokens[index + 1].value !== "("
+    ) {
+      continue;
+    }
+    let depth = 1;
+    const expression: SqlToken[] = [];
+    let cursor = index + 2;
+    for (; cursor < tokens.length; cursor += 1) {
+      const token = tokens[cursor];
+      if (token.kind === "symbol" && token.value === "(") depth += 1;
+      if (token.kind === "symbol" && token.value === ")") {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+      expression.push(token);
+    }
+    if (depth === 0) {
+      checks.push(expression);
+      index = cursor;
+    }
+  }
+  return checks;
+}
+
+function extractIndexWherePredicate(sql: string) {
+  const tokens = withoutTrailingSemicolons(tokenizeSql(sql));
+  let depth = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token.kind === "symbol" && token.value === "(") depth += 1;
+    if (token.kind === "symbol" && token.value === ")") depth -= 1;
+    if (token.kind === "word" && token.value === "where" && depth === 0) {
+      return tokens.slice(index + 1);
+    }
+  }
+  return null;
+}
+
+function tokenIs(token: SqlToken | undefined, kind: SqlToken["kind"], value: string) {
+  return token?.kind === kind && token.value === value;
+}
+
+function triggerMatches(sql: string, expected: TriggerExpectation) {
+  const tokens = withoutTrailingSemicolons(tokenizeSql(sql));
+  let cursor = 0;
+  const consume = (kind: SqlToken["kind"], value: string) => {
+    if (!tokenIs(tokens[cursor], kind, value)) return false;
+    cursor += 1;
+    return true;
+  };
+
+  if (!consume("word", "create") || !consume("word", "trigger")) return false;
+  if (
+    tokenIs(tokens[cursor], "word", "if") &&
+    tokenIs(tokens[cursor + 1], "word", "not") &&
+    tokenIs(tokens[cursor + 2], "word", "exists")
+  ) {
+    cursor += 3;
+  }
+  if (
+    !consume("word", expected.name) ||
+    !consume("word", "before") ||
+    !consume("word", expected.action) ||
+    !consume("word", "on") ||
+    !consume("word", expected.table) ||
+    !consume("word", "begin") ||
+    !consume("word", "select") ||
+    !consume("word", "raise") ||
+    !consume("symbol", "(") ||
+    !consume("word", "abort") ||
+    !consume("symbol", ",") ||
+    !consume("string", TOMBSTONE_METADATA_IMMUTABLE_MESSAGE) ||
+    !consume("symbol", ")")
+  ) {
+    return false;
+  }
+  if (tokenIs(tokens[cursor], "symbol", ";")) cursor += 1;
+  if (!consume("word", "end")) return false;
+  return cursor === tokens.length;
+}
+
+function verifyCriticalChecks(
+  objectSql: ReadonlyMap<string, string>,
+  missing: string[],
+) {
+  for (const [tableName, expectations] of Object.entries(CRITICAL_CHECKS)) {
+    const sql = objectSql.get(tableName);
+    if (!sql) continue;
+    const checks = extractCheckExpressions(sql);
+    for (const expected of expectations) {
+      if (
+        !checks.some((actual) =>
+          exactSqlExpressionMatches(actual, expected.expression),
+        )
+      ) {
+        missing.push(`constraint_semantics:${tableName}:${expected.label}`);
+      }
+    }
+  }
+}
+
+function verifyTombstoneMetadataTriggers(
+  objectSql: ReadonlyMap<string, string>,
+  missing: string[],
+) {
+  for (const expected of TOMBSTONE_METADATA_TRIGGERS) {
+    const sql = objectSql.get(expected.name);
+    if (sql && !triggerMatches(sql, expected)) {
+      missing.push(`trigger_semantics:${expected.name}`);
+    }
+  }
+}
+
 function asString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
@@ -707,9 +1194,9 @@ function asNumber(value: unknown) {
 }
 
 function normalizeSql(sql: string) {
-  return sql
+  return stripSqlComments(sql)
     .toLowerCase()
-    .replace(/["`]/g, "")
+    .replace(/["`\[\]]/g, "")
     .replace(/\s+/g, " ")
     .replace(/\s*([(),=<>])\s*/g, "$1")
     .trim();
@@ -887,6 +1374,15 @@ async function verifyIndexes(
       ) {
         continue;
       }
+      if (expected.wherePredicate) {
+        const predicate = extractIndexWherePredicate(definition.sql);
+        if (
+          !predicate ||
+          !exactSqlExpressionMatches(predicate, expected.wherePredicate)
+        ) {
+          continue;
+        }
+      }
       found = true;
       break;
     }
@@ -964,6 +1460,8 @@ export async function assertAccountDeletionSchemaReady(
   await verifyForeignKeys(client, availableTables, missing);
   await verifyIndexes(client, availableTables, missing);
   verifySqlFragments(objectSql, missing);
+  verifyCriticalChecks(objectSql, missing);
+  verifyTombstoneMetadataTriggers(objectSql, missing);
 
   if (missing.length > 0) {
     throw new AccountDeletionSchemaError(missing);
