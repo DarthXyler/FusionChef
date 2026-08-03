@@ -590,23 +590,19 @@ const REQUIRED_SQL_FRAGMENTS: Record<string, readonly string[]> = {
     "preview_fingerprint text not null",
     "check(length(trim(preview_fingerprint)) between 32 and 160)",
     "preview_expires_at text not null",
-    "status text not null check(status in ('previewed','approved','executing','database_completed','storage_pending','completed','failed_retryable','manual_review'))",
+    "status text not null",
     "attempt_count integer not null default 0 check(attempt_count >= 0)",
     "idempotency_key text not null check(length(trim(idempotency_key)) between 1 and 240)",
     "unique(request_source,idempotency_key)",
-    "status = 'completed' and completed_at is not null",
-    "status <> 'completed' and completed_at is null",
   ],
   account_deletion_job_targets: [
     "target_ref text not null check(length(trim(target_ref)) between 1 and 160)",
     "graph_fingerprint text not null check(length(trim(graph_fingerprint)) between 32 and 160)",
     "plan_json text not null default '{}' check(json_valid(plan_json) and json_type(plan_json) = 'object')",
-    "status text not null check(status in ('previewed','approved','executing','database_completed','storage_pending','completed','failed_retryable','manual_review'))",
+    "status text not null",
     "attempt_count integer not null default 0 check(attempt_count >= 0)",
     "unique(job_id,target_ref)",
     "unique(job_id,graph_fingerprint)",
-    "status = 'completed' and completed_at is not null",
-    "status <> 'completed' and completed_at is null",
   ],
   account_deletion_storage_outbox: [
     "length(object_key) between 1 and 1024",
@@ -614,38 +610,30 @@ const REQUIRED_SQL_FRAGMENTS: Record<string, readonly string[]> = {
     "substr(object_key,1,1) <> '/'",
     "instr(object_key,'://') = 0",
     "object_key not like '%/../%'",
-    "object_category text not null check(object_category in ('recipe_image','profile_avatar','generated_image'))",
-    "status text not null default 'pending' check(status in ('pending','processing','completed','failed_retryable','manual_review'))",
+    "object_category text not null",
+    "status text not null default 'pending'",
     "attempt_count integer not null default 0 check(attempt_count >= 0)",
     "created_at text not null",
     "updated_at text not null",
     "attempted_at text",
     "completed_at text",
     "unique(job_id,object_key)",
-    "status = 'completed' and completed_at is not null",
-    "status <> 'completed' and completed_at is null",
     "last_safe_error is null or length(trim(last_safe_error)) between 1 and 500",
   ],
   deleted_identity_tombstones: [
-    "identity_ref text primary key check(identity_ref glob 'identity:v1:[0-9a-f]*'",
-    "substr(identity_ref,13) not glob '*[^0-9a-f]*'",
-    "length(identity_ref) = 76",
-    "identity_kind text not null check(identity_kind = 'graph_node')",
-    "reason_category text not null default 'admin_fulfillment' check(reason_category = 'admin_fulfillment')",
-    "schema_version integer not null default 1 check(schema_version = 1)",
-    "key_version integer not null default 1 check(key_version = 1)",
-    "key_reference text not null check(key_reference glob 'key:v1:[0-9a-f]*'",
-    "substr(key_reference,8) not glob '*[^0-9a-f]*'",
-    "length(key_reference) = 71",
+    "identity_ref text primary key",
+    "identity_kind text not null",
+    "reason_category text not null default 'admin_fulfillment'",
+    "schema_version integer not null default 1",
+    "key_version integer not null default 1",
+    "key_reference text not null",
   ],
   deleted_identity_tombstone_key_metadata: [
-    "singleton_id integer primary key check(singleton_id = 1)",
-    "key_version integer not null check(key_version = 1)",
-    "key_reference text not null check(key_reference glob 'key:v1:[0-9a-f]*'",
-    "substr(key_reference,8) not glob '*[^0-9a-f]*'",
-    "length(key_reference) = 71",
-    "hmac_algorithm text not null check(hmac_algorithm = 'hmac-sha256')",
-    "schema_version integer not null default 1 check(schema_version = 1)",
+    "singleton_id integer primary key",
+    "key_version integer not null",
+    "key_reference text not null",
+    "hmac_algorithm text not null",
+    "schema_version integer not null default 1",
     "unique(key_version,key_reference)",
   ],
   trg_purchase_reconciliation_completed_update: [
@@ -707,6 +695,8 @@ type SqlToken = {
 type CheckExpectation = {
   label: string;
   expression: string;
+  classifyingColumns: readonly string[];
+  excludedColumns?: readonly string[];
 };
 
 type TriggerExpectation = {
@@ -739,25 +729,50 @@ const KEY_REFERENCE_CHECK = `
 
 const CRITICAL_CHECKS: Record<string, readonly CheckExpectation[]> = {
   account_deletion_jobs: [
-    { label: "status", expression: DELETION_STATUS_CHECK },
-    { label: "completion_timestamp", expression: COMPLETION_TIMESTAMP_CHECK },
+    {
+      label: "status",
+      expression: DELETION_STATUS_CHECK,
+      classifyingColumns: ["status"],
+      excludedColumns: ["completed_at"],
+    },
+    {
+      label: "completion_timestamp",
+      expression: COMPLETION_TIMESTAMP_CHECK,
+      classifyingColumns: ["completed_at"],
+    },
   ],
   account_deletion_job_targets: [
-    { label: "status", expression: DELETION_STATUS_CHECK },
-    { label: "completion_timestamp", expression: COMPLETION_TIMESTAMP_CHECK },
+    {
+      label: "status",
+      expression: DELETION_STATUS_CHECK,
+      classifyingColumns: ["status"],
+      excludedColumns: ["completed_at"],
+    },
+    {
+      label: "completion_timestamp",
+      expression: COMPLETION_TIMESTAMP_CHECK,
+      classifyingColumns: ["completed_at"],
+    },
   ],
   account_deletion_storage_outbox: [
     {
       label: "object_category",
       expression:
         "object_category IN ('recipe_image', 'profile_avatar', 'generated_image')",
+      classifyingColumns: ["object_category"],
     },
     {
       label: "status",
       expression:
         "status IN ('pending', 'processing', 'completed', 'failed_retryable', 'manual_review')",
+      classifyingColumns: ["status"],
+      excludedColumns: ["completed_at"],
     },
-    { label: "completion_timestamp", expression: COMPLETION_TIMESTAMP_CHECK },
+    {
+      label: "completion_timestamp",
+      expression: COMPLETION_TIMESTAMP_CHECK,
+      classifyingColumns: ["completed_at"],
+    },
   ],
   deleted_identity_tombstones: [
     {
@@ -767,25 +782,60 @@ const CRITICAL_CHECKS: Record<string, readonly CheckExpectation[]> = {
         AND substr(identity_ref, 13) NOT GLOB '*[^0-9a-f]*'
         AND length(identity_ref) = 76
       `,
+      classifyingColumns: ["identity_ref"],
     },
-    { label: "identity_kind", expression: "identity_kind = 'graph_node'" },
+    {
+      label: "identity_kind",
+      expression: "identity_kind = 'graph_node'",
+      classifyingColumns: ["identity_kind"],
+    },
     {
       label: "reason_category",
       expression: "reason_category = 'admin_fulfillment'",
+      classifyingColumns: ["reason_category"],
     },
-    { label: "schema_version", expression: "schema_version = 1" },
-    { label: "key_version", expression: "key_version = 1" },
-    { label: "key_reference_format", expression: KEY_REFERENCE_CHECK },
+    {
+      label: "schema_version",
+      expression: "schema_version = 1",
+      classifyingColumns: ["schema_version"],
+    },
+    {
+      label: "key_version",
+      expression: "key_version = 1",
+      classifyingColumns: ["key_version"],
+    },
+    {
+      label: "key_reference_format",
+      expression: KEY_REFERENCE_CHECK,
+      classifyingColumns: ["key_reference"],
+    },
   ],
   deleted_identity_tombstone_key_metadata: [
-    { label: "singleton", expression: "singleton_id = 1" },
-    { label: "key_version", expression: "key_version = 1" },
-    { label: "key_reference_format", expression: KEY_REFERENCE_CHECK },
+    {
+      label: "singleton",
+      expression: "singleton_id = 1",
+      classifyingColumns: ["singleton_id"],
+    },
+    {
+      label: "key_version",
+      expression: "key_version = 1",
+      classifyingColumns: ["key_version"],
+    },
+    {
+      label: "key_reference_format",
+      expression: KEY_REFERENCE_CHECK,
+      classifyingColumns: ["key_reference"],
+    },
     {
       label: "hmac_algorithm",
       expression: "hmac_algorithm = 'HMAC-SHA256'",
+      classifyingColumns: ["hmac_algorithm"],
     },
-    { label: "schema_version", expression: "schema_version = 1" },
+    {
+      label: "schema_version",
+      expression: "schema_version = 1",
+      classifyingColumns: ["schema_version"],
+    },
   ],
 };
 
@@ -1162,9 +1212,26 @@ function verifyCriticalChecks(
     if (!sql) continue;
     const checks = extractCheckExpressions(sql);
     for (const expected of expectations) {
+      const checksForDomain = checks.filter((actual) => {
+        const referencedWords = new Set(
+          actual
+            .filter((token) => token.kind === "word")
+            .map((token) => token.value),
+        );
+        return (
+          expected.classifyingColumns.some((column) =>
+            referencedWords.has(column),
+          ) &&
+          !expected.excludedColumns?.some((column) =>
+            referencedWords.has(column),
+          )
+        );
+      });
       if (
-        !checks.some((actual) =>
-          exactSqlExpressionMatches(actual, expected.expression),
+        checksForDomain.length !== 1 ||
+        !exactSqlExpressionMatches(
+          checksForDomain[0] ?? [],
+          expected.expression,
         )
       ) {
         missing.push(`constraint_semantics:${tableName}:${expected.label}`);
