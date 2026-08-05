@@ -48,14 +48,37 @@ function classifyStorageReference(
   return null;
 }
 
+const APP_GENERATED_IMAGE_KEY_PATTERN =
+  /^(?:recipe-images|fusion-images|profile-photos)\/([a-z0-9][a-z0-9-]{0,47})-([0-9]{13})-([0-9a-f]{8})\.webp$/;
+
+function isAppGeneratedImageKey(key: string) {
+  const match = APP_GENERATED_IMAGE_KEY_PATTERN.exec(key);
+  if (!match) {
+    return false;
+  }
+  const slug = match[1] ?? "";
+  return !slug.includes("--");
+}
+
 function containsUnsafeOperationalDetail(key: string) {
-  return (
-    /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(key) ||
+  if (/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(key)) {
+    return true;
+  }
+  if (
     /(?:bearer|oauth|provider[-_]?payload|purchase[-_]?token|receipt[-_]?token)/i.test(
       key,
-    ) ||
-    /[a-z0-9_-]{49,}/i.test(key)
-  );
+    )
+  ) {
+    return true;
+  }
+  if (isAppGeneratedImageKey(key)) {
+    return false;
+  }
+  // Preserve conservative opaque-token detection for unknown key shapes. Exact
+  // app-generated filename separators are handled by the grammar above.
+  return key
+    .split(/[/.]+/)
+    .some((component) => /[a-z0-9_-]{49,}/i.test(component));
 }
 
 export function resolveAccountDeletionStorageReference(options: {

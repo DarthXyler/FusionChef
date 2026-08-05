@@ -3,7 +3,7 @@
  * Admin-only logged-in user listing, CSV-export support, and batch credit grant workflow.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createHash, createHmac } from "crypto";
+import { createHash, createHmac, randomUUID } from "crypto";
 import type { InStatement } from "@libsql/client";
 import {
   assertAccountDeletionDoesNotIncludeActor,
@@ -14,6 +14,11 @@ import {
   assertAccountDeletionSchemaReady,
 } from "@/lib/account-deletion-schema";
 import { runAccountDeletionPreflight } from "@/lib/account-deletion-preflight";
+import {
+  getAccountDeletionStorageApiFailure,
+  logUnexpectedAccountDeletionFailure,
+  type AccountDeletionFailureStage,
+} from "@/lib/account-deletion-diagnostics";
 import { buildAccountDeletionGraphCleanupStatements } from "@/lib/account-deletion-execution";
 import {
   buildDeletedIdentityTombstoneStatements,
@@ -1177,6 +1182,10 @@ function buildReadyGraphDeletionStatements(params: {
 
 export async function POST(request: NextRequest) {
   let idempotencyContext: IdempotencyContext | null = null;
+  let accountDeletionFailureContext: {
+    requestId: string;
+    stage: AccountDeletionFailureStage;
+  } | null = null;
   try {
     if (isRequestBodyTooLarge(request, MAX_BODY_BYTES)) {
       return NextResponse.json({ error: "Request is too large." }, { status: 413 });
@@ -1184,7 +1193,12 @@ export async function POST(request: NextRequest) {
     const rawBody = (await request.json()) as unknown;
     const operation = isObjectRecord(rawBody) && rawBody.operation === "account_delete" ? "account_delete" : "credit_grant";
     if (operation === "account_delete") {
+      accountDeletionFailureContext = {
+        requestId: randomUUID(),
+        stage: "request_validation",
+      };
       const payload = parseDeletePayload(rawBody);
+      accountDeletionFailureContext.stage = "preflight";
       const preflight = await runAccountDeletionPreflight({
         verifySchema: () => assertAccountDeletionSchemaReady(),
         authorize: () => requireAccountDeletionAdmin(request),
@@ -1202,7 +1216,10 @@ export async function POST(request: NextRequest) {
         ok: true as const,
         context: preflight.context,
       };
+      accountDeletionFailureContext.requestId = deletionAdmin.context.requestId;
+      accountDeletionFailureContext.stage = "target_resolution";
       const { targets, plan } = await resolveDeleteTargets(payload.identifiers);
+      accountDeletionFailureContext.stage = "actor_validation";
       try {
         assertAccountDeletionDoesNotIncludeActor(
           deletionAdmin.context.actorAuthUserId,
@@ -1226,10 +1243,12 @@ export async function POST(request: NextRequest) {
       }
 
       if (payload.mode === "commit") {
+        accountDeletionFailureContext.stage = "execution_gate";
         assertAccountDeletionExecutionEnabled();
       }
 
       if (payload.mode === "dry_run") {
+        accountDeletionFailureContext.stage = "preview_persistence";
         const preview = await createAccountDeletionPreview({
           plan,
           reason: payload.reason,
@@ -1238,10 +1257,12 @@ export async function POST(request: NextRequest) {
           idempotencyKey:
             getIdempotencyKeyFromHeaders(request.headers) ?? undefined,
         });
+        accountDeletionFailureContext.stage = "preview_status";
         const previewStatus = await getAccountDeletionJobStatus({
           jobId: preview.jobId,
           actingAdminAuthUserId: deletionAdmin.context.actorAuthUserId,
         });
+        accountDeletionFailureContext.stage = "response_serialization";
         const response = NextResponse.json(
           buildDeleteResponse({
             mode: payload.mode,
@@ -1256,6 +1277,7 @@ export async function POST(request: NextRequest) {
         return response;
       }
 
+      accountDeletionFailureContext.stage = "execution";
       const execution = await executeAccountDeletionJob({
         jobId: payload.jobId,
         fingerprint: payload.fingerprint,
@@ -1287,6 +1309,7 @@ export async function POST(request: NextRequest) {
         execution.status === "database_completed"
       ) {
         try {
+          accountDeletionFailureContext.stage = "storage_processing";
           storageResult = await processAccountDeletionStorageOutbox({
             jobId: execution.jobId,
           });
@@ -1303,10 +1326,12 @@ export async function POST(request: NextRequest) {
           });
         }
       }
+      accountDeletionFailureContext.stage = "job_status";
       const persistedJob = await getAccountDeletionJobStatus({
         jobId: execution.jobId,
         actingAdminAuthUserId: deletionAdmin.context.actorAuthUserId,
       });
+      accountDeletionFailureContext.stage = "response_serialization";
       const responseBody = buildDeleteResponse({
         mode: payload.mode,
         targets,
@@ -1482,14 +1507,31 @@ export async function POST(request: NextRequest) {
     const planningError =
       error instanceof AccountDeletionPlanningError ? error : null;
     const jobError = error instanceof AccountDeletionJobError ? error : null;
+    const storageApiFailure = getAccountDeletionStorageApiFailure(error);
     const tombstoneError =
       error instanceof DeletedIdentityTombstoneConfigurationError
         ? error
         : null;
     const isValidationError = error instanceof RequestValidationError;
+    if (
+      accountDeletionFailureContext &&
+      !schemaError &&
+      !planningError &&
+      !jobError &&
+      !storageApiFailure &&
+      !tombstoneError &&
+      !isValidationError
+    ) {
+      logUnexpectedAccountDeletionFailure({
+        ...accountDeletionFailureContext,
+        error,
+      });
+    }
     const response = NextResponse.json(
       {
-        error: jobError
+        error: storageApiFailure
+          ? storageApiFailure.body.error
+          : jobError
           ? jobError.message
           : tombstoneError
           ? tombstoneError.message
@@ -1500,7 +1542,9 @@ export async function POST(request: NextRequest) {
           : isValidationError
             ? error.message
             : "Could not complete user batch operation.",
-        ...(jobError
+        ...(storageApiFailure
+          ? { code: storageApiFailure.body.code }
+          : jobError
           ? { code: jobError.code }
           : tombstoneError
           ? { code: tombstoneError.code }
@@ -1515,6 +1559,7 @@ export async function POST(request: NextRequest) {
       },
       {
         status:
+          storageApiFailure?.statusCode ??
           jobError?.statusCode ??
           tombstoneError?.statusCode ??
           planningError?.statusCode ??
