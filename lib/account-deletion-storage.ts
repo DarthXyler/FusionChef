@@ -60,6 +60,23 @@ function isAppGeneratedImageKey(key: string) {
   return !slug.includes("--");
 }
 
+function isSameOriginStorageReference(reference: string, publicBaseUrl: string) {
+  try {
+    const baseUrl = new URL(publicBaseUrl);
+    const referenceUrl = new URL(reference, baseUrl);
+    return referenceUrl.origin === baseUrl.origin;
+  } catch {
+    return false;
+  }
+}
+
+function invalidStorageReference(): never {
+  throw new AccountDeletionStorageError(
+    "storage_reference_invalid",
+    "An account deletion storage reference is invalid.",
+  );
+}
+
 function containsUnsafeOperationalDetail(key: string) {
   if (/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(key)) {
     return true;
@@ -85,19 +102,24 @@ export function resolveAccountDeletionStorageReference(options: {
   reference: { category: "cookbook_image" | "profile_avatar"; value: string };
   publicBaseUrl: string;
 }) {
-  const publicBaseUrl = options.publicBaseUrl.replace(/\/$/, "");
+  const publicBaseUrl = options.publicBaseUrl.replace(/\/+$/, "");
   if (!options.reference.value.startsWith(`${publicBaseUrl}/`)) {
+    if (
+      isSameOriginStorageReference(options.reference.value, publicBaseUrl)
+    ) {
+      invalidStorageReference();
+    }
     return null;
   }
+  const rawKey = options.reference.value.slice(publicBaseUrl.length + 1);
   const key = getR2ObjectKeyFromPublicUrl(
     options.reference.value,
     options.publicBaseUrl,
   );
-  if (!key) {
-    throw new AccountDeletionStorageError(
-      "storage_reference_invalid",
-      "An account deletion storage reference is invalid.",
-    );
+  // The upload builder emits an ASCII key without URL encoding, query data, or
+  // fragments. Any parsing change means the persisted reference is noncanonical.
+  if (!key || key !== rawKey) {
+    invalidStorageReference();
   }
   if (containsUnsafeOperationalDetail(key)) {
     throw new AccountDeletionStorageError(
@@ -111,6 +133,9 @@ export function resolveAccountDeletionStorageReference(options: {
       "storage_reference_unsupported",
       "An account deletion storage reference cannot be attributed safely.",
     );
+  }
+  if (!isAppGeneratedImageKey(key)) {
+    invalidStorageReference();
   }
   return {
     key,
