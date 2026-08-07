@@ -57,6 +57,7 @@ import {
   type MobileSessionIdentity,
 } from "../services/authSession";
 import { createAuthenticatedRerollContinuation } from "../services/rerollContinuation";
+import { recordSuccessfulCookbookSaveForReview } from "../services/storeReview";
 import { styles } from "../styles/appStyles";
 import type { FuseRequest, GeneratedRecipeRecord } from "../types/recipe";
 import { buildShoppingItemKey, toTitleCase } from "../utils/recipeUi";
@@ -76,6 +77,7 @@ const LOADING_MESSAGES = [
 ] as const;
 const IMAGE_FETCH_MAX_ATTEMPTS = 3;
 const IMAGE_FETCH_RETRY_DELAYS_MS = [1200, 2200] as const;
+const STORE_REVIEW_PROMPT_DELAY_MS = 400;
 
 type CreditPackOption = {
   productId: string;
@@ -1161,7 +1163,16 @@ export function RecipeWorkspaceScreen({
         );
         setPreviewImageUrl(savedRecord.recipe.imageUrl);
       }
-      Alert.alert("Saved", "Recipe added to your cookbook.");
+      Alert.alert("Saved", "Recipe added to your cookbook.", [
+        {
+          text: "OK",
+          onPress: () => {
+            setTimeout(() => {
+              void recordSuccessfulCookbookSaveForReview();
+            }, STORE_REVIEW_PROMPT_DELAY_MS);
+          },
+        },
+      ]);
     } catch (error) {
       const message =
         error instanceof Error && error.message.trim().length > 0
