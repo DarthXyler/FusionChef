@@ -10,6 +10,8 @@ import "./globals.css";
 
 const siteUrl = "https://www.flavorfusionchef.com";
 const appStoreUrl = "https://apps.apple.com/us/app/flavor-fusion-chef/id6764818879";
+const googlePlayUrl =
+  "https://play.google.com/store/apps/details?id=com.flavorfusionchef.mobile";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -72,28 +74,45 @@ export default function RootLayout({
             {children}
           </main>
           <footer className="border-t border-emerald-100 bg-emerald-50/55">
-            <div className="mx-auto grid w-full max-w-none gap-8 px-4 py-10 text-sm text-zinc-600 md:grid-cols-[1.4fr_1fr_1fr] md:px-8 lg:px-12">
+            <div className="mx-auto grid w-full max-w-none gap-8 px-4 py-10 text-sm text-zinc-600 md:px-8 lg:grid-cols-[1.4fr_1fr_1fr] lg:px-12">
               <div>
                 <p className="text-lg font-extrabold text-zinc-950">Flavor Fusion Chef</p>
                 <p className="mt-3 max-w-sm leading-7">
                   The AI-powered mobile app that turns familiar recipes into wild, cookable
                   fusion favorites. Sichuan Bolognese, anyone?
                 </p>
-                <Link
-                  href={appStoreUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Download Flavor Fusion Chef on the App Store"
-                  className="mt-5 inline-block"
-                >
-                  <Image
-                    src="/landing/app-store-download-badge.png"
-                    alt="Download on the App Store"
-                    width={172}
-                    height={51}
-                    className="rounded-xl"
-                  />
-                </Link>
+                <div className="footer-store-row">
+                  <Link
+                    href={appStoreUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Download Flavor Fusion Chef on the App Store"
+                    className="store-cta-slot store-cta-slot-footer"
+                  >
+                    <Image
+                      src="/landing/app-store-download-badge-normalized.svg"
+                      alt="Download on the App Store"
+                      width={811}
+                      height={241}
+                      className="store-badge store-badge-footer"
+                    />
+                  </Link>
+                  <Link
+                    href={googlePlayUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Download Flavor Fusion Chef on Google Play"
+                    className="store-cta-slot store-cta-slot-footer"
+                  >
+                    <Image
+                      src="/landing/google-play-download-badge-cropped.png"
+                      alt="Get it on Google Play"
+                      width={811}
+                      height={241}
+                      className="store-badge store-badge-footer"
+                    />
+                  </Link>
+                </div>
               </div>
               <nav className="grid gap-2">
                 <p className="font-extrabold uppercase text-emerald-700">App</p>

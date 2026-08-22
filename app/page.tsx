@@ -22,6 +22,8 @@ export const metadata: Metadata = {
 };
 
 const appStoreUrl = "https://apps.apple.com/us/app/flavor-fusion-chef/id6764818879";
+const googlePlayUrl =
+  "https://play.google.com/store/apps/details?id=com.flavorfusionchef.mobile";
 
 /*
  * Testimonials: real App Store reviews are not in yet, so the section is
@@ -36,13 +38,12 @@ const structuredData = {
     {
       "@type": "MobileApplication",
       name: "Flavor Fusion Chef",
-      // Add Android when the public Google Play listing and install URL are available.
-      operatingSystem: "iOS",
+      operatingSystem: ["iOS", "Android"],
       applicationCategory: "FoodApplication",
       description:
         "AI-powered cooking app that turns any recipe into a practical fusion recipe with cuisine, spice, and dietary preferences.",
       url: "https://www.flavorfusionchef.com/",
-      installUrl: appStoreUrl,
+      installUrl: [appStoreUrl, googlePlayUrl],
       offers: fallbackCreditPacks.map((pack) => ({
         "@type": "Offer",
         name: pack.name,
@@ -64,11 +65,23 @@ const structuredData = {
 function AppStoreBadge({ className = "" }: { className?: string }) {
   return (
     <Image
-      src="/landing/app-store-download-badge.png"
+      src="/landing/app-store-download-badge-normalized.svg"
       alt="Download on the App Store"
-      width={258}
-      height={76}
-      className={`app-store-badge ${className}`}
+      width={811}
+      height={241}
+      className={`store-badge ${className}`}
+    />
+  );
+}
+
+function GooglePlayBadge({ className = "" }: { className?: string }) {
+  return (
+    <Image
+      src="/landing/google-play-download-badge-cropped.png"
+      alt="Get it on Google Play"
+      width={811}
+      height={241}
+      className={`store-badge ${className}`}
     />
   );
 }
@@ -118,7 +131,7 @@ export default function Home() {
                   into a{" "}
                   <span className="relative inline-block">
                     <span className="text-emerald-700">new</span>{" "}
-                    <span style={{ color: "var(--warm-ember)" }}>favorite</span>
+                    <span style={{ color: "var(--warm-ember)" }}>favorite</span>.
                     <svg
                       aria-hidden="true"
                       className="hero-underline absolute -bottom-4 left-[-7%] h-8 w-[114%] text-amber-300"
@@ -130,7 +143,6 @@ export default function Home() {
                       <path d="M40 34C130 18 238 17 322 30" stroke="currentColor" strokeWidth="4" strokeLinecap="round" opacity="0.95" />
                     </svg>
                   </span>
-                  .
                 </span>
               </h1>
               <p className="hero-copy hero-copy-delay-2 max-w-[490px] text-lg leading-8 text-zinc-600 sm:text-[20px] sm:leading-9">
@@ -138,32 +150,41 @@ export default function Home() {
                 recipe, pick a flavor world, and cook the mashup tonight.
               </p>
             </div>
-            <div className="hero-copy hero-copy-delay-3 w-full max-w-[560px] space-y-4">
-              <div className="grid gap-3 sm:grid-cols-[1.55fr_1fr] sm:gap-4">
+            <div className="hero-copy hero-copy-delay-3 w-full max-w-[560px]">
+              <div className="hero-cta-grid">
                 <Link
                   href={appStoreUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Download Flavor Fusion Chef on the App Store"
-                  className="hero-app-store-link"
+                  className="store-cta-slot store-cta-slot-hero"
                 >
-                  <AppStoreBadge className="app-store-badge-hero" />
+                  <AppStoreBadge className="store-badge-hero" />
                 </Link>
                 <Link
-                  href="#pricing"
-                  className="inline-flex min-h-14 w-full min-w-0 items-center justify-center gap-3 rounded-xl border-2 border-emerald-700 bg-white px-5 text-base font-extrabold text-emerald-800 transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 sm:min-h-[68px] sm:px-7 sm:text-lg"
+                  href={googlePlayUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Download Flavor Fusion Chef on Google Play"
+                  className="store-cta-slot store-cta-slot-hero"
                 >
-                  See pricing
-                  <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none">
-                    <path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <GooglePlayBadge className="store-badge-hero" />
                 </Link>
-              </div>
-              <div className="grid w-full min-w-0 gap-3 text-[13px] font-extrabold text-emerald-900 sm:grid-cols-3">
+                <div className="hero-pricing-cell">
+                  <Link
+                    href="#pricing"
+                    className="hero-pricing-link inline-flex w-full min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl border-2 border-emerald-700 bg-white px-4 text-base font-extrabold text-emerald-800 transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 sm:px-2 sm:text-[15px]"
+                  >
+                    See pricing
+                    <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                      <path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </Link>
+                </div>
                 {["Pay-as-you-go credits", "No subscription", "Private cookbook"].map((chip, index) => (
                   <span
                     key={chip}
-                    className="inline-flex min-h-[54px] min-w-0 items-center justify-center gap-2 rounded-xl bg-emerald-50/95 px-2 text-center ring-1 ring-emerald-100"
+                    className="hero-benefit-item inline-flex min-h-[54px] min-w-0 items-center justify-center gap-2 rounded-xl bg-emerald-50/95 px-2 text-center text-[13px] font-extrabold text-emerald-900 ring-1 ring-emerald-100"
                   >
                     <svg aria-hidden="true" className="h-6 w-6 shrink-0 text-emerald-700" viewBox="0 0 24 24" fill="none">
                       {index === 0 ? (
@@ -400,27 +421,38 @@ export default function Home() {
               "linear-gradient(100deg, rgba(4, 78, 56, 0.94) 0%, rgba(4, 96, 70, 0.88) 45%, rgba(124, 45, 18, 0.82) 100%)",
           }}
         />
-        <div className="relative mx-auto flex max-w-6xl flex-col items-center gap-6 md:flex-row md:items-center md:justify-between md:gap-8">
-          <div className="text-center md:text-left">
+        <div className="relative mx-auto flex max-w-6xl flex-col items-center gap-6 xl:flex-row xl:items-center xl:justify-between xl:gap-8">
+          <div className="text-center xl:text-left">
             <p className="text-sm font-extrabold uppercase tracking-wide text-amber-200">Mobile app</p>
             <h2 className="mt-3 max-w-2xl text-[34px] font-extrabold leading-tight sm:text-[44px]">
               Tonight&rsquo;s dinner deserves a plot twist.
             </h2>
-            <p className="mx-auto mt-4 max-w-xl text-lg leading-8 text-emerald-50 md:mx-0">
+            <p className="mx-auto mt-4 max-w-xl text-lg leading-8 text-emerald-50 xl:mx-0">
               Download Flavor Fusion Chef and turn everyday meals into wild,
               cookable fusion dishes with AI.
             </p>
           </div>
           <div className="flex flex-col items-center gap-4 md:shrink-0">
-            <Link
-              href={appStoreUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Download Flavor Fusion Chef on the App Store"
-              className="mobile-cta-store-link"
-            >
-              <AppStoreBadge className="app-store-badge-large" />
-            </Link>
+            <div className="mobile-cta-store-row">
+              <Link
+                href={appStoreUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Download Flavor Fusion Chef on the App Store"
+                className="store-cta-slot mobile-cta-store-link"
+              >
+                <AppStoreBadge className="store-badge-large" />
+              </Link>
+              <Link
+                href={googlePlayUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Download Flavor Fusion Chef on Google Play"
+                className="store-cta-slot mobile-cta-store-link"
+              >
+                <GooglePlayBadge className="store-badge-large" />
+              </Link>
+            </div>
             <div className="flex gap-3">
               <Link
                 href="/pricing"
