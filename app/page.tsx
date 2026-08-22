@@ -146,7 +146,7 @@ export default function Home() {
                 </span>
               </h1>
               <p className="hero-copy hero-copy-delay-2 max-w-[490px] text-lg leading-8 text-zinc-600 sm:text-[20px] sm:leading-9">
-                The AI chef that smashes cuisines together — gloriously. Import any
+                The AI chef that smashes cuisines together gloriously. Import any
                 recipe, pick a flavor world, and cook the mashup tonight.
               </p>
             </div>
@@ -215,7 +215,7 @@ export default function Home() {
               </div>
               <a
                 href="#fusion-demo"
-                className="inline-flex items-center gap-1.5 text-sm font-extrabold text-emerald-700 hover:text-emerald-800"
+                className="mt-4 inline-flex items-center gap-1.5 text-sm font-extrabold text-emerald-700 hover:text-emerald-800"
               >
                 Try a fusion right here ↓
               </a>
@@ -456,13 +456,13 @@ export default function Home() {
             <div className="flex gap-3">
               <Link
                 href="/pricing"
-                className="inline-flex min-h-12 items-center justify-center rounded-xl bg-white px-5 text-sm font-extrabold text-emerald-800 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"
+                className="inline-flex min-h-12 w-40 items-center justify-center whitespace-nowrap rounded-xl bg-white px-5 text-sm font-extrabold text-emerald-800 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"
               >
                 View pricing
               </Link>
               <Link
                 href="/support"
-                className="inline-flex min-h-12 items-center justify-center rounded-xl border border-white/50 px-5 text-sm font-extrabold text-white transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"
+                className="inline-flex min-h-12 w-40 items-center justify-center whitespace-nowrap rounded-xl border border-white/50 px-5 text-sm font-extrabold text-white transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-emerald-700"
               >
                 Contact support
               </Link>
